@@ -23,7 +23,7 @@ https://michellefeliciano.github.io/budget/. See README.md for what it does and 
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 227/227).
+  about 15 seconds. The title ends `OK n/n` (currently 240/240).
 - Python: `python -m unittest discover -s tests` (currently 15/15).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:

@@ -1,20 +1,19 @@
 // Service worker: makes the app work offline.
-// Strategy is cache-first. On install, every app-shell file below is stored in
-// a versioned cache. On each request, the cached copy is returned if there is
-// one (so the app opens instantly with no network); otherwise the request goes
-// to the network and a successful response is added to the cache for next time.
-// This app shares its web address (origin) with Second Memory, so everything here is scoped to this
-// app's own files: its cache is named budget-vN and it only ever touches caches starting with budget-.
-// Only same-origin GET requests are handled; sync calls to the server (POST,
-// different origin) pass straight through untouched.
-// Old caches are deleted on activate, so only the current version is kept.
+// Strategy is cache-first, for this app's own files only (APP_SHELL below). On install, every
+// shell file is stored in a versioned cache. A request for a shell file is answered from that
+// cache when possible (so the app opens instantly with no network); otherwise it goes to the
+// network and a successful response is added to the cache for next time.
+// Everything else passes straight through untouched: other paths on this web address (the app
+// can share its origin with Second Memory), non-GET requests, and other origins such as the
+// sync server. The cache is named budget-vN and only caches starting with budget- are ever
+// deleted, so another app's caches are never touched. Old budget- caches are deleted on activate.
 //
-// IMPORTANT: bump this string on every deploy that touches any app-shell file
-// (index.html, style.css, app.js, manifest.json, icons/apple-touch-icon.png).
+// IMPORTANT: bump this string (and APP_VERSION in app.js, to the same number) on every deploy
+// that touches any app-shell file (index.html, style.css, app.js, manifest.json, any icon).
 // The browser only detects a Service Worker update when sw.js's bytes change —
 // if this string is left unchanged, sw.js is byte-identical after a deploy, the
 // browser never notices, and users silently stay on old code forever.
-const CACHE_NAME = 'budget-v2';
+const CACHE_NAME = 'budget-v3';
 
 // Files pre-cached at install time: everything needed to run with no network.
 const APP_SHELL = [

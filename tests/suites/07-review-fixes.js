@@ -100,4 +100,31 @@ document.querySelector('#budget-list .edit-btn').click();
 check('Edit opens for a bill with no category without showing "undefined"', document.querySelector('#budget-list .bill-edit-category').value === '');
 bills.length = 0;
 
-check('backup file names use the local date', todayForFilename() === todayKey());
+const realClick = HTMLAnchorElement.prototype.click;
+let downloadName = '';
+HTMLAnchorElement.prototype.click = function () { downloadName = this.download; };
+exportData();
+HTMLAnchorElement.prototype.click = realClick;
+check('backup file names use the local date', downloadName === `budget-export-${todayKey()}.json`, downloadName);
+
+// ---- the payday form survives a full disk ----
+__mem.failWrites = true;
+let paydayThrew = false;
+let paydaySaved = true;
+try { paydaySaved = savePaydaySettings({ payDateKey: dk(-3), frequency: 'weekly' }); } catch { paydayThrew = true; }
+__mem.failWrites = false;
+check('saving the payday while storage is full does not throw and shows the storage warning', !paydayThrew && paydaySaved === false && !!$('storage-warning'));
+if ($('storage-warning')) $('storage-warning').remove();
+check('saving the payday works again once storage is free', savePaydaySettings({ payDateKey: dk(-3), frequency: 'weekly' }) === true && loadPaydaySettings().frequency === 'weekly');
+
+// ---- fourth review: import bookkeeping types, sync passphrase save failure ----
+const okBill = { id: 'bk-ok', name: 'n', amount: 5, dueDate: dk(1), frequency: 'monthly' };
+check('import refuses a text "deleted" flag, a text version and a numeric updatedAt', !isValidImportRecord('bills', { ...okBill, deleted: 'false' }) && !isValidImportRecord('bills', { ...okBill, version: '3' }) && !isValidImportRecord('bills', { ...okBill, updatedAt: 5 }));
+check('import still accepts real bookkeeping fields', isValidImportRecord('bills', { ...rb, ...okBill }) && isValidImportRecord('income', { ...rb, id: dk(1), dateKey: dk(1), amount: 5 }));
+localStorage.removeItem('budgetApp.syncConfig.v1');
+window.__mem.failWrites = true;
+$('sync-token-input').value = 'full-disk-passphrase';
+let setupThrew = false;
+try { $('sync-setup-form').requestSubmit(); await sleep(50); } catch { setupThrew = true; }
+window.__mem.failWrites = false;
+check('a full disk when saving the passphrase is reported and keeps the form open', !setupThrew && !$('sync-setup').hidden && /Could not save the sync passphrase/.test($('data-io-status').textContent) && !loadSyncConfig(), $('data-io-status').textContent);

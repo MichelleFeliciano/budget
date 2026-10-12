@@ -1,42 +1,41 @@
-/* Budget stylesheet (copied from Second Memory's, with every rule that only served the other
-   lists removed).
-   Table of contents, in file order (search for the section name to jump to it):
+/* Budget stylesheet. Plain CSS: no build step, no external files, no fonts or images fetched.
+
+   Table of contents, in file order (search for the heading text to jump to a section):
      1.  Theme and variables (light and dark colours)
      2.  Base page, headings, focus ring
-     3.  Decorative background (corner branches, sidebar leaf)
-     4.  Layout: app shell and sidebar (undo/redo, sync panel, backup buttons)
-     5.  Content area and toolbars
-     6.  Add forms and date fields
-     7.  Cards, chips (filter buttons) and scrolling lists
-     8.  Edit forms shared by the bill and recurring income cards
-     9.  Budget: bill cards, calendar, day cells, phone day sheet
-     10. Reminder banner
-     11. Paid history
-     12. Storage warning and sync "changes not synced" note
-     13. Phone polish (later fixes): small patches added over time for narrow screens
-     14. Menu footer and app lock
-   Several phone rules sit in later @media (max-width: 700px) blocks because they
-   must come after the base rules they override. */
+     3.  Decorative background (corner vines, sidebar sprig)
+     4.  Menu (sidebar): undo/redo, sync, backup buttons, footer
+     5.  Content area, toolbars, cards and shared pieces (buttons, chips, badges)
+     6.  Add forms, date fields and checkboxes
+     7.  Bill and recurring income cards (view and edit forms)
+     8.  Calendar: weeks, day cells, phone day sheet
+     9.  Banners: reminders and the "couldn't save" warning
+     10. Paid history
+     11. App lock
+     12. Phone layout (max-width: 700px)
 
-/* ===== Theme and variables ===== */
+   Order matters: rules of equal strength are decided by source order, so a media query that
+   overrides a base rule sits after it (the calendar's 900px block ends section 8; the 700px
+   phone block is last). [hidden] overrides are kept next to any rule that sets display. */
+
+/* ===== 1. Theme and variables ===== */
 
 /* Light palette by default; the dark block below swaps the same names. Use these
    variables everywhere instead of raw colours so both themes stay in step. */
 
 :root {
   color-scheme: light dark;
-  --bg: #F6FAF4;
-  --surface: #FFFFFF;
-  --text: #1C2B1A;
-  --muted: #4C5D46;
-  --accent: #2E5D34;
+  --bg: #F0F4EA;
+  --surface: #FAFCF6;
+  --text: #1F2B1E;
+  --muted: #4A5A47;
+  --accent: #4A6B4B;
   --accent-2: #A34A2A;
-  --border: #6B7A63;
+  --border: #6F8068;
   --accent-contrast: #ffffff;
   --accent-rose: #A24B68;
   --accent-lavender: #6B5B95;
-  --tint-blush: #F6E4E9;
-  --border-soft: #D7E3CE;
+  --border-soft: #CBD8C3;
   --font-heading: "Snell Roundhand", "Bradley Hand", "Segoe Script", "Segoe Print",
     cursive, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -46,39 +45,40 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #101C12;
-    --surface: #182A17;
-    --text: #EAF3E6;
-    --muted: #AEC7A4;
-    --accent: #7BC174;
+    --bg: #121A14;
+    --surface: #1B271D;
+    --text: #E7EFE1;
+    --muted: #A9BDA0;
+    --accent: #8CBF84;
     --accent-2: #E08A5B;
-    --border: #63795A;
-    --accent-contrast: #101C12;
+    --border: #5F7558;
+    --accent-contrast: #121A14;
     --accent-rose: #E8A9BE;
     --accent-lavender: #C9B8E8;
-    --tint-blush: #3A2530;
-    --border-soft: #33452F;
+    --border-soft: #2D3E2E;
   }
 }
 
-/* Dark theme chosen by hand in the Menu (same rules as above). */
+/* Light and dark chosen by hand in the Menu (same dark values as above). */
+
+:root[data-theme="light"] { color-scheme: light; }
 
 :root[data-theme="dark"] {
-  --bg: #101C12;
-  --surface: #182A17;
-  --text: #EAF3E6;
-  --muted: #AEC7A4;
-  --accent: #7BC174;
+  color-scheme: dark;
+  --bg: #121A14;
+  --surface: #1B271D;
+  --text: #E7EFE1;
+  --muted: #A9BDA0;
+  --accent: #8CBF84;
   --accent-2: #E08A5B;
-  --border: #63795A;
-  --accent-contrast: #101C12;
+  --border: #5F7558;
+  --accent-contrast: #121A14;
   --accent-rose: #E8A9BE;
   --accent-lavender: #C9B8E8;
-  --tint-blush: #3A2530;
-  --border-soft: #33452F;
+  --border-soft: #2D3E2E;
 }
 
-/* ===== Base page, headings, focus ring ===== */
+/* ===== 2. Base page, headings, focus ring ===== */
 
 * { box-sizing: border-box; }
 
@@ -102,94 +102,64 @@ h1, h2, h3 {
   outline-offset: 2px;
 }
 
-/* ===== Decorative background ===== */
+/* ===== 3. Decorative background ===== */
 
-/* Decorative corner-branch frame, purely aesthetic (aria-hidden by
-   construction — a pseudo-element is never exposed to assistive tech).
-   Fixed + negative z-index + pointer-events:none keeps it behind all real
-   content and fully inert. Four independent background layers place one
-   branch-cluster motif at each viewport corner (background-image doesn't
-   support per-layer transforms, so the down-right/down-left/up-right/up-left
-   orientations are baked into each SVG's own path coordinates — mechanical
-   mirrors of one authored motif, same technique as the light/dark hex swap
-   below). Deliberately left un-tiled so the center of the screen stays open,
-   echoing the corner-framed reference photo this was modeled on without
-   reusing its (copyrighted, watercolor-texture) artwork. Opacity sits in the
-   0.16-0.2 band already verified safe for corner-anchored decor by
-   `.sidebar-header::after` below — higher than the old
-   full-page tile this replaced, but safe here because coverage is confined
-   to the outer edges, not the central reading column. See
-   the original contrast research (in Second Memory's notes) this still builds on. */
+/* Vine drawings in the four corners of the screen and a small sprig by the sidebar title. They
+   are masks (the drawing's shape) filled with the theme's --accent colour, so one drawing
+   serves Light and Dark and there are no colours baked into images. Fixed, behind everything
+   (negative z-index) and inert (pointer-events: none), so they never get in the way. The
+   top-left vine is the only drawing: the other three corners are the same shape flipped. */
 
-body::before {
+:root {
+  --vine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 300'%3E%3Cg fill='none' stroke='%23000' stroke-linecap='round' stroke-width='3.4'%3E%3Cpath d='M-10 34 C70 26 96 92 128 150'/%3E%3Cpath d='M128 150 C150 192 190 205 214 262' stroke-width='3'/%3E%3Cpath d='M30 28 C96 4 170 30 250 10' stroke-width='2.6'/%3E%3Cpath d='M96 60 C118 40 150 46 166 72' stroke-width='2.2'/%3E%3Cpath d='M214 262 c14 4 20 -8 12 -15 c-6 -5 -14 1 -9 7' stroke-width='2'/%3E%3Cpath d='M250 10 c12 -2 18 8 11 14 c-6 4 -13 -2 -8 -7' stroke-width='2'/%3E%3C/g%3E%3Cg fill='%23000'%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(28.3 36.4) rotate(66.9) scale(1.0)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(61.1 52.4) rotate(-14.1) scale(1.1)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(86.4 78.8) rotate(105.5) scale(1.0)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(109.0 114.9) rotate(9.2) scale(0.9)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(141.4 170.3) rotate(102.8) scale(1.0)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(162.7 193.0) rotate(-7.6) scale(1.05)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(187.2 218.4) rotate(101.9) scale(0.9)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(206.4 246.1) rotate(9.5) scale(0.8)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(70.5 18.8) rotate(-58.2) scale(0.95)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(117.2 17.1) rotate(52.9) scale(0.9)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(161.5 18.1) rotate(-51.2) scale(1.0)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(207.4 16.9) rotate(47.0) scale(0.8)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(121.7 48.3) rotate(46.9) scale(0.8)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(151.4 56.3) rotate(-16.6) scale(0.75)'/%3E%3C/g%3E%3C/svg%3E");
+  --sprig: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 84'%3E%3Cpath d='M76 6 C58 22 44 40 34 70' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(66 14) rotate(120) scale(0.95)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(54 30) rotate(20) scale(0.9)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(46 46) rotate(130) scale(0.8)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(38 62) rotate(25) scale(0.7)'/%3E%3C/svg%3E");
+}
+
+html::before,
+html::after,
+body::before,
+body::after {
   content: '';
   position: fixed;
-  inset: 0;
+  width: clamp(190px, 24vw, 340px);
+  aspect-ratio: 1;
   z-index: -1;
   pointer-events: none;
-  background-repeat: no-repeat;
-  background-position: top left, top right, bottom left, bottom right;
-  background-size: clamp(180px, 22vw, 300px);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 26 C5 107 59 179 140 215 C131 134 104 62 41 8 Z' fill='%232E5D34' opacity='0.18'/%3E%3Cpath d='M14 26 C50 44 95 89 122 152' stroke='%232E5D34' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 53 L72 76 M59 89 L90 116 M77 125 L104 156' stroke='%232E5D34' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 10 C90 66 122 122 170 146 C159 90 138 42 98 5 Z' fill='%232E5D34' opacity='0.16'/%3E%3Cpath d='M90 10 C114 26 138 58 154 98' stroke='%232E5D34' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23A24B68' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 26 C295 107 241 179 160 215 C169 134 196 62 259 8 Z' fill='%232E5D34' opacity='0.18'/%3E%3Cpath d='M286 26 C250 44 205 89 178 152' stroke='%232E5D34' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 53 L228 76 M241 89 L210 116 M223 125 L196 156' stroke='%232E5D34' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 10 C210 66 178 122 130 146 C141 90 162 42 202 5 Z' fill='%232E5D34' opacity='0.16'/%3E%3Cpath d='M210 10 C186 26 162 58 146 98' stroke='%232E5D34' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23A24B68' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 274 C5 193 59 121 140 85 C131 166 104 238 41 292 Z' fill='%232E5D34' opacity='0.18'/%3E%3Cpath d='M14 274 C50 256 95 211 122 148' stroke='%232E5D34' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 247 L72 224 M59 211 L90 184 M77 175 L104 144' stroke='%232E5D34' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 290 C90 234 122 178 170 154 C159 210 138 258 98 295 Z' fill='%232E5D34' opacity='0.16'/%3E%3Cpath d='M90 290 C114 274 138 242 154 202' stroke='%232E5D34' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23A24B68' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 274 C295 193 241 121 160 85 C169 166 196 238 259 292 Z' fill='%232E5D34' opacity='0.18'/%3E%3Cpath d='M286 274 C250 256 205 211 178 148' stroke='%232E5D34' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 247 L228 224 M241 211 L210 184 M223 175 L196 144' stroke='%232E5D34' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 290 C210 234 178 178 130 154 C141 210 162 258 202 295 Z' fill='%232E5D34' opacity='0.16'/%3E%3Cpath d='M210 290 C186 274 162 242 146 202' stroke='%232E5D34' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23A24B68' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23A24B68' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: var(--accent);
+  opacity: 0.3;
+  -webkit-mask: var(--vine) no-repeat center / contain;
+  mask: var(--vine) no-repeat center / contain;
 }
 
-/* Same four corner branches, recoloured for dark mode (the colours are baked into each image). */
+html::before { top: 0; left: 0; }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) body::before {
-    background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 26 C5 107 59 179 140 215 C131 134 104 62 41 8 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M14 26 C50 44 95 89 122 152' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 53 L72 76 M59 89 L90 116 M77 125 L104 156' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 10 C90 66 122 122 170 146 C159 90 138 42 98 5 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M90 10 C114 26 138 58 154 98' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 26 C295 107 241 179 160 215 C169 134 196 62 259 8 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M286 26 C250 44 205 89 178 152' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 53 L228 76 M241 89 L210 116 M223 125 L196 156' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 10 C210 66 178 122 130 146 C141 90 162 42 202 5 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M210 10 C186 26 162 58 146 98' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 274 C5 193 59 121 140 85 C131 166 104 238 41 292 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M14 274 C50 256 95 211 122 148' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 247 L72 224 M59 211 L90 184 M77 175 L104 144' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 290 C90 234 122 178 170 154 C159 210 138 258 98 295 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M90 290 C114 274 138 242 154 202' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 274 C295 193 241 121 160 85 C169 166 196 238 259 292 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M286 274 C250 256 205 211 178 148' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 247 L228 224 M241 211 L210 184 M223 175 L196 144' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 290 C210 234 178 178 130 154 C141 210 162 258 202 295 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M210 290 C186 274 162 242 146 202' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E");
-  }
-}
+html::after { top: 0; right: 0; transform: scaleX(-1); }
 
-/* Dark theme chosen by hand in the Menu (same rules as above). */
+body::before { bottom: 0; left: 0; transform: scaleY(-1); }
 
-:root[data-theme="dark"] body::before {
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 26 C5 107 59 179 140 215 C131 134 104 62 41 8 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M14 26 C50 44 95 89 122 152' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 53 L72 76 M59 89 L90 116 M77 125 L104 156' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 10 C90 66 122 122 170 146 C159 90 138 42 98 5 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M90 10 C114 26 138 58 154 98' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 26 C295 107 241 179 160 215 C169 134 196 62 259 8 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M286 26 C250 44 205 89 178 152' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 53 L228 76 M241 89 L210 116 M223 125 L196 156' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 10 C210 66 178 122 130 146 C141 90 162 42 202 5 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M210 10 C186 26 162 58 146 98' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='127.6' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M14 274 C5 193 59 121 140 85 C131 166 104 238 41 292 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M14 274 C50 256 95 211 122 148' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M41 247 L72 224 M59 211 L90 184 M77 175 L104 144' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M90 290 C90 234 122 178 170 154 C159 210 138 258 98 295 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M90 290 C114 274 138 242 154 202' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 60 150)'/%3E%3Cellipse cx='60' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 60 150)'/%3E%3Ccircle cx='60' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'%3E%3Cpath d='M286 274 C295 193 241 121 160 85 C169 166 196 238 259 292 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M286 274 C250 256 205 211 178 148' stroke='%237BC174' stroke-width='3' fill='none' opacity='0.2'/%3E%3Cpath d='M259 247 L228 224 M241 211 L210 184 M223 175 L196 144' stroke='%237BC174' stroke-width='1.8' fill='none' opacity='0.16'/%3E%3Cpath d='M210 290 C210 234 178 178 130 154 C141 210 162 258 202 295 Z' fill='%237BC174' opacity='0.16'/%3E%3Cpath d='M210 290 C186 274 162 242 146 202' stroke='%237BC174' stroke-width='2.4' fill='none' opacity='0.18'/%3E%3Cg%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(72 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(144 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(216 240 150)'/%3E%3Cellipse cx='240' cy='172.4' rx='11.2' ry='22.4' fill='%23E8A9BE' opacity='0.16' transform='rotate(288 240 150)'/%3E%3Ccircle cx='240' cy='150' r='7.2' fill='%23E8A9BE' opacity='0.18'/%3E%3C/g%3E%3C/svg%3E");
-}
+body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
-/* Small leaf in the corner of the sidebar title. */
+/* Small sprig in the corner of the sidebar title. */
 
 .sidebar-header {
   position: relative;
-  overflow: visible;
 }
 
 .sidebar-header::after {
   content: '';
   position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 84px;
-  height: 84px;
+  top: -14px;
+  right: -12px;
+  width: 64px;
+  height: 64px;
   pointer-events: none;
-  background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='84' height='84' viewBox='0 0 84 84'%3E%3Cpath d='M80 4 C60 8 40 24 30 48 C48 42 68 26 80 4 Z' fill='%232E5D34' opacity='0.18'/%3E%3Cpath d='M70 12 C55 22 40 36 32 50' stroke='%232E5D34' stroke-width='1.4' fill='none' opacity='0.2'/%3E%3C/svg%3E");
+  background-color: var(--accent);
+  opacity: 0.3;
+  -webkit-mask: var(--sprig) no-repeat center / contain;
+  mask: var(--sprig) no-repeat center / contain;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .sidebar-header::after {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='84' height='84' viewBox='0 0 84 84'%3E%3Cpath d='M80 4 C60 8 40 24 30 48 C48 42 68 26 80 4 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M70 12 C55 22 40 36 32 50' stroke='%237BC174' stroke-width='1.4' fill='none' opacity='0.2'/%3E%3C/svg%3E");
-  }
-}
-
-/* Dark theme chosen by hand in the Menu (same rules as above). */
-
-:root[data-theme="dark"] .sidebar-header::after {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='84' height='84' viewBox='0 0 84 84'%3E%3Cpath d='M80 4 C60 8 40 24 30 48 C48 42 68 26 80 4 Z' fill='%237BC174' opacity='0.18'/%3E%3Cpath d='M70 12 C55 22 40 36 32 50' stroke='%237BC174' stroke-width='1.4' fill='none' opacity='0.2'/%3E%3C/svg%3E");
-}
-
-/* ===== Layout: app shell and sidebar ===== */
+/* ===== 4. Menu (sidebar) ===== */
 
 .app-shell {
   display: flex;
@@ -218,7 +188,7 @@ body::before {
   font-size: 0.85rem;
 }
 
-/* The Menu button only exists on phones; the 700px media query below turns it on. */
+/* The Menu button only exists on phones; the phone block at the end of the file turns it on. */
 
 .sidebar-toggle {
   display: none;
@@ -251,14 +221,16 @@ body::before {
   top: 6px;
 }
 
-/* Undo / redo buttons at the top of the sidebar. */
+/* Undo / redo buttons at the top of the sidebar, and the Export / Import / Theme / App lock
+   buttons further down: the same quiet outlined pill. */
 
 .undo-redo-panel {
   display: flex;
   gap: 8px;
 }
 
-.undo-redo-panel button {
+.undo-redo-panel button,
+.data-io-btn {
   flex: 1;
   padding: 6px 10px;
   border: 1px solid var(--border);
@@ -269,7 +241,8 @@ body::before {
   font-size: 0.78rem;
 }
 
-.undo-redo-panel button:hover:not(:disabled) {
+.undo-redo-panel button:hover:not(:disabled),
+.data-io-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -297,8 +270,7 @@ body::before {
   gap: 8px;
 }
 
-/* Same [hidden]-vs-unconditional-display landmine guarded elsewhere in this
-   file (see .rating-label, .note-view). */
+/* display: flex above would otherwise beat the hidden attribute. */
 
 .sync-status[hidden] {
   display: none;
@@ -328,6 +300,24 @@ body::before {
 .sync-change-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* The Sync now button highlights itself when there is something to send (the ID wins over :hover). */
+
+#sync-now-btn.sync-needed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+/* "N changes not synced" note under the sync status. */
+
+.sync-pending {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-rose);
 }
 
 /* Passphrase form shown until sync is connected. */
@@ -362,7 +352,7 @@ body::before {
 
 .sync-setup-form button:hover { opacity: 0.9; }
 
-/* Export data / Import data buttons under the sync area. */
+/* Two boxes under the sync area: Export / Import, then Theme / App lock / version. */
 
 .data-io {
   padding-top: 16px;
@@ -377,23 +367,14 @@ body::before {
   gap: 8px;
 }
 
-.data-io-btn {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: transparent;
+.app-version {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
   color: var(--muted);
-  cursor: pointer;
-  font-size: 0.78rem;
+  text-align: center;
 }
 
-.data-io-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* ===== Content area, toolbars, search box ===== */
+/* ===== 5. Content area, toolbars, cards and shared pieces ===== */
 
 /* min-width: 0 lets the content column shrink instead of being pushed wider by long text. */
 
@@ -404,7 +385,7 @@ body::before {
   max-width: 960px;
 }
 
-/* Heading row at the top of each section: title, then search box and sort menu. */
+/* Heading row at the top of each part: title, then totals, search box, sort menu or month arrows. */
 
 .collection-toolbar {
   display: flex;
@@ -417,14 +398,6 @@ body::before {
 
 .collection-toolbar h2 { margin: 0; }
 
-/* The small grey summary line under a heading ("12 books", totals, etc.). */
-
-.stats-line {
-  margin: 0 0 16px;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
 .collection-toolbar input[type="search"] {
   flex: 1 1 220px;
   max-width: 320px;
@@ -435,176 +408,27 @@ body::before {
   color: var(--text);
 }
 
-/* Known landmine: any `.collection { display: ... }` layout rule silently
-   overrides the `hidden` attribute unless this override is present. */
+/* The "Sort:" dropdown: same look as the search box. */
 
-.collection[hidden] {
-  display: none;
-}
-
-/* ===== Add forms and date fields ===== */
-
-/* Default add form lays its fields out in a wrapping row; .add-form-stacked (below) makes a single column. */
-
-.add-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border-soft);
-  border-radius: 18px;
-  padding: 20px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.035);
-  /* Without this, flex's default `align-items: stretch` makes a plain
-     single-line input match the height of a taller sibling (e.g. `.date-field`,
-     which stacks a label above its input) instead of keeping its own height. */
-  align-items: flex-start;
-}
-
-.add-form input[type="text"],
-.add-form input[type="date"],
-.add-form input[type="number"],
-.add-form input[type="search"],
-.add-form select,
-.add-form textarea {
-  flex: 1 1 160px;
-  padding: 9px 12px;
+select[id$="-sort-input"] {
+  max-width: 100%;
+  padding: 9px 14px;
   border: 1px solid var(--border);
   border-radius: 13px;
-  background: var(--bg);
+  background-color: var(--surface);
   color: var(--text);
   font-family: inherit;
 }
 
-.add-form textarea {
-  flex: 1 1 100%;
-  resize: vertical;
-}
+/* The small grey summary line under a heading (totals, notes). */
 
-.add-form-stacked {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.add-form-stacked input[type="text"],
-.add-form-stacked input[type="date"],
-.add-form-stacked input[type="number"],
-.add-form-stacked input[type="search"],
-.add-form-stacked textarea,
-.add-form-stacked select,
-.add-form-stacked .date-field {
-  width: 100%;
-  /* Column layout turns the row-based `flex: 1 1 160px` above into "grow to
-     fill vertical space." Selector specificity must match-or-beat that rule
-     (it includes an attribute selector) or this override silently loses.
-     Every input type present in the base rule above must also be listed
-     here — every input type in the base rule must appear in both lists. */
-  flex: none;
-}
-
-.add-form button {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 13px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  cursor: pointer;
-  font-weight: 600;
-  align-self: flex-start;
-}
-
-.add-form button:hover { opacity: 0.9; }
-
-/* A label stacked above a date or time input. */
-
-.date-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
+.stats-line {
+  margin: 0 0 16px;
   color: var(--muted);
-  flex: 1 1 160px;
-  min-width: 0; /* lets the date box shrink to fit a phone screen */
-}
-
-.date-field input[type="date"] {
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-  width: 100%;
-  /* `.add-form input[type="date"]` (class+attribute+element) also matches
-     this input via descendant selection, applying its `flex: 1 1 160px`
-     (meant for a row-context sibling of `.add-form`) to this input's actual
-     flex parent, `.date-field` (column direction) — turning that 160px
-     basis into a height instead of a width. Selector specificity here must
-     match that rule's (hence `input[type="date"]`, not bare `input`) so this
-     override actually wins. */
-  flex: none;
-}
-
-/* Validation message shown above a form's submit button. */
-
-.form-error {
-  color: var(--accent-2);
-  background: var(--bg);
-  border: 1px solid var(--accent-2);
-  border-radius: 13px;
-  padding: 9px 12px;
-  margin: 0;
   font-size: 0.85rem;
 }
 
-/* Main phone breakpoint: single-column panels, sidebar stacks on top and collapses behind the Menu button. */
-
-@media (max-width: 700px) {
-  .app-shell { flex-direction: column; }
-
-  .sidebar { flex: 0 0 auto; }
-
-  .sidebar-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 13px;
-    background: transparent;
-    color: var(--text);
-    font-size: 0.9rem;
-    cursor: pointer;
-    margin-top: 12px;
-  }
-
-  .sidebar-toggle:hover {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .sidebar:not(.sidebar-open) #undo-redo-panel, .sidebar:not(.sidebar-open) .sync-panel, .sidebar:not(.sidebar-open) .data-io {
-    display: none;
-  }
-
-  /* iOS Safari zooms the viewport on focusing any form control whose
-     computed font-size is under 16px. App-wide, not just Budget — every
-     collection's inputs/selects are candidates, not only
-     .budget-day-manual-input. */
-
-  input[type="text"],
-  input[type="search"],
-  input[type="number"],
-  input[type="date"],
-  input[type="password"],
-  textarea,
-  select {
-    font-size: 16px;
-  }
-}
-
-/* The <ul> that holds a list of cards. */
+/* The <ul> that holds a list of cards; .flat-list is the looser one-column spacing. */
 
 .card-list {
   list-style: none;
@@ -615,13 +439,11 @@ body::before {
   gap: 12px;
 }
 
-/* A single-column list of cards; slightly looser spacing. */
-
 .flat-list {
   gap: 16px;
 }
 
-/* Shared look for every kind of card: same border, radius, padding and shadow. */
+/* Shared look for the bill and recurring income cards: same border, radius, padding and shadow. */
 
 .bill-card, .recurring-income-card {
   overflow-wrap: break-word;
@@ -637,10 +459,13 @@ body::before {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.055);
 }
 
-/* Delete button on every card; margin-left: auto pushes it to the right end of the button row. */
+/* The quiet outlined buttons on a card: Edit, Cancel, Delete and "Mark oldest unpaid as paid".
+   Delete's margin-left: auto pushes it to the right end of the button row. */
 
-.delete-btn {
-  margin-left: auto;
+.edit-btn,
+.cancel-btn,
+.delete-btn,
+.mark-oldest-paid-btn {
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -650,9 +475,25 @@ body::before {
   font-size: 0.8rem;
 }
 
+.delete-btn {
+  margin-left: auto;
+}
+
+.edit-btn:hover,
+.cancel-btn:hover,
+.mark-oldest-paid-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .delete-btn:hover {
   color: var(--accent-2);
   border-color: var(--accent-2);
+}
+
+.mark-oldest-paid-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* "Nothing here yet" message shown when a list is empty. */
@@ -663,7 +504,7 @@ body::before {
   margin-top: 24px;
 }
 
-/* Small green pill used for categories and repeat labels. */
+/* Small green pill used for categories. */
 
 .badge {
   background: var(--accent);
@@ -673,7 +514,7 @@ body::before {
   font-size: 0.75rem;
 }
 
-/* Filter chips (the Budget's category filter). */
+/* Filter chips (the bills' category filter). */
 
 .chip-row {
   display: flex;
@@ -710,50 +551,147 @@ body::before {
   color: var(--accent-contrast); /* stays readable while hovered (phones keep :hover after a tap) */
 }
 
-/* Long ingredient or step lists scroll inside the card instead of stretching it. */
+/* ===== 6. Add forms, date fields and checkboxes ===== */
 
-.scroll-block {
-  margin: 0;
-  padding-left: 20px;
-  max-height: 180px;
-  overflow-y: auto;
+/* Default add form lays its fields out in a wrapping row; .add-form-stacked (below) makes a single column. */
+
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.035);
+  /* Without this, flex's default `align-items: stretch` makes a plain
+     single-line input match the height of a taller sibling (e.g. `.date-field`,
+     which stacks a label above its input) instead of keeping its own height. */
+  align-items: flex-start;
 }
 
-.scroll-block li {
-  font-size: 0.9rem;
-  margin-bottom: 2px;
-}
-
-/* Past-due dates for bills. */
-
-.bill-due.overdue {
-  color: var(--accent-2);
-  font-weight: 600;
-}
-
-/* Edit and Cancel buttons used on every card (outlined, quiet). */
-
-.edit-btn,
-.cancel-btn {
-  padding: 5px 12px;
+.add-form input[type="text"],
+.add-form input[type="date"],
+.add-form input[type="number"],
+.add-form select {
+  flex: 1 1 160px;
+  padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: 13px;
-  background: transparent;
-  color: var(--muted);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+}
+
+.add-form-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.add-form-stacked input[type="text"],
+.add-form-stacked input[type="date"],
+.add-form-stacked input[type="number"],
+.add-form-stacked select,
+.add-form-stacked .date-field {
+  width: 100%;
+  /* Column layout turns the row-based `flex: 1 1 160px` above into "grow to
+     fill vertical space". Specificity must match-or-beat that rule (it includes
+     an attribute selector) or this override silently loses, and every input
+     type in the base rule above must also be listed here. */
+  flex: none;
+}
+
+.add-form button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 13px;
+  background: var(--accent);
+  color: var(--accent-contrast);
   cursor: pointer;
-  font-size: 0.8rem;
+  font-weight: 600;
+  align-self: flex-start;
 }
 
-.edit-btn:hover,
-.cancel-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+.add-form button:hover { opacity: 0.9; }
+
+/* A label stacked above a date input. */
+
+.date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex: 1 1 160px;
+  min-width: 0; /* lets the date box shrink to fit a phone screen */
 }
 
-/* ===== Edit forms shared by most cards ===== */
+.date-field input[type="date"] {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  width: 100%;
+  /* `.add-form input[type="date"]` (class+attribute+element) also matches
+     this input via descendant selection, applying its `flex: 1 1 160px`
+     (meant for a row-context sibling of `.add-form`) to this input's actual
+     flex parent, `.date-field` (column direction), turning that 160px
+     basis into a height instead of a width. Selector specificity here must
+     match that rule's (hence `input[type="date"]`, not bare `input`) so this
+     override actually wins. */
+  flex: none;
+}
 
-/* Edit-form pattern for a bill card and a recurring income card: a vertical card that swaps
-   between its view and its edit form. */
+/* Phone fix for every date input. iPhone Safari gives date inputs their own minimum width and
+   centres the date text, so they could poke out of their box. Dropping the native look and
+   letting them shrink fixes it. */
+
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.6em;
+  text-align: left;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-width: 0;
+}
+
+/* "Pays automatically" checkbox with its label. A checkbox must stay a plain checkbox, even
+   inside the edit forms (which style every input like a text box). */
+
+.check-field { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); }
+
+.check-field input[type="checkbox"] {
+  padding: 0;
+  border: 0;
+  background: none;
+  width: auto;
+  flex: none;
+}
+
+/* Validation message shown above a form's submit button. */
+
+.form-error {
+  color: var(--accent-2);
+  background: var(--bg);
+  border: 1px solid var(--accent-2);
+  border-radius: 13px;
+  padding: 9px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* ===== 7. Bill and recurring income cards ===== */
+
+/* A card swaps between its view and its edit form; both are a vertical stack. */
 
 .bill-view, .bill-edit-form, .recurring-income-view, .recurring-income-edit-form {
   display: flex;
@@ -761,14 +699,13 @@ body::before {
   gap: 10px;
 }
 
-/* Same [hidden]-vs-unconditional-display landmine guarded elsewhere in this
-   file (see .rating-label, .note-view). */
+/* display: flex above would otherwise beat the hidden attribute. */
 
 .bill-view[hidden], .bill-edit-form[hidden], .recurring-income-view[hidden], .recurring-income-edit-form[hidden] {
   display: none;
 }
 
-/* Text fields inside those edit forms. */
+/* Fields inside the edit forms. */
 
 .bill-edit-form input, .bill-edit-form select, .recurring-income-edit-form input, .recurring-income-edit-form select {
   width: 100%;
@@ -779,6 +716,11 @@ body::before {
   color: var(--text);
   font-family: inherit;
 }
+
+/* A date box inside a column-flex edit form: the 160px flex basis of .date-field would become a
+   height there, leaving a tall empty gap, so it is switched off (the add forms already do this). */
+
+.bill-edit-form .date-field, .recurring-income-edit-form .date-field { flex: none; }
 
 /* Green Save button in those edit forms, and its hover state just below. */
 
@@ -797,22 +739,58 @@ body::before {
   opacity: 0.9;
 }
 
-/* Budget */
+/* Small note in the bill edit form about already-paid amounts. */
 
-.bill-info {
+.bill-edit-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* The text lines of a card. Each child is only as wide as its text (a category badge should not
+   stretch across the card) but may never be wider than the card. */
+
+.bill-info,
+.recurring-income-info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
   margin-bottom: 8px;
 }
 
-.bill-name { font-size: 0.95rem; }
+.bill-info > *,
+.recurring-income-info > * {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.bill-info .badge,
+.recurring-income-info .badge {
+  border-radius: 14px;
+}
+
+.bill-name,
+.recurring-income-name { font-size: 0.95rem; }
 
 .bill-amount,
 .bill-due,
-.bill-frequency {
+.bill-frequency,
+.recurring-income-amount,
+.recurring-income-start,
+.recurring-income-frequency {
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+/* "Autopay" outlined label on a bill. It sets no display, so the hidden attribute works as is. */
+
+.bill-autopay {
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--accent);
 }
 
 .bill-actions,
@@ -823,45 +801,9 @@ body::before {
   gap: 6px;
 }
 
-.recurring-income-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-}
+/* ===== 8. Calendar ===== */
 
-.recurring-income-name { font-size: 0.95rem; }
-
-.recurring-income-amount,
-.recurring-income-start,
-.recurring-income-frequency {
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-/* "Mark oldest unpaid as paid" button on a bill card. */
-
-.mark-oldest-paid-btn {
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.8rem;
-}
-
-.mark-oldest-paid-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.mark-oldest-paid-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* ----- Budget calendar: a Mon-Sun weekday header, then one block per week with seven day cells ----- */
+/* A Mon-Sun weekday header, then one block per week with seven day cells. */
 
 .budget-calendar {
   margin-bottom: 20px;
@@ -921,17 +863,8 @@ body::before {
   gap: 8px;
 }
 
-/* The Budget calendar's 7-column .budget-week-cells grid is already cramped
-   at the app-wide 700px breakpoint (the fixed 220px sidebar isn't collapsed
-   until then either, so even a moderately narrow desktop window hits the
-   same problem well above 700px) — give it its own, wider breakpoint instead
-   of reusing the generic phone rule. See the mobile notes in Second Memory's docs,
-   Part 2.1/2.2. Must come AFTER the base .budget-week-cells/.budget-weekday-row
-   rules above — same specificity, so source order decides the cascade tie,
-   and a media query earlier in the file than the rule it overrides loses. */
-
 /* On desktop the day's body wrapper adds no box of its own, and the phone-only
-   Close and open-day buttons stay hidden. The 900px media query below turns them on. */
+   Close and open-day buttons stay hidden. The 900px block at the end of this section turns them on. */
 
 .budget-day-body { display: contents; }
 
@@ -974,14 +907,13 @@ body::before {
 
 .budget-day-occurrences {
   max-height: 72px;
+  overflow-y: auto;
   padding-left: 0;
   list-style: none;
   margin: 4px 0;
 }
 
-/* Higher specificity than the generic `.scroll-block li` rule (which would
-   otherwise win on source order alone and force these back to 0.9rem) —
-   needed so occurrences actually fit a tiny day cell. */
+/* Occurrences must fit a tiny day cell, so their font size and spacing are set here. */
 
 .budget-day-occurrences .budget-occurrence {
   font-size: 0.75rem;
@@ -1084,6 +1016,12 @@ body::before {
   font-size: 0.85rem;
 }
 
+/* The calendar's 7-column grid is already cramped at the app-wide 700px breakpoint (the fixed
+   220px sidebar is not collapsed until then either, so even a moderately narrow desktop window
+   has the same problem), so it gets its own wider breakpoint. It must come AFTER the base rules
+   above: same specificity, so source order decides, and a media query earlier in the file than
+   the rule it overrides loses. */
+
 @media (max-width: 900px) {
   /* Compact phone/tablet calendar: all 7 columns always fit the screen (no
      sideways scrolling). Each day shows only its date plus one dot per bill/
@@ -1098,7 +1036,7 @@ body::before {
 
   .budget-weekday-row {
     text-align: center;
-    padding-right: 0;
+    padding: 0 9px; /* week padding 8px + 1px border, so labels sit over their day cells */
   }
 
   .budget-week {
@@ -1262,7 +1200,9 @@ body::before {
   }
 }
 
-/* Reminder banner */
+/* ===== 9. Banners: reminders and the "couldn't save" warning ===== */
+
+/* Bills-due banner and the backup / sync reminders (same look). */
 
 .reminder-banner {
   display: flex;
@@ -1296,7 +1236,39 @@ body::before {
 
 .reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
 
-/* Paid history */
+/* Shown when the browser refuses to save (storage full or blocked). */
+
+.storage-warning {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1000;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--accent-2);
+  border-radius: 13px;
+  font-size: 0.9rem;
+}
+
+.storage-warning button {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--accent-contrast);
+  background: var(--accent-2);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* ===== 10. Paid history ===== */
 
 .paid-history-nav {
   padding: 2px 12px;
@@ -1324,167 +1296,11 @@ body::before {
 
 .paid-history-total { font-weight: 700; }
 
-/* iOS Safari zooms the page when a text control under 16px gets focus. Later,
-   more specific rules (edit-form inputs, Move selects) were beating the earlier
-   16px rule, so this final override wins on phones. */
-
-@media (max-width: 700px) {
-  input:not([type="checkbox"]):not([type="radio"]),
-  select,
-  textarea {
-    font-size: 16px !important;
-  }
-}
-
-/* Shown when the browser refuses to save (storage full or blocked). */
-
-.storage-warning {
-  position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  z-index: 1000;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  background: var(--surface);
-  color: var(--text);
-  border: 2px solid var(--accent-2);
-  border-radius: 13px;
-  font-size: 0.9rem;
-  font-style: normal;
-}
-
-.storage-warning button {
-  flex: none;
-  min-height: 44px;
-  padding: 0 14px;
-  font: inherit;
-  color: var(--accent-contrast);
-  background: var(--accent-2);
-  border: 0;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-/* Small note in the bill edit form about already-paid amounts. */
-
-.bill-edit-hint {
-  display: block;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-style: normal;
-}
-
-/* "N changes not synced" note under the sync status, and the Sync now button
-   highlighting itself when there is something to send. */
-
-.sync-pending {
-  margin: 6px 0 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--accent-rose);
-}
-
-.sync-pending[hidden] { display: none; }
-
-#sync-now-btn.sync-needed {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 600;
-}
-
-/* ===== Phone polish (later fixes) ===== */
-
-/* Everything from here to the end of the file was added over time as small fixes
-   found on real phones. Each block carries its own comment. They sit at the end on
-   purpose: they override earlier rules of equal strength, so order matters. */
-
-/* Phone polish: date fields.
-   iPhone Safari gives date inputs their own minimum width and centres the date text, so
-   they could poke out of their box. Dropping the native look and letting them shrink fixes it. */
-
-input[type="date"] {
-  -webkit-appearance: none;
-  appearance: none;
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  min-height: 2.6em;
-  text-align: left;
-}
-
-input[type="date"]::-webkit-date-and-time-value {
-  text-align: left;
-  min-width: 0;
-}
-
-/* The "Sort:" dropdowns above each list used the browser's plain look; match the search box. */
-
-select[id$="-sort-input"] {
-  max-width: 100%;
-  padding: 9px 14px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background-color: var(--surface);
-  color: var(--text);
-  font-family: inherit;
-  margin-bottom: 12px;
-}
-
-/* Reminder banners on phones: the message gets the full width and its buttons sit underneath,
-   instead of the text being squeezed into a thin column beside them. */
-
-@media (max-width: 700px) {
-  .reminder-banner {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-
-  .reminder-banner-text {
-    flex: 1 1 100%;
-  }
-}
-
-/* Budget cards: a category label should be only as wide as its text, not stretched across the card. */
-
-.bill-info,
-.recurring-income-info {
-  align-items: flex-start;
-}
-
-.bill-info .badge,
-.recurring-income-info .badge {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  border-radius: 14px;
-}
-
-/* Space between the paid-history note and the Bills heading below it */
+/* Space between the paid-history note and the Bills heading below it. */
 
 #paid-history-empty + .collection-toolbar { margin-top: 28px; }
 
-.bill-info > *,
-.recurring-income-info > * {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-/* ===== Menu footer: theme button, version, and (later) app lock ===== */
-
-:root[data-theme="light"] { color-scheme: light; }
-
-:root[data-theme="dark"] { color-scheme: dark; }
-
-.app-version {
-  margin: 4px 0 0;
-  font-size: 0.75rem;
-  color: var(--muted);
-  text-align: center;
-}
+/* ===== 11. App lock ===== */
 
 /* The lock screen covers everything until the PIN is right. It is shown purely by CSS (the
    data-locked attribute on <html>), so a locked app never flashes its content while loading. */
@@ -1568,54 +1384,69 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
 
 .lock-buttons button { flex: 1; }
 
-/* ===== Autopay label and small layout details ===== */
+/* ===== 12. Phone layout (max-width: 700px) ===== */
 
-.date-field[hidden] { display: none; }
-
-/* .date-field sets display:flex, which would otherwise beat [hidden] */
-
-.check-field { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); }
-
-.check-field input { width: auto; flex: none; }
-
-.bill-autopay {
-  align-self: flex-start;
-  padding: 1px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  font-size: 0.75rem;
-  color: var(--accent);
-}
-
-.bill-autopay[hidden] { display: none; }
-
-/* ===== Review fixes: layout details ===== */
-
-/* A date box inside a column-flex edit form: the 160px flex basis of .date-field would become a
-   height there, leaving a tall empty gap, so it is switched off (the add forms already do this). */
-
-.bill-edit-form .date-field, .recurring-income-edit-form .date-field { flex: none; }
-
-/* The bill edit form styles every input like a text box; a checkbox must stay a plain checkbox. */
-
-.check-field input[type="checkbox"] {
-  padding: 0;
-  border: 0;
-  background: none;
-  width: auto;
-  flex: none;
-}
-
-/* The "Sort:" dropdowns' bottom margin is for stacked layouts; inside a centred toolbar row it pushed them up. */
-
-.collection-toolbar select { margin-bottom: 0; }
-
-@media (max-width: 900px) {
-  .budget-weekday-row { padding: 0 9px; }
-}
+/* Last in the file on purpose: these override base rules of equal strength from above. */
 
 @media (max-width: 700px) {
+  /* The Menu stacks above the content and collapses behind the Menu button. */
+
+  .app-shell { flex-direction: column; }
+
+  .sidebar {
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border); /* stacked on top, so the divider goes underneath */
+  }
+
+  .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-top: 12px;
+  }
+
+  .sidebar-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .sidebar:not(.sidebar-open) .undo-redo-panel,
+  .sidebar:not(.sidebar-open) .sync-panel,
+  .sidebar:not(.sidebar-open) .data-io {
+    display: none;
+  }
+
+  /* A reminder banner gets the full width for its message, with its buttons underneath,
+     instead of the text being squeezed into a thin column beside them. */
+
+  .reminder-banner {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .reminder-banner-text {
+    flex: 1 1 100%;
+  }
+
   /* Finger-sized tap targets for the small buttons. */
 
   .chip, .sync-change-btn, .reminder-banner-btn { min-height: 36px; }
+
+  /* iOS Safari zooms the page when a text control under 16px gets focus. Many more specific
+     rules set their own smaller sizes (add and edit forms, the day amount box, the sync
+     passphrase box), so this one needs !important to win everywhere. */
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }

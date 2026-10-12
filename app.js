@@ -9,8 +9,9 @@
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
 //   metadata, undo/redo, Budget (bills, income, recurring income, paid history, pay period,
-//   calendar), backup reminders, the due/overdue bills banner, Device Sync, undo/redo
-//   application, data export/import, day rollover, theme and version, App lock, and Init.
+//   calendar), backup reminders, the due/overdue bills banner, Device Sync (server address,
+//   sync client, undo/redo application), data export/import, day rollover, theme and version,
+//   App lock, and Init (which also wires the phone Menu button and registers the service worker).
 //
 // Each list is an array of plain records kept in memory and saved whole to its own
 // localStorage key. A record looks like:
@@ -87,9 +88,8 @@ function safeRender(fn) {
 }
 
 // ---- Shared filter/sort helpers ----
-// Reused by every collection's sort <select> and chip filter so the
-// null-last convention and chip-grouping logic are implemented once instead
-// of per comparator/filter.
+// Used by the Bills sort <select> and the category chips so the
+// null-last convention and chip-grouping logic are implemented once.
 
 // Builds a comparator for Array.prototype.sort() from a value-extractor.
 // Missing values (null/undefined/empty string — never a falsy-but-real value
@@ -119,8 +119,8 @@ function compareByField(getValue, direction = 1, { text = true } = {}) {
   };
 }
 
-// Trims and case-folds a free-text chip value so near-duplicates ("Fall
-// 2026" vs. "fall 2026 ") group into one chip instead of two.
+// Trims and case-folds a free-text chip value so near-duplicates ("Rent"
+// vs. "rent ") group into one chip instead of two.
 function normalizeChipKey(value) {
   return (typeof value === 'string' ? value : '').trim().toLowerCase();
 }
@@ -143,8 +143,7 @@ function deriveChipOptions(items, getValue) {
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
-// Shared chip-filter renderer (dynamic category-like chips and fixed
-// boolean-toggle chips alike): renders one chip per option, auto-resets the
+// Shared chip-filter renderer: renders one chip per option, auto-resets the
 // current selection to 'all' if it disappeared from `options` (e.g. the last
 // item with that value was deleted), and wires click handlers via the
 // caller's own get/set for its module-level selection variable. `options`
@@ -174,7 +173,7 @@ function renderChipFilter(container, options, getSelected, setSelected, onSelect
 
 // ---- Keep keyboard focus when a list redraws ----
 // Every screen rebuilds its cards from scratch after a change. That used to throw away the
-// control you were on (tick a to-do box with Space and focus fell back to the top of the page).
+// control you were on (tick a paid box with Space and focus fell back to the top of the page).
 // withFocusRestore() remembers which control had focus, lets the screen redraw, then puts
 // focus back on the equivalent control in the new cards.
 
@@ -361,29 +360,6 @@ function recordUndo(collectionName, id, before, after) {
   updateUndoRedoButtons();
 }
 
-// ---- Menu button (phones) ----
-
-const sidebarToggleBtn = document.getElementById('sidebar-toggle');
-if (sidebarToggleBtn) {
-  sidebarToggleBtn.addEventListener('click', () => {
-    const sidebar = document.querySelector('.sidebar');
-    const isOpen = sidebar.classList.toggle('sidebar-open');
-    sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  });
-}
-
-// The only address the app ever talks to, and only when the user presses "Sync now".
-// It is the same sync server Second Memory uses, so the same passphrase works for both.
-const SYNC_SERVER_URL = 'https://second-memory-mwm3.onrender.com';
-
-// A real calendar date in YYYY-MM-DD form (rejects 2026-13-45 and 2026-02-30).
-function isRealDateKey(value) {
-  if (typeof value !== 'string' || !DATE_KEY_RE.test(value)) return false;
-  const { y, m, d } = parseDateKey(value);
-  const date = new Date(y, m, d);
-  return date.getFullYear() === y && date.getMonth() === m && date.getDate() === d;
-}
-
 // ---- Budget (Bills + rolling 5-week calendar) ----
 // Storage key: budgetApp.bills.v1.
 
@@ -398,9 +374,8 @@ let bills = migrateSyncFields(loadCollection(BILLS_KEY), BILLS_KEY, getDeviceId(
 
 // ---- Date helpers ----
 // All date-key values are local-date-derived 'YYYY-MM-DD' strings — never
-// `toISOString()`-derived, which is UTC, not local (the existing
-// `isTodoOverdue()`/`todayForFilename()` bug pattern this new code must not
-// repeat). Comparisons between two date keys use plain string comparison,
+// `toISOString()`-derived, which is UTC, not local (that was a past bug).
+// Comparisons between two date keys use plain string comparison,
 // which is correct for this fixed zero-padded format.
 
 // A date key is a 'YYYY-MM-DD' string; this checks the shape (not that the date is real).
@@ -427,6 +402,14 @@ function parseDateKey(key) {
   return { y, m: m - 1, d }; // m is 0-indexed to match Date's convention
 }
 
+// A real calendar date in YYYY-MM-DD form (rejects 2026-13-45 and 2026-02-30).
+function isRealDateKey(value) {
+  if (typeof value !== 'string' || !DATE_KEY_RE.test(value)) return false;
+  const { y, m, d } = parseDateKey(value);
+  const date = new Date(y, m, d);
+  return date.getFullYear() === y && date.getMonth() === m && date.getDate() === d;
+}
+
 // How many days a month has (handles leap years); monthIndex is 0-based.
 function daysInMonth(year, monthIndex) {
   // The "day 0" trick: day 0 of month M+1 is the last day of month M.
@@ -437,14 +420,14 @@ function daysInMonth(year, monthIndex) {
 function utcDayDiff(fromKey, toKey) {
   const a = parseDateKey(fromKey);
   const b = parseDateKey(toKey);
-  // UTC-anchored per the research brief — never diff local-millisecond
-  // timestamps, that's DST-unsafe. Every UTC day is exactly 86,400,000ms.
+  // UTC-anchored: never diff local-millisecond timestamps, that's DST-unsafe.
+  // Every UTC day is exactly 86,400,000ms.
   return Math.round((Date.UTC(b.y, b.m, b.d) - Date.UTC(a.y, a.m, a.d)) / 86400000);
 }
 
-// Local calendar-day arithmetic (safe from the DST pitfall above because it
-// increments the day-of-month FIELD, letting Date's constructor normalize
-// month/year rollover — the same technique the calendar window math uses).
+// Adds (or subtracts) whole days to a date key. Local calendar-day arithmetic, safe from the
+// DST pitfall above because it increments the day-of-month FIELD and lets Date's constructor
+// normalize month/year rollover — the same technique the calendar window math uses.
 function shiftDateKey(key, deltaDays) {
   const { y, m, d } = parseDateKey(key);
   return dateKeyFromLocalDate(new Date(y, m, d + deltaDays));
@@ -605,13 +588,11 @@ function weekTotal(weekEndKey, allBills) {
     .reduce((sum, b) => sum + unpaidAmountThrough(b, weekEndKey), 0);
 }
 
-// ---- Income (per-day manual number, now a real synced collection) ----
-// `id` is deliberately the record's own `dateKey`, not a fresh makeId() UUID
-// — a conscious divergence
-// from every other collection's convention: it gives "one income entry per
-// date" a real identity-level guarantee across the normal sync-merge paths,
-// at the cost of setIncomeForDate needing to find-or-create by dateKey
-// instead of blindly pushing like every other addX.
+// ---- Income (per-day manual number, a synced collection) ----
+// `id` is deliberately the record's own `dateKey`, not a fresh makeId() UUID like bills and
+// recurring income use: it gives "one income entry per date" a real identity-level guarantee
+// across the normal sync-merge paths, at the cost of setIncomeForDate needing to find-or-create
+// by dateKey instead of blindly pushing.
 
 const INCOME_KEY = 'budgetApp.income.v1';
 let income = migrateSyncFields(loadCollection(INCOME_KEY), INCOME_KEY, getDeviceId());
@@ -714,12 +695,10 @@ function incomeSumInRange(startKey, endKey, allIncome) {
     .reduce((sum, r) => sum + r.amount, 0);
 }
 
-// Every existing currency display in this tab is guaranteed non-negative by
-// construction (unpaidAmountThrough clamps at 0; Bills' amount is validated
-// > 0), so `$${x.toFixed(2)}` has never had to handle a negative number.
-// Income (a manual income amount may be negative) and net totals
-// (can go negative) both can — use this instead, never the plain template
-// literal, for those two figures.
+// Formats money with a sign ("-$5.00"). Bill figures are non-negative by construction
+// (unpaidAmountThrough clamps at 0; a bill's amount is validated > 0), so they use the plain
+// `$${x.toFixed(2)}`. Income (a manual amount may be negative) and net totals (can go negative)
+// must use this instead.
 function formatSignedCurrency(amount) {
   const abs = Math.abs(amount).toFixed(2);
   // Check the sign of the *rounded* magnitude, not the raw value — a tiny
@@ -728,11 +707,8 @@ function formatSignedCurrency(amount) {
   return (amount < 0 && abs !== '0.00') ? `-$${abs}` : `$${abs}`;
 }
 
-// Pairs with formatSignedCurrency's string output but is a separate concern
-// (CSS class vs. text) — kept as its own function rather than teaching
-// formatSignedCurrency to touch the DOM, which would also affect its
-// income-total callers that this feature does not ask to color-code (net
-// totals only, not income totals).
+// The CSS class for a net/income figure: red when negative, normal otherwise. Separate from
+// formatSignedCurrency because only net totals and the day income dot are colored, not income totals.
 function signedAmountClass(amount) {
   // Compare in whole cents so float noise (e.g. -5.5e-17) never paints $0.00 red.
   return Math.round(amount * 100) / 100 < 0 ? 'amount-negative' : 'amount-positive';
@@ -751,10 +727,10 @@ function isReasonableDateKey(key) {
 }
 const DATE_RANGE_MESSAGE = `Pick a date between the years ${DATE_YEAR_MIN} and ${DATE_YEAR_MAX}.`;
 
-// Checks and cleans a bill's form values (name, amount above $0, due date); unknown frequency becomes monthly.
 // The largest amount accepted for a bill or income entry (keeps totals and displays sane).
 const MAX_MONEY = 1000000000;
 
+// Checks and cleans a bill's form values (name, amount above $0, due date); unknown frequency becomes monthly.
 function validateBillFields(fields) {
   const trimmedName = fields.name.trim();
   if (!trimmedName) return { ok: false, error: 'Bill name is required.' };
@@ -892,10 +868,9 @@ function restoreBill(id) {
   renderBudget();
 }
 
-// Direct structural match to toggleTodoCompleted/toggleShoppingChecked: find
-// record, snapshot before, mutate exactly one field, stampSync,
-// saveCollection, recordUndo, re-render. paidDates is never touched anywhere
-// else — see updateBill above.
+// Marks one occurrence of a bill paid or unpaid (and remembers the amount paid). Snapshot before,
+// mutate, stampSync, save, recordUndo, re-render. paidDates is otherwise only moved by
+// updateBill when the schedule changes.
 function toggleBillPaid(billId, dateKey, paid) {
   const bill = bills.find((b) => b.id === billId);
   if (!bill) return;
@@ -1126,8 +1101,7 @@ function matchesBillSearch(bill, term) {
   return haystack.includes(term.toLowerCase());
 }
 
-// 'all' is the default/initial state, same convention as every other
-// chip-filtered collection.
+// The selected category chip's key; 'all' is the default.
 let selectedBillCategory = 'all';
 
 // True if the bill is in the selected category chip ('all' matches everything).
@@ -1140,7 +1114,7 @@ function matchesBillCategory(bill, categoryKey) {
 // the normalized string (same normalization matchesBillCategory uses, so
 // "Rent"/"rent " share a color) into one of exactly 3 palette colors — never
 // var(--accent-2), which is reserved app-wide for error/overdue/destructive
-// semantics per DECISIONS.md. Blank categories return null (neutral/no dot)
+// semantics. Blank categories return null (neutral/no dot)
 // rather than being hashed in.
 const BILL_CATEGORY_PALETTE = ['var(--accent)', 'var(--accent-rose)', 'var(--accent-lavender)'];
 
@@ -1189,18 +1163,12 @@ function renderBudgetStats(nonDeletedBills) {
 }
 
 // ---- Current Pay Period ----
-// Storage key: budgetApp.paydaySettings.v1. Deliberately a flat,
-// local-only settings object, NOT a synced collection — this is a personal
-// display preference (which pay-cycle window to show), not financial
-// transaction data, matching the precedent set by the original pre-Income
-// manual-number decision. Loaded/saved via plain localStorage.getItem/
-// setItem + JSON.parse/stringify, the same lightweight pattern
-// UI_STORAGE_KEY/loadUiState/saveUiState already use — NOT loadCollection/
-// saveCollection, which assume an array of sync-tracked records. Flagging
-// for the Architect: if this ever needs to follow a user across devices, it
-// would need to be promoted to a real synced collection (its own id/
-// updatedAt/deviceId/deleted/version, wired into SYNC_COLLECTIONS) instead
-// of living in this flat, device-local key.
+// Storage key: budgetApp.paydaySettings.v1. Deliberately a flat, device-local settings object,
+// NOT a synced collection: it is a display preference (which pay-cycle window to show), not
+// transaction data. It is read and written with plain localStorage + JSON rather than
+// loadCollection/saveCollection, which assume an array of sync-tracked records. If it ever needs
+// to follow the user across devices it would have to become a real synced collection
+// (id/updatedAt/deviceId/deleted/version, listed in SYNC_COLLECTIONS).
 
 const PAYDAY_SETTINGS_KEY = 'budgetApp.paydaySettings.v1';
 // How often payday comes around, for the Current Pay Period panel.
@@ -1223,11 +1191,21 @@ function loadPaydaySettings() {
   return { payDateKey: null, frequency: 'biweekly' };
 }
 
-// Saves the payday date and frequency (device-local, never synced).
+// Saves the payday date and frequency (device-local, never synced). Returns false (and shows the
+// storage warning) if the browser refuses, instead of throwing out of the form's submit handler.
 function savePaydaySettings(settings) {
-  localStorage.setItem(PAYDAY_SETTINGS_KEY, JSON.stringify(settings));
+  try {
+    localStorage.setItem(PAYDAY_SETTINGS_KEY, JSON.stringify(settings));
+    return true;
+  } catch {
+    reportStorageProblem();
+    return false;
+  }
 }
 
+// Finds the current pay period: { periodStart, periodEnd } where periodStart is the latest payday
+// on or before today and periodEnd the next one. Returns null if there is no payday yet (the
+// saved payday is still in the future).
 // Bounded backward/forward scan (at most 31 days each way — long enough to
 // cover every supported frequency) using the existing, already-verified
 // occursOnDate() to find the current pay period's boundaries. This is safe
@@ -1397,15 +1375,15 @@ function setDayDialog(cell, open) {
   }
 }
 
-// Closes the opened day sheet; with restoreFocus, focus goes back to that day's button.
-function closeCalendarDay({ restoreFocus = false } = {}) {
+// Closes the opened day sheet; with refocus, focus goes back to that day's button.
+function closeCalendarDay({ refocus = false } = {}) {
   const key = openCalendarDayKey;
   openCalendarDayKey = null;
   document.querySelectorAll('.budget-day-cell.budget-day-open').forEach((el) => {
     el.classList.remove('budget-day-open');
     setDayDialog(el, false);
   });
-  if (restoreFocus && key) {
+  if (refocus && key) {
     // The Close button is about to be hidden, so hand focus back to the day that was opened.
     const opener = document.querySelector(`.budget-day-cell[data-date-key="${key}"] .budget-day-open-btn`);
     if (opener) opener.focus();
@@ -1418,7 +1396,7 @@ document.addEventListener('keydown', (e) => {
   if (!sheet) return;
   if (e.key === 'Escape') {
     e.preventDefault();
-    closeCalendarDay({ restoreFocus: true });
+    closeCalendarDay({ refocus: true });
     return;
   }
   if (e.key !== 'Tab') return;
@@ -1459,7 +1437,7 @@ document.addEventListener('click', (e) => {
 function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, focusedManualInput) {
   const today = new Date();
   const todayK = todayKey();
-  const dueSoonEndK = shiftDateKey(todayK, 2);
+  const dueSoonEndK = shiftDateKey(todayK, REMINDER_BANNER_DAYS); // same window as the banner
   document.getElementById('budget-month-label').textContent =
     `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -1575,7 +1553,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       closeBtn.type = 'button';
       closeBtn.className = 'budget-day-close';
       closeBtn.textContent = 'Close';
-      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeCalendarDay({ restoreFocus: true }); });
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeCalendarDay({ refocus: true }); });
       headerEl.appendChild(closeBtn);
       bodyEl.appendChild(headerEl);
 
@@ -1622,11 +1600,13 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           const itemEl = document.createElement('li');
           itemEl.className = 'budget-occurrence';
           const paid = (bill.paidDates || []).includes(dateKey);
-          const overdue = !paid && dateKey < todayK;
+          // A bill that pays itself is never flagged, matching the banner (see computeBillReminders).
+          const needsPayment = !paid && !bill.autopay;
+          const overdue = needsPayment && dateKey < todayK;
           // Mutually exclusive by construction: overdue is strictly before
           // today, due-soon is today-or-later, so a single dateKey can never
           // satisfy both.
-          const dueSoon = !paid && dateKey >= todayK && dateKey <= dueSoonEndK;
+          const dueSoon = needsPayment && dateKey >= todayK && dateKey <= dueSoonEndK;
           itemEl.classList.toggle('overdue', overdue);
           itemEl.classList.toggle('due-soon', dueSoon);
 
@@ -1706,7 +1686,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     // Under each week: what's still owed, the income, and the net.
     const totalEl = document.createElement('p');
     totalEl.className = 'budget-week-total';
-    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekTotal(weekEndKey, nonDeletedBills).toFixed(2)}</strong>`;
+    const weekOwed = weekTotal(weekEndKey, nonDeletedBills);
+    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekOwed.toFixed(2)}</strong>`;
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
@@ -1720,7 +1701,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
     // This mixes a cumulative expense figure with a period-scoped income
     // figure on purpose; the title tooltip below explains it to the user.
-    const weekNet = weekIncome - weekTotal(weekEndKey, nonDeletedBills);
+    const weekNet = weekIncome - weekOwed;
     const netTotalEl = document.createElement('p');
     netTotalEl.className = 'budget-week-net-total';
     netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`;
@@ -1799,8 +1780,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const editError = node.querySelector('.bill-edit-error');
 
     node.querySelector('.edit-btn').addEventListener('click', () => {
-      // Only one bill can be in edit mode at a time — close any other open
-      // bill edit form first, same invariant as every other collection.
+      // Only one bill can be in edit mode at a time: close any other open edit form first.
       const otherOpenForm = list.querySelector('.bill-edit-form:not([hidden])');
       if (otherOpenForm && otherOpenForm !== editForm) {
         otherOpenForm.hidden = true;
@@ -1824,15 +1804,9 @@ function renderBudgetList(nonDeletedBills, openEdit) {
 
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      // Hide the form BEFORE calling updateBill — if the save succeeds,
-      // updateBill's internal re-render (renderBudget -> renderBudgetList)
-      // captures "is there an open edit form" from live DOM state, and must
-      // see this one as already closed, or it reopens the very form that
-      // just successfully saved (this was a real, confirmed bug: the data
-      // saved correctly but the form stayed open, indistinguishable from
-      // the button doing nothing). If the save FAILS, updateBill returns
-      // early before any render happens at all, so these exact DOM nodes
-      // are still live/attached and safe to simply re-show.
+      // Close the form BEFORE saving: a successful save redraws the list, and the redraw
+      // reopens whichever edit form is still open. A failed save redraws nothing, so
+      // these same nodes are still attached and simply get re-shown below.
       editForm.hidden = true;
       viewSection.hidden = false;
       const result = updateBill(bill.id, {
@@ -1871,9 +1845,8 @@ function renderBudgetList(nonDeletedBills, openEdit) {
   document.getElementById('budget-empty-state').hidden = nonDeletedBills.length !== 0;
 }
 
-// Direct structural mirror of renderBudgetList, minus the "mark oldest
-// unpaid" wiring (no paid concept) and any search/sort/category
-// filter (deliberately not built: realistic scale is a handful of sources).
+// Draws the Recurring Income list. Same shape as renderBudgetList, minus "mark oldest unpaid"
+// (income has no paid concept) and the search/sort/category filters (only a handful of sources).
 function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
   const list = document.getElementById('recurring-income-list');
   const template = document.getElementById('recurring-income-card-template');
@@ -1907,9 +1880,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     const editError = node.querySelector('.recurring-income-edit-error');
 
     node.querySelector('.edit-btn').addEventListener('click', () => {
-      // Only one recurring income source can be in edit mode at a time —
-      // this is a separate invariant from the Bills list's own open-edit-form
-      // state, not a shared one (edit-form exclusivity is per collection).
+      // Only one source is in edit mode at a time (independent of the Bills list's open form).
       const otherOpenForm = list.querySelector('.recurring-income-edit-form:not([hidden])');
       if (otherOpenForm && otherOpenForm !== editForm) {
         otherOpenForm.hidden = true;
@@ -1932,9 +1903,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
 
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      // Hide the form BEFORE calling updateRecurringIncome — see the full
-      // comment on Medications'/Bills' edit-form submit handlers for why
-      // this ordering matters on both the success and failure paths.
+      // Close the form before saving; see the Bills edit handler for why.
       editForm.hidden = true;
       viewSection.hidden = false;
       const result = updateRecurringIncome(source.id, {
@@ -1970,17 +1939,9 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
   document.getElementById('recurring-income-empty-state').hidden = nonDeletedRecurringIncome.length !== 0;
 }
 
-// Generalizes the "preserve in-progress unsaved input across a re-render"
-// pattern to the THREE kinds of in-progress state specific to this tab: the
-// Bills list's open edit form (identical to every other collection), the
-// Recurring Income list's own open edit form (a separate, independent
-// invariant — per-collection edit-form exclusivity, not app-wide; a user CAN
-// have one Bill card and one Recurring Income card open simultaneously),
-// AND a currently-focused
-// .budget-day-manual-input (a real, non-obvious risk unique to this tab —
-// toggling any single paid-checkbox anywhere calls renderBudget(), which
-// wipes and rebuilds all 35 day cells including whichever one the user might
-// be mid-typing into).
+// Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
+// in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
+// (one of each can be open at once) and a focused day income box (any paid tick redraws all 35 days).
 function renderBudget() {
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
@@ -2031,15 +1992,11 @@ function renderBudget() {
   renderBillReminders(); // the due/overdue bills banner at the top
 }
 
-// The settings form itself is populated once here, at setup time, and never
-// re-populated on every renderBudget() re-render — unlike the edit forms
-// fixed elsewhere in this file, this form has no "open/cancel" concept to
-// fight with; it's a persistent, always-visible settings form, not a
-// per-record edit form a render pass could reopen. Re-touching its inputs
-// on every render (renderBudget() runs on nearly every Budget-tab mutation)
-// would risk overwriting whatever the user is mid-typing for no benefit, so
-// renderPayPeriod() above only ever touches the summary/list, never these
-// inputs.
+// ---- Form wiring ----
+
+// Fills the payday settings form once at startup and saves it on submit. It is never refilled
+// by renderBudget(), which would overwrite what the user is typing; renderPayPeriod() only
+// touches the summary and list, never these inputs.
 (function initPaydaySettingsForm() {
   const form = document.getElementById('payday-settings-form');
   if (!form) return;
@@ -2169,7 +2126,7 @@ function backupAgeText(days) {
 // Set when the user dismisses the backup reminders; they stay hidden until the page is reloaded.
 let backupNotesDismissed = false;
 
-// Shows reminders above the Budget when the full export is overdue for a backup, or sync is stale.
+// Shows reminders above the calendar when the full export is overdue for a backup, or sync is stale.
 function renderBackupNotes() {
   const box = document.getElementById('backup-notes');
   if (!box) return;
@@ -2221,34 +2178,30 @@ function renderBackupNotes() {
 }
 
 // ---- Bills banner ----
-// Pure, render-only aggregation over the live bills array: no storage key of its own.
-// Re-rendered at the end of renderBudget(), so every add/edit/delete/undo/redo/sync keeps it current.
+// Computed from the live bills array, with no storage key of its own. Redrawn at the end of
+// renderBudget(), so every add/edit/delete/undo/redo/sync keeps it current.
 
-// How many days ahead the banner looks for bills that are "due soon".
-const DUE_SOON_DAYS = 7;
+// How soon a bill must be due to appear in the banner at the top of the screen.
+const REMINDER_BANNER_DAYS = 2;
 
-// Splits bills into overdue (unpaid balance before today) and due soon (unpaid, in the next week).
+// Splits bills into overdue (unpaid balance before today) and due soon (unpaid, within
+// REMINDER_BANNER_DAYS). Bills that pay themselves (autopay) are left out of both.
 function computeBillReminders(nonDeletedBills) {
   const todayK = todayKey();
   const yesterdayK = shiftDateKey(todayK, -1);
 
-  // Overdue: real unpaid balance strictly before today. unpaidAmountThrough
-  // (closed-form) on purpose — NOT oldestUnpaidOccurrence, which is an
-  // unbounded day-by-day walk restricted to the "mark oldest unpaid" button's
-  // click handler for cost reasons. The banner re-renders on every add/edit/delete/
-  // undo/redo/sync across three collections, so it must stay cheap.
+  // Overdue: real unpaid balance strictly before today. Uses the closed-form unpaidAmountThrough,
+  // not oldestUnpaidOccurrence (a day-by-day walk), because this runs on every redraw.
   const overdue = nonDeletedBills
     .filter((bill) => !bill.autopay) // a bill that pays itself is not "overdue" just because it was not ticked off
     .map((bill) => ({ bill, amount: unpaidAmountThrough(bill, yesterdayK) }))
     .filter((x) => x.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
-  // Due soon: unpaid occurrences landing on any of the next DUE_SOON_DAYS
-  // days (today inclusive) — a bounded per-bill loop, same technique
-  // renderBudgetCalendar() already uses.
+  // Due soon: unpaid occurrences on any of the next REMINDER_BANNER_DAYS days (today included).
   const dueSoon = [];
-  nonDeletedBills.forEach((bill) => {
-    for (let i = 0; i <= DUE_SOON_DAYS; i++) {
+  nonDeletedBills.filter((bill) => !bill.autopay).forEach((bill) => {
+    for (let i = 0; i <= REMINDER_BANNER_DAYS; i++) {
       const dateKey = shiftDateKey(todayK, i);
       if (occursOnDate(bill, dateKey) && !(bill.paidDates || []).includes(dateKey)) {
         dueSoon.push({ bill, dateKey });
@@ -2260,7 +2213,7 @@ function computeBillReminders(nonDeletedBills) {
   return { overdue, dueSoon };
 }
 
-// Plain-English timing for Home rows, e.g. "today", "tomorrow", "in 4 days", "2 days ago".
+// Plain-English timing for the banner, e.g. "today", "tomorrow", "in 4 days", "2 days ago".
 function whenLabel(days) {
   if (days < 0) return `${-days} day${days === -1 ? '' : 's'} ago`;
   if (days === 0) return 'today';
@@ -2270,19 +2223,14 @@ function whenLabel(days) {
 
 // Whole days from today to a YYYY-MM-DD date (negative if it's in the past).
 function daysUntilDateKey(dateKey) {
-  return Math.round((new Date(dateKey + 'T00:00:00') - new Date(todayKey() + 'T00:00:00')) / 86400000);
+  return utcDayDiff(todayKey(), dateKey);
 }
 
-// How soon a bill must be due to appear in the banner at the top of every screen.
-const REMINDER_BANNER_DAYS = 2;
 let reminderBannerDismissed = false;
 
 // Shows or hides the bills banner (bills due within a few days, plus a count of overdue ones).
-function renderReminderBanner(overdueBills, dueSoonBills) {
+function renderReminderBanner(overdueBills, soon) {
   const banner = document.getElementById('reminder-banner');
-  const cutoff = shiftDateKey(todayKey(), REMINDER_BANNER_DAYS);
-  // Bills that pay themselves are not nagged about; overdue ones (probably just not marked paid) still are.
-  const soon = dueSoonBills.filter((x) => x.dateKey <= cutoff && !x.bill.autopay);
   if (reminderBannerDismissed || (soon.length === 0 && overdueBills.length === 0)) {
     banner.hidden = true;
     return;
@@ -2312,21 +2260,21 @@ document.getElementById('reminder-banner-dismiss').addEventListener('click', () 
 });
 
 // ---- Device Sync ----
-// Optional: the app is fully functional offline with no sync configured, and
-// keeps working from local data if the server is ever unreachable — sync only
-// happens when the user presses "Sync now", and is never a requirement for any UI action.
+// Optional: the app works fully offline with no sync configured. Sync only happens when the
+// user presses "Sync now" and is never required for any other action.
+
+// The only address the app ever talks to, and only when the user presses "Sync now".
+// It is the same sync server Second Memory uses, so the same passphrase works for both.
+const SYNC_SERVER_URL = 'https://second-memory-mwm3.onrender.com';
 
 const SYNC_CONFIG_KEY = 'budgetApp.syncConfig.v1';
 
-// Reads the saved sync settings (the access token); null if none, or if they are from the old server.
+// Reads the saved sync settings ({ token }); null if none or damaged.
 function loadSyncConfig() {
   try {
     const raw = localStorage.getItem(SYNC_CONFIG_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    // Old pre-Render config was {serverUrl, token}; treat the whole object as
-    // stale rather than reusing its token against the new server.
-    if (parsed && typeof parsed === 'object' && 'serverUrl' in parsed) return null;
-    if (parsed && parsed.token) return parsed;
+    if (parsed && typeof parsed.token === 'string' && parsed.token) return parsed;
   } catch {
     // fall through
   }
@@ -2338,9 +2286,8 @@ function saveSyncConfig(config) {
   localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(config));
 }
 
-// Maps each collection to the wire-protocol name the server expects, its
-// localStorage key, and how to read/replace/render it — lets the sync
-// function stay generic instead of one hand-written copy per list.
+// The three synced lists: the name the server expects, the localStorage key, a display label, and
+// how to read, replace, redraw, delete and restore each. Sync, undo and import all loop over this.
 const SYNC_COLLECTIONS = [
   { name: 'bills', label: 'Bills', key: BILLS_KEY, get: () => bills, set: (v) => { bills = v; }, render: renderBudget, delete: deleteBill, restore: restoreBill },
   { name: 'income', label: 'Income', key: INCOME_KEY, get: () => income, set: (v) => { income = v; }, render: renderBudget, delete: deleteIncome, restore: restoreIncome },
@@ -2348,9 +2295,8 @@ const SYNC_COLLECTIONS = [
 ];
 
 // ---- Undo/redo application mechanics ----
-// Applies one side (`before` on undo, `after` on redo) of a recorded entry
-// back onto the live collection, generalized across every synced collection via
-// the get/set/render/delete/restore lookup above.
+// Applies one side (`before` on undo, `after` on redo) of a recorded entry back onto the live
+// collection, using the get/set/render/delete/restore lookup above.
 
 // Replays one recorded change onto the live record. which is 'before' (undo) or 'after' (redo).
 // Adds and deletes go through the collection's own delete/restore; edits copy back only the fields that changed.
@@ -2362,10 +2308,9 @@ function applyEntrySnapshot(entry, which) {
   const items = cfg.get();
   const record = items.find((r) => r.id === entry.id);
 
-  // Case 1: the target state is "didn't exist", so soft-delete the record.
+  // Case 1: the target state is "didn't exist" (undoing an add), so tombstone the record
+  // with the collection's own delete, never a splice.
   if (target === null) {
-    // Undoing an "add": there is no prior state, so the record must be
-    // removed. Reuse the collection's own deleteX (tombstone), never a splice.
     if (record && !record.deleted) cfg.delete(entry.id);
     return;
   }
@@ -2381,23 +2326,16 @@ function applyEntrySnapshot(entry, which) {
     cfg.restore(entry.id); // un-tombstone via restoreX first
   }
 
-  // Re-clone the target on every application — never assign the stack
-  // entry's own nested objects/arrays into the live record. This is the
-  // same reference-aliasing risk noted for the original mutation functions,
-  // applied here to the new engine: without this clone, a field like
-  // Recipes' `ingredients` array would end up shared between the live
-  // record and the entry still sitting in the opposite stack, so a later
-  // in-place mutation could silently corrupt history.
+  // Clone the target so the live record never shares nested arrays (e.g. paidDates) with the
+  // entry still sitting in the other stack.
   const snapshot = structuredClone(target);
   const other = entry[which === 'before' ? 'after' : 'before'];
   const BOOKKEEPING = ['id', 'dateAdded', 'version', 'updatedAt', 'deviceId', 'deleted'];
-  // Only fields this history entry actually changed are applied, so undo can
-  // never revert fields changed elsewhere since (e.g. paid dates that arrived
-  // from another device). A field the snapshot lacks (set on a record that
-  // predates it) is removed again. Bookkeeping fields are never replayed:
-  // version is server-assigned, updatedAt/deviceId are freshly stamped below
-  // because this undo IS a new local mutation, `deleted` is handled above.
-  // Apply the field-by-field difference, then stamp, save and redraw this one collection.
+  // Only fields this entry actually changed are applied, so undo never reverts fields changed
+  // elsewhere since (e.g. paid dates that arrived from another device). A field the snapshot
+  // lacks is removed again. Bookkeeping is never replayed: version is server-assigned,
+  // updatedAt/deviceId are freshly stamped below (this undo is a new local change), and
+  // `deleted` is handled above. Then save and redraw this one collection.
   new Set([...Object.keys(snapshot), ...Object.keys(other || {})]).forEach((key) => {
     if (BOOKKEEPING.includes(key)) return;
     if (other && JSON.stringify(snapshot[key]) === JSON.stringify(other[key])) return;
@@ -2439,12 +2377,12 @@ function redo() {
   updateUndoRedoButtons();
 }
 
-// Which field names a record in each collection (used in the Undo/Redo tooltips).
+// Which field names a record in each collection, for the Undo/Redo tooltips.
 const RECORD_LABEL_FIELD = {
   bills: 'name', income: 'dateKey', recurringIncome: 'name',
 };
 
-// Plain-English summary of an undo entry, e.g. "deleted 'Dune'", for the button tooltips.
+// Plain-English summary of an undo entry, e.g. "deleted 'Rent'", for the button tooltips.
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
@@ -2475,7 +2413,7 @@ document.getElementById('redo-btn').addEventListener('click', redo);
 // Sync progress state: a sync is running, when the last one finished, and whether its message was ok/failed.
 let syncInFlight = false;
 let lastSyncedAt = null;
-// The last successful sync is also saved, so the Home screen can warn when it has been too long.
+// The last successful sync is also saved, so the backup notes can warn when it has been too long.
 const LAST_SYNC_AT_KEY = 'budgetApp.lastSyncAt.v1';
 const SYNC_STALE_DAYS = 7;
 let lastSyncTone = null;
@@ -2570,9 +2508,11 @@ function syncTokenHeader(token) {
   return /^[\x20-\x7e]*$/.test(token) ? token : 'u:' + encodeURIComponent(token);
 }
 
-// A stalled connection would otherwise leave "Sync now" disabled until the browser gives up.
-let SYNC_WAKE_NOTICE_MS = 5000; // after this long with no answer, explain the wait
-// After SYNC_TIMEOUT_MS the request is abandoned and the sync reports a timeout.
+// After this long with no answer, the status line explains the wait (a free-tier server can be asleep).
+// `let` so a test can shorten it.
+let SYNC_WAKE_NOTICE_MS = 5000;
+// After this long the request is abandoned and the sync reports a timeout, so a stalled
+// connection cannot leave "Sync now" disabled until the browser gives up.
 const SYNC_TIMEOUT_MS = 60000; // generous: a sleeping free-tier server can take ~30s to wake
 
 // Sends the changed records to the server and returns { kind: 'ok', data } or a failure kind:
@@ -2601,7 +2541,8 @@ async function postSync(config, collections) {
 // reconcile record by record WITHOUT sending anything. A local record is only
 // kept as "changed here" if the server has never seen it or this device's
 // copy was edited more recently than the server's; otherwise the server's
-// copy wins, so a long-stale device can't resurrect or overwrite anything.
+// copy wins, so a long-stale device can't resurrect or overwrite anything. A record the
+// server has deleted stays deleted, even if this device edited it later.
 function bootstrapSyncSnapshot(serverData) {
   const snapshot = {};
   SYNC_COLLECTIONS.forEach((c) => {
@@ -2621,7 +2562,8 @@ function bootstrapSyncSnapshot(serverData) {
         return;
       }
       const sameContent = contentMatchesIgnoringVersion(local, server, c.name);
-      if (!sameContent && (local.updatedAt || '') > (server.updatedAt || '')) {
+      const wouldResurrect = server.deleted && !local.deleted;
+      if (!sameContent && !wouldResurrect && (local.updatedAt || '') > (server.updatedAt || '')) {
         merged.push(local);
         return;
       }
@@ -2846,8 +2788,17 @@ function initSyncUI() {
     const token = tokenInput.value.trim();
     if (!token) return;
     const previousConfig = loadSyncConfig();
-    if (!previousConfig || previousConfig.token !== token) localStorage.removeItem(SYNC_SNAPSHOT_KEY);
-    saveSyncConfig({ token });
+    try {
+      saveSyncConfig({ token });
+    } catch {
+      // The setup form is showing (the sync status line is hidden), so use the Menu's message line.
+      setDataIoStatus('Could not save the sync passphrase on this device (storage is full).', 'failed');
+      return; // the form stays open; nothing was changed
+    }
+    // A different passphrase means a different server copy: forget what the old one confirmed.
+    if (!previousConfig || previousConfig.token !== token) {
+      try { localStorage.removeItem(SYNC_SNAPSHOT_KEY); } catch { /* nothing to remove it from */ }
+    }
     tokenInput.value = '';
     setupSection.hidden = true;
     statusSection.hidden = false;
@@ -2868,11 +2819,9 @@ function initSyncUI() {
 }
 
 // ---- Data export / import ----
-// Import's merge algorithm intentionally mirrors sync_server.py's
-// merge_collection()/_content_matches() (as Second Memory does) so a client-side
-// restore behaves the same way a genuine sync conflict does: never silently
-// discard a record, treat a byte-for-byte replay as a no-op, and keep both
-// sides on a genuine conflict rather than picking a winner.
+// Import's merge mirrors the sync server's merge_collection()/_content_matches() (as Second
+// Memory does), so a restore behaves like a sync conflict: a replay of the same data is a no-op,
+// a deleted record stays deleted, and a genuine conflict keeps both sides.
 // It accepts a Second Memory export too: only bills, income and recurringIncome are read.
 
 // The full backup: the three lists that sync, plus the pay-period settings, which only live on
@@ -2886,11 +2835,6 @@ function buildExportPayload() {
   return { collections, local };
 }
 
-// Today's date as YYYY-MM-DD for backup file names.
-function todayForFilename() {
-  return todayKey(); // local date, like the rest of the app (not the UTC date)
-}
-
 // Downloads the full backup (the three lists plus the payday settings) as one JSON file.
 function exportData() {
   recordBackupTime(EXPORT_AT_KEY);
@@ -2899,7 +2843,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `budget-export-${todayForFilename()}.json`;
+  link.download = `budget-export-${todayKey()}.json`; // the local date, not the UTC one
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -2908,10 +2852,8 @@ function exportData() {
   renderBackupNotes();
 }
 
-// Accepts the exact shape `buildExportPayload()` produces (`{ collections: {...} }`)
-// and, defensively, a bare collections object at the top level too. Returns
-// null for anything else so the caller can reject with a clear error instead
-// of crashing on malformed input.
+// Finds the lists in a parsed file: `{ collections: {...} }` (what buildExportPayload makes) or a
+// bare collections object. Returns null for anything else so the caller can refuse it.
 function extractImportCollections(parsed) {
   if (!parsed || typeof parsed !== 'object') return null;
   if (parsed.collections && typeof parsed.collections === 'object' && !Array.isArray(parsed.collections)) return parsed.collections;
@@ -2922,7 +2864,7 @@ function extractImportCollections(parsed) {
 // Structural equality for records (arrays and nested objects compared by content; null equals missing).
 function deepEqual(a, b) {
   if (a === b) return true;
-  if (a == null && b == null) return true; // null and undefined both mean "no value" — treat as equal, matching Python's dict.get() semantics where a missing key and an explicit JSON null both deserialize to None
+  if (a == null && b == null) return true; // null and a missing value are the same (as in the server's dict.get())
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
   }
@@ -2933,29 +2875,17 @@ function deepEqual(a, b) {
   return false;
 }
 
-// Fields that describe who/when touched a record rather than its actual
-// data. Mirrors sync_server.py's _BOOKKEEPING_FIELDS. Comparing these would
-// make identical records look different and inflate `version` on every sync.
-// `dateAdded` and `deleted` are deliberately NOT here — they're meaningful
-// data, not bookkeeping.
+// Fields that say who/when touched a record rather than what it holds (mirrors the server's
+// _BOOKKEEPING_FIELDS). Comparing them would make identical records look different.
+// `dateAdded` and `deleted` are deliberately NOT here: they are real data.
 const BOOKKEEPING_FIELDS = new Set(['version', 'updatedAt', 'deviceId']);
 
-// Per-collection extra bookkeeping fields, beyond the universal set above.
-// `income` uses id = dateKey (not a fresh UUID like every other collection)
-// specifically so two devices independently entering the same date's income
-// converge onto one record instead of duplicating — dateAdded differing
-// between two independently-created same-dateKey records is the expected
-// normal case here, not an anomaly, unlike every other collection where a
-// dateAdded mismatch on a shared id is a real red flag worth surfacing.
+// Extra bookkeeping per list. Income uses id = dateKey so two devices entering the same date
+// converge on one record; their dateAdded values then differ normally and must not count.
 const EXTRA_BOOKKEEPING_FIELDS_BY_COLLECTION = { income: new Set(['dateAdded']) };
 
-// Port of sync_server.py's _content_matches(): true if two records
-// describe the same real-world data — i.e. this import record is a
-// re-import of something already merged in (or a no-op resend), not a
-// genuine conflicting edit. Already uses deepEqual() (not ===/==), so
-// array-valued fields like `paidDates` are compared correctly (JS's own
-// ===/== do NOT deep-compare arrays — confirmed this function already
-// avoids that footgun).
+// Port of the server's _content_matches(): true if two records hold the same real data, i.e.
+// the incoming one is a re-import or resend, not a genuine conflicting edit.
 function contentMatchesIgnoringVersion(a, b, collectionName) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   BOOKKEEPING_FIELDS.forEach((k) => keys.delete(k));
@@ -2964,20 +2894,12 @@ function contentMatchesIgnoringVersion(a, b, collectionName) {
   return [...keys].every((k) => deepEqual(a[k], b[k]));
 }
 
-// Port of sync_server.py's merge_collection(), adapted to merge an imported
-// file's records onto the in-memory client collection instead of the
-// server's onto a client's. Four cases now (previously three): (a) new id -> add as a
-// new record; (b) known id, incoming version equal-or-newer, content
-// IDENTICAL -> true no-op, don't touch the local record at all (THE FIX:
-// previously this unconditionally overwrote, silently replacing
-// updatedAt/deviceId with the import file's stale values and misreporting
-// it as "updated"); (c) known id, incoming version equal-or-newer, content
-// genuinely differs -> replace the local record with the imported one;
-// (d) known id, incoming version older, content identical -> no-op
-// (already existed); (e) known id, incoming version older, content
-// genuinely differs -> kept as a new record under a freshly generated id,
-// local record left untouched, so nothing is ever silently discarded.
-// Mutates `localItems` in place and returns counts for the summary message.
+// Port of the server's merge_collection(), merging an imported file's records into the local
+// list. Per record: (a) new id -> added; (b) same content -> no-op; (c) a deleted record is
+// never brought back; (d) the incoming copy is newer (by version, then edit time) -> replaces
+// the local one; (e) the incoming copy is older -> ignored if the local one was edited later,
+// otherwise kept as a copy under a new id (income instead replaces, as it is one entry per
+// date). Mutates `localItems` in place and returns counts for the summary message.
 function mergeCollectionFromImport(localItems, importedItems, collectionName) {
   const byId = new Map(localItems.map((item) => [item.id, item]));
   let added = 0;
@@ -3001,11 +2923,7 @@ function mergeCollectionFromImport(localItems, importedItems, collectionName) {
     const existingVersion = existing.version || 0;
 
     if (incomingVersion >= existingVersion) {
-      // THE FIX: a content-identical import is a true no-op. Don't
-      // overwrite the local record (which would silently replace its
-      // updatedAt/deviceId with the import file's — possibly stale —
-      // values) and don't count it as "updated" in the summary shown to
-      // the user.
+      // Same content is a true no-op: leave the local record (and its updatedAt/deviceId) alone.
       if (contentMatchesIgnoringVersion(existing, incoming, collectionName)) {
         unchanged += 1;
         return;
@@ -3050,18 +2968,15 @@ function mergeCollectionFromImport(localItems, importedItems, collectionName) {
       return;
     }
 
-    // Income is one entry per date (the id is the date): the most recently edited wins instead
-    // of creating a second entry, which would count the money twice.
+    // Income is one entry per date (the id is the date): the newer entry (known to be this one,
+    // from the check above) replaces the local one instead of creating a second entry, which
+    // would count the money twice.
     if (collectionName === 'income') {
-      if ((incoming.updatedAt || '') > (existing.updatedAt || '')) {
-        const index = localItems.findIndex((item) => item.id === incoming.id);
-        const record = { ...incoming, version: existing.version };
-        localItems[index] = record;
-        byId.set(record.id, record);
-        updated += 1;
-      } else {
-        unchanged += 1;
-      }
+      const index = localItems.findIndex((item) => item.id === incoming.id);
+      const record = { ...incoming, version: existing.version };
+      localItems[index] = record;
+      byId.set(record.id, record);
+      updated += 1;
       return;
     }
 
@@ -3084,23 +2999,27 @@ function setDataIoStatus(text, tone) {
   el.classList.toggle('sync-failed', tone === 'failed');
 }
 
-// The repeat options a bill from an import file may have (recurring income additionally rejects 'one_time').
-const IMPORT_FREQUENCIES = ['one_time', 'weekly', 'biweekly', 'monthly', 'yearly'];
-
-// Rejects records whose types would crash rendering later (e.g. a bill whose
-// amount is the string "1200" throws in toFixed on every page load). Anything that is not one of
-// this app's three lists never gets here, so it is simply not accepted.
+// Rejects records whose types would crash rendering later (e.g. a bill whose amount is the
+// string "1200" throws in toFixed on every page load).
 function isValidImportRecord(collectionName, rec) {
   if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !rec.id) return false;
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  // Bills and recurring income need what their forms need (a cent up to MAX_MONEY); a day's
+  // income may be negative but is held to the same size limit.
+  const isPositiveMoney = (v) => isNum(v) && v >= 0.01 && v <= MAX_MONEY;
   const isDate = (v) => isRealDateKey(v);
   const isText = (v) => typeof v === 'string';
   const textOrMissing = (v) => v === undefined || v === null || typeof v === 'string';
   const listOrMissing = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isNum(rec.amount) && isDate(rec.dueDate) && IMPORT_FREQUENCIES.includes(rec.frequency) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
-  if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isNum(rec.amount) && isDate(rec.dueDate) && IMPORT_FREQUENCIES.includes(rec.frequency) && rec.frequency !== 'one_time';
-  if (collectionName === 'income') return isNum(rec.amount) && isDate(rec.dateKey);
-  return true;
+  // Sync bookkeeping, when present, must have the right types: a text "deleted" would count as
+  // true, and a non-number version or non-text updatedAt would break the merge comparisons.
+  if (rec.version !== undefined && !isNum(rec.version)) return false;
+  if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
+  if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
+  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
+  if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
+  if (collectionName === 'income') return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
+  return false; // only this app's three lists are ever checked
 }
 
 // Merges a parsed backup file into the app without ever discarding local data, then reports
@@ -3171,6 +3090,7 @@ document.getElementById('import-data-btn').addEventListener('click', () => {
   document.getElementById('import-file-input').click();
 });
 
+// Reads the chosen backup file as JSON and hands it to importData.
 document.getElementById('import-file-input').addEventListener('change', (e) => {
   const file = e.target.files[0];
   e.target.value = '';
@@ -3218,7 +3138,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 2;
+const APP_VERSION = 3;
 const THEME_KEY = 'budgetApp.theme.v1';
 const THEMES = ['auto', 'light', 'dark'];
 
@@ -3244,6 +3164,7 @@ function applyTheme(theme) {
   if (btn) btn.textContent = `Theme: ${theme.charAt(0).toUpperCase()}${theme.slice(1)}`;
 }
 
+// The Theme button cycles Auto -> Light -> Dark.
 document.getElementById('theme-btn').addEventListener('click', () => {
   applyTheme(THEMES[(THEMES.indexOf(loadTheme()) + 1) % THEMES.length]);
 });
@@ -3293,6 +3214,7 @@ function lockSupported() {
   return !!(window.crypto && crypto.subtle && window.TextEncoder);
 }
 
+// Byte array <-> hex text, for storing the salt and hash.
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (hex) => Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16)));
 
@@ -3360,6 +3282,7 @@ function wipeDeviceData() {
   return keys.length;
 }
 
+// Unlock screen: check the PIN, count wrong tries, and pause for 30 seconds after 5 in a row.
 document.getElementById('lock-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errorEl = document.getElementById('lock-error');
@@ -3398,6 +3321,7 @@ document.getElementById('lock-form').addEventListener('submit', async (e) => {
   }
 });
 
+// "Forgot PIN": after a confirmation, erase this app's data on this device and reload.
 document.getElementById('lock-forgot-btn').addEventListener('click', () => {
   const ok = window.confirm('Forgot your PIN?\n\nThe only way in is to erase everything stored on THIS device. Your synced lists come back when you sync again, but changes you have not synced yet and your sync passphrase exist only on this device and will be lost.\n\nErase this device and start over?');
   if (!ok) return;
@@ -3405,8 +3329,10 @@ document.getElementById('lock-forgot-btn').addEventListener('click', () => {
   window.location.reload();
 });
 
-// The turn-on / turn-off dialog.
+// Which way the lock dialog is working: 'on' (choose a PIN) or 'off' (enter the PIN to remove it).
 let lockSetupMode = 'on';
+
+// Opens the turn-on / turn-off dialog for the given mode and focuses its first box.
 function openLockSetup(mode) {
   lockSetupMode = mode;
   const turningOff = mode === 'off';
@@ -3423,6 +3349,7 @@ function openLockSetup(mode) {
   document.getElementById(turningOff ? 'lock-setup-current' : 'lock-setup-new').focus();
 }
 
+// Closes the lock dialog and returns focus to the Menu's lock button.
 function closeLockSetup() {
   document.getElementById('lock-setup').hidden = true;
   document.getElementById('lock-btn').focus();
@@ -3439,6 +3366,7 @@ document.getElementById('lock-now-btn').addEventListener('click', lockNow);
 document.getElementById('lock-setup-cancel').addEventListener('click', closeLockSetup);
 document.getElementById('lock-setup').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLockSetup(); });
 
+// Lock dialog submit: either verify the PIN to turn the lock off, or validate and save a new PIN.
 document.getElementById('lock-setup-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errorEl = document.getElementById('lock-setup-error');
@@ -3475,6 +3403,16 @@ if (document.documentElement.hasAttribute('data-locked') && !loadLock()) {
 if (loadLock()) lockNow(); // a locked app opens locked (the lock screen is already showing)
 
 // ---- Init ----
+
+// Menu button (phones only; CSS hides it on wide screens): opens and closes the collapsed sidebar.
+const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+if (sidebarToggleBtn) {
+  sidebarToggleBtn.addEventListener('click', () => {
+    const sidebar = document.querySelector('.sidebar');
+    const isOpen = sidebar.classList.toggle('sidebar-open');
+    sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  });
+}
 
 safeRender(renderBudget);
 updateUndoRedoButtons();

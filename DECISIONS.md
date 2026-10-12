@@ -29,5 +29,20 @@ A week's or month's bill total includes every still-unpaid bill from earlier wee
 only inside the period. This is deliberate, and the net tooltip explains it. Category filters never change
 these totals.
 
+## Autopay bills are never flagged
+A bill with autopay is not "overdue" or "due soon" anywhere: not in the banner and not on the calendar
+(`computeBillReminders` and the calendar use the same rule and the same two-day window). Totals still count
+it as owed until it is ticked paid.
+
+## Import and first sync are stricter than Second Memory's
+These two differences are bug fixes that Second Memory probably needs too:
+- Import refuses a bill or recurring income whose amount is under $0.01 or over $1,000,000,000 (what the forms
+  allow). A day of income may be negative but is held to the same size limit.
+- The first sync on a device keeps a record the server has deleted deleted, even if this device edited it later.
+
+## Look: vine and sage
+The corner vines and the sidebar sprig are CSS masks filled with `--accent`, so one drawing serves Light and
+Dark. The palette is the variables at the top of `style.css`. The icon is a cream vine and coin on sage.
+
 ## Comments do not cite design notes
 Second Memory's `docs/specs/...` were not copied here, so comments state the rule directly.

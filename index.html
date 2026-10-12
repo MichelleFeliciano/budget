@@ -14,10 +14,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" href="icons/apple-touch-icon.png">
 <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#2E5D34">
+<meta name="theme-color" content="#4A6B4B">
 </head>
 <body>
 <!-- App shell: the Menu (sidebar) on the left, the Budget on the right. -->
@@ -61,11 +62,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <button type="button" id="export-data-btn" class="data-io-btn">Export data</button>
         <button type="button" id="import-data-btn" class="data-io-btn">Import data</button>
       </div>
-      <input type="file" id="import-file-input" accept="application/json" hidden>
+      <input type="file" id="import-file-input" accept="application/json,.json" hidden>
       <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
     </div>
 
-    <!-- Menu footer: Theme button (Auto / Light / Dark) and the app version, filled by app.js. -->
+    <!-- Menu footer: Theme (Auto / Light / Dark) and App lock buttons, and the app version; labels filled by app.js. -->
     <div class="data-io">
       <div class="data-io-buttons">
         <button type="button" id="theme-btn" class="data-io-btn">Theme: Auto</button>
@@ -92,7 +93,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <div id="backup-notes" hidden></div>
 
       <div class="collection-toolbar">
-        <h2 id="budget-month-label">September 2026</h2>
+        <h2 id="budget-month-label">This month</h2>
         <p class="budget-month-total" id="budget-month-total"></p>
         <p class="budget-month-income-total" id="budget-month-income-total"></p>
         <p class="budget-month-net-total" id="budget-month-net-total"></p>
@@ -303,7 +304,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     <input type="password" id="lock-setup-confirm" inputmode="numeric" autocomplete="off" placeholder="Type it again" aria-label="Confirm new PIN">
     <p class="form-error" id="lock-setup-error" role="alert" hidden></p>
     <div class="lock-buttons">
-      <button type="submit" id="lock-setup-save">Save</button>
+      <button type="submit">Save</button>
       <button type="button" id="lock-setup-cancel">Cancel</button>
     </div>
   </form>
