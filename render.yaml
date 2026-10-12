@@ -1,0 +1,20 @@
+# Budget's own sync server, as a Render "Blueprint" (render.yaml in the repo root).
+# Create it with: Render dashboard > New > Blueprint > pick the MichelleFeliciano/budget repo.
+# Render asks for SYNC_TOKEN on first deploy: type the new sync passphrase there (it is never stored
+# in this repo). A persistent disk needs a paid instance type, hence "starter".
+services:
+  - type: web
+    name: budget-sync
+    runtime: python
+    plan: starter
+    buildCommand: echo "nothing to install (standard library only)"
+    startCommand: python server/sync_server.py
+    disk:
+      name: budget-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: SYNC_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://michellefeliciano.github.io
