@@ -2,27 +2,29 @@
 
 Short notes on choices that are not obvious from the code.
 
-## Separate names from Second Memory
-Both apps are served from `michellefeliciano.github.io`, which shares one `localStorage` and one
-service-worker cache namespace. Budget therefore uses `budgetApp.*` keys and `budget-vN` caches, only
-deletes `budget-*` caches, and "Forgot PIN" erases only `budgetApp.*` keys. Data is not shared between the
-apps on a device: use Import or Sync.
+## Budget is fully separate from Second Memory
+Budget began as a tab of Second Memory. It now has its own repository, its own sync server
+(`server/sync_server.py`, deployed from `render.yaml` as `budget-sync`) with its own passphrase and its own
+stored data, and no code or data in common with it at runtime. The code that was copied over (sync client, import
+merge, undo, app lock, theme, base CSS) is now just Budget's code and evolves on its own.
+Bills, income and recurring income can be brought over once with Export (Second Memory) and Import (Budget);
+the import still accepts a Second Memory export for that reason.
 
-## Sync covers only bills, income and recurringIncome
-Budget sends only those three lists. `sync_server.py` (in the Second Memory repo) replies to every sync with
-all of its lists (`response_collections` is built from the whole `COLLECTION_NAMES`), and has no way to ask
-for a subset. Budget reads the three it needs and ignores the rest, so the extra download is accepted: the
-server cannot be changed from this repo. If the server ever offers a filter, send it
-from `postSync`. The three names must stay in `COLLECTION_NAMES` or Budget stops syncing.
+## Own storage names
+Browsers share `localStorage` and service-worker caches between every path on one web address. While Budget and
+Second Memory shared `michellefeliciano.github.io`, that was a real risk, so Budget uses `budgetApp.*` keys and
+`budget-vN` caches, only deletes `budget-*` caches, and "Forgot PIN" erases only `budgetApp.*` keys. The names are
+kept even if Budget moves to its own address, because they cost nothing and the tests guard them.
 
-## Code copied from Second Memory
-Sync client, import merge, undo, app lock, theme and the base CSS are copies. They are kept identical on
-purpose so behaviour matches; a bug found in one is reported rather than fixed only here.
+## The server only knows three lists
+`COLLECTION_NAMES` in `server/sync_server.py` is exactly `bills`, `income` and `recurringIncome`, the same three
+the app sends. Anything else found in the data file is dropped on the next save. Allowed website addresses (CORS)
+come from the `ALLOWED_ORIGINS` environment variable, so moving the site only needs a settings change.
 
 ## Income id is the date
 An `income` record's `id` is its own date key (one manual income entry per day), unlike every other
 collection, which uses a fresh UUID. This gives "one entry per date" an identity-level guarantee across sync
-and import merges.
+and import merges, and the server has a matching rule for it.
 
 ## Calendar totals mix cumulative and period figures
 A week's or month's bill total includes every still-unpaid bill from earlier weeks, while income is summed
@@ -34,8 +36,7 @@ A bill with autopay is not "overdue" or "due soon" anywhere: not in the banner a
 (`computeBillReminders` and the calendar use the same rule and the same two-day window). Totals still count
 it as owed until it is ticked paid.
 
-## Import and first sync are stricter than Second Memory's
-These two differences are bug fixes that Second Memory probably needs too:
+## Import and first sync are strict
 - Import refuses a bill or recurring income whose amount is under $0.01 or over $1,000,000,000 (what the forms
   allow). A day of income may be negative but is held to the same size limit.
 - The first sync on a device keeps a record the server has deleted deleted, even if this device edited it later.
@@ -45,4 +46,4 @@ The corner vines and the sidebar sprig are CSS masks filled with `--accent`, so 
 Dark. The palette is the variables at the top of `style.css`. The icon is a cream vine and coin on sage.
 
 ## Comments do not cite design notes
-Second Memory's `docs/specs/...` were not copied here, so comments state the rule directly.
+Second Memory's design notes were not copied here, so comments state the rule directly.

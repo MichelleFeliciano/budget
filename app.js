@@ -1,10 +1,9 @@
 // Budget: bills, income and the pay period, as a small standalone app.
 // All persistence is local (localStorage). No dependencies. The only network call is the
-// optional manual "Sync now" to the same sync server Second Memory uses.
+// optional manual "Sync now" to this app's own sync server (server/sync_server.py).
 //
-// This app was extracted from the Budget tab of Second Memory. The code in the Budget
-// section below is a copy of that tab's code, so behaviour matches it exactly. Second Memory's
-// design notes were not copied; the comments here say what each rule is instead of citing them.
+// This app began as the Budget tab of another app (Second Memory) and is now fully separate: its own
+// repository, storage names and sync server.
 //
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
@@ -24,8 +23,8 @@
 // There are three lists: bills, income (one entry per day) and recurringIncome. Syncing is
 // manual only (the user presses "Sync now"); nothing runs in the background.
 //
-// Every localStorage key starts with "budgetApp." because this app and Second Memory are
-// served from the same web address and would otherwise share (and overwrite) each other's data.
+// Every localStorage key starts with "budgetApp." so that, if another app is ever hosted at the same
+// web address (browsers share storage per address), the two cannot overwrite each other's data.
 
 // ---- Shared helpers ----
 
@@ -2264,8 +2263,8 @@ document.getElementById('reminder-banner-dismiss').addEventListener('click', () 
 // user presses "Sync now" and is never required for any other action.
 
 // The only address the app ever talks to, and only when the user presses "Sync now".
-// It is the same sync server Second Memory uses, so the same passphrase works for both.
-const SYNC_SERVER_URL = 'https://second-memory-mwm3.onrender.com';
+// It is this app's own sync server (server/sync_server.py, deployed with render.yaml).
+const SYNC_SERVER_URL = 'https://budget-sync.onrender.com';
 
 const SYNC_CONFIG_KEY = 'budgetApp.syncConfig.v1';
 
@@ -2822,10 +2821,11 @@ function initSyncUI() {
 // Import's merge mirrors the sync server's merge_collection()/_content_matches() (as Second
 // Memory does), so a restore behaves like a sync conflict: a replay of the same data is a no-op,
 // a deleted record stays deleted, and a genuine conflict keeps both sides.
-// It accepts a Second Memory export too: only bills, income and recurringIncome are read.
+// It also accepts a Second Memory export (a one-time way to bring old data over): only bills,
+// income and recurringIncome are read.
 
 // The full backup: the three lists that sync, plus the pay-period settings, which only live on
-// this device and are kept under `local` so they stay out of syncing. Same shape as Second Memory's.
+// this device and are kept under `local` so they stay out of syncing.
 function buildExportPayload() {
   const collections = {};
   SYNC_COLLECTIONS.forEach((c) => { collections[c.name] = c.get(); });
@@ -3138,7 +3138,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 const THEME_KEY = 'budgetApp.theme.v1';
 const THEMES = ['auto', 'light', 'dark'];
 
@@ -3271,7 +3271,7 @@ function updateLockButtons() {
   document.getElementById('lock-now-btn').hidden = !on;
 }
 
-// Erases everything this app keeps on this device (all budgetApp.* entries; Second Memory's are never touched). Used by "Forgot PIN".
+// Erases everything this app keeps on this device (all budgetApp.* entries, and nothing else). Used by "Forgot PIN".
 function wipeDeviceData() {
   const keys = [];
   for (let i = 0; i < localStorage.length; i++) {

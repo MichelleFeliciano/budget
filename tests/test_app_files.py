@@ -123,6 +123,19 @@ class AppFiles(unittest.TestCase):
         for word in ("books-collection", "home-collection", "journal-collection", "data-tab=", "health-summary", "cook-mode"):
             self.assertNotIn(word, HTML, word)
 
+    def test_sync_address_matches_the_deploy_config_and_the_server_lists(self):
+        """The app, render.yaml and the server must agree, or sync silently goes nowhere."""
+        render = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        server = (ROOT / "server" / "sync_server.py").read_text(encoding="utf-8")
+        url = re.search(r"SYNC_SERVER_URL = '([^']+)'", APP).group(1)
+        service = re.search(r"^\s*-\s*type: web\s*\n\s*name: (\S+)", render, re.M).group(1)
+        self.assertEqual(url, f"https://{service}.onrender.com")
+        self.assertIn("startCommand: python server/sync_server.py", render)
+        listed = re.search(r"COLLECTION_NAMES = \[(.*?)\]", server, re.S).group(1)
+        self.assertEqual(re.findall(r'"(\w+)"', listed), ["bills", "income", "recurringIncome"])
+        for other in ("second memory", "secondmemory", "second-memory"):
+            self.assertNotIn(other, (server + render).lower())
+
     def test_no_secrets_in_the_files(self):
         """The sync passphrase is typed by the user at runtime; it is never in code, tests or docs."""
         for path in ROOT.rglob("*"):

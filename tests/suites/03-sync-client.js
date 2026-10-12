@@ -152,7 +152,7 @@ SYNC_WAKE_NOTICE_MS = 5000;
 
 // ---- only the three Budget lists are ever sent ----
 check('every request names only bills, income and recurringIncome', server.calls.every((c) => Object.keys(c.body.collections).every((k) => ['bills', 'income', 'recurringIncome'].includes(k))));
-check('every request goes to the sync server only', server.calls.every((c) => /^https:\/\/second-memory-mwm3\.onrender\.com\/api\/sync$/.test(c.url)), server.calls[0] && server.calls[0].url);
+check('every request goes to the sync server only', server.calls.every((c) => /^https:\/\/budget-sync\.onrender\.com\/api\/sync$/.test(c.url)), server.calls[0] && server.calls[0].url);
 check('the passphrase is stored only under this app\'s own key', JSON.parse(localStorage.getItem('budgetApp.syncConfig.v1')).token === 'tok' && localStorage.getItem('secondMemory.syncConfig.v1') === null);
 // a day income entry and a recurring income source sync too
 setIncomeForDate(dk(0), '75'); await sleep(40);
