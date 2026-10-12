@@ -905,8 +905,7 @@ body::before {
 }
 
 /* Net totals color-code their <strong> child via
-   signedAmountClass() — income totals stay plain/uncolored (see
-   the income spec, §10.3). Reuses the same
+   signedAmountClass() — income totals stay plain/uncolored. Reuses the same
    amount-positive/amount-negative class pair the income-day dot below uses —
    one shared semantic vocabulary across the tab. */
 
@@ -1061,7 +1060,7 @@ body::before {
 /* Indicates a manual `income` entry exists for this day — sign-aware, reuses
    the amount-positive/amount-negative pair above (never --accent-2, reserved
    for error/overdue/destructive semantics). Reflects only the manual entry's
-   sign, not the day's combined manual + recurring total — see §9/§12. */
+   sign, not the day's combined manual + recurring total. */
 
 .budget-income-dot {
   flex: 0 0 auto;

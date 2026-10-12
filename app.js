@@ -3,8 +3,8 @@
 // optional manual "Sync now" to the same sync server Second Memory uses.
 //
 // This app was extracted from the Budget tab of Second Memory. The code in the Budget
-// section below is a copy of that tab's code, so behaviour matches it exactly. Comments that cite
-// docs/specs/... or docs/research/... point at Second Memory's design notes, which were not copied.
+// section below is a copy of that tab's code, so behaviour matches it exactly. Second Memory's
+// design notes were not copied; the comments here say what each rule is instead of citing them.
 //
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
@@ -338,7 +338,7 @@ function migrateSyncFields(items, key, deviceId) {
 
 // ---- Undo/Redo ----
 // In-memory only, never persisted. One entry per changed record (never a
-// whole-array snapshot). See docs/specs/edit-everywhere-and-undo-redo.md.
+// whole-array snapshot).
 
 // Each entry is { collection, id, before, after, timestamp }; before is null for a brand-new record.
 let undoStack = [];
@@ -385,7 +385,7 @@ function isRealDateKey(value) {
 }
 
 // ---- Budget (Bills + rolling 5-week calendar) ----
-// Storage key: budgetApp.bills.v1. See docs/specs/budget-tab.md.
+// Storage key: budgetApp.bills.v1.
 
 const BILLS_KEY = 'budgetApp.bills.v1';
 // How often a bill repeats, and the label shown for each option.
@@ -598,7 +598,7 @@ const BUDGET_WEEK_LABELS = ['2 weeks ago', 'Last week', 'This week', 'Next week'
 // Cumulative "total currently owed as of the end of this week" — the same
 // unpaid occurrence contributes to every week's total from the week it's due
 // through every subsequent week, for as long as it stays unpaid. Deliberate,
-// not a bug — see docs/specs/budget-tab.md §4.
+// not a bug.
 function weekTotal(weekEndKey, allBills) {
   return allBills
     .filter((b) => !b.deleted)
@@ -607,7 +607,7 @@ function weekTotal(weekEndKey, allBills) {
 
 // ---- Income (per-day manual number, now a real synced collection) ----
 // `id` is deliberately the record's own `dateKey`, not a fresh makeId() UUID
-// — see docs/specs/budget-income.md §1.1. This is a conscious divergence
+// — a conscious divergence
 // from every other collection's convention: it gives "one income entry per
 // date" a real identity-level guarantee across the normal sync-merge paths,
 // at the cost of setIncomeForDate needing to find-or-create by dateKey
@@ -707,7 +707,7 @@ function uniqueIncomeByDate(records) {
 
 // Deliberately NOT cumulative-through-date, unlike weekTotal()/unpaidAmountThrough(). Each
 // income record is summed into exactly the one week (or month) whose range its dateKey falls
-// in — never carried into subsequent periods. See docs/specs/budget-income.md §5.
+// in — never carried into subsequent periods.
 function incomeSumInRange(startKey, endKey, allIncome) {
   return allIncome
     .filter((r) => !r.deleted && r.dateKey >= startKey && r.dateKey <= endKey)
@@ -717,9 +717,9 @@ function incomeSumInRange(startKey, endKey, allIncome) {
 // Every existing currency display in this tab is guaranteed non-negative by
 // construction (unpaidAmountThrough clamps at 0; Bills' amount is validated
 // > 0), so `$${x.toFixed(2)}` has never had to handle a negative number.
-// Income (§1.2 of the income spec allows negative amounts) and net totals
+// Income (a manual income amount may be negative) and net totals
 // (can go negative) both can — use this instead, never the plain template
-// literal, for those two figures. See docs/specs/budget-income.md §7.1.
+// literal, for those two figures.
 function formatSignedCurrency(amount) {
   const abs = Math.abs(amount).toFixed(2);
   // Check the sign of the *rounded* magnitude, not the raw value — a tiny
@@ -731,9 +731,8 @@ function formatSignedCurrency(amount) {
 // Pairs with formatSignedCurrency's string output but is a separate concern
 // (CSS class vs. text) — kept as its own function rather than teaching
 // formatSignedCurrency to touch the DOM, which would also affect its
-// income-total callers that this feature does not ask to color-code (see
-// docs/specs/budget-income-followups.md §10.3 — net totals only, not income
-// totals).
+// income-total callers that this feature does not ask to color-code (net
+// totals only, not income totals).
 function signedAmountClass(amount) {
   // Compare in whole cents so float noise (e.g. -5.5e-17) never paints $0.00 red.
   return Math.round(amount * 100) / 100 < 0 ? 'amount-negative' : 'amount-positive';
@@ -923,12 +922,11 @@ function toggleBillPaid(billId, dateKey, paid) {
 
 // ---- Recurring Income (scheduled income sources, e.g. a paycheck) ----
 // Storage key: budgetApp.recurringIncome.v1. A structural mirror of Bills
-// (fresh-UUID id, dueDate + frequency), not a mutation of `income` — see
-// docs/specs/budget-income-followups.md §1. `dueDate` here means "first
-// occurrence," not "money owed" — reused literally so occursOnDate()/
-// occurrenceCountThrough() work unmodified (§3 of that spec). No `paidDates`
-// equivalent: occurrences are purely computed/projected, never individually
-// toggled (§4).
+// (fresh-UUID id, dueDate + frequency), not a mutation of `income`.
+// `dueDate` here means "first occurrence," not "money owed" — reused
+// literally so occursOnDate()/occurrenceCountThrough() work unmodified.
+// No `paidDates` equivalent: occurrences are purely computed/projected,
+// never individually toggled.
 
 const RECURRING_INCOME_KEY = 'budgetApp.recurringIncome.v1';
 // How often a recurring income source repeats (no one-time option), and the label shown for each.
@@ -947,11 +945,11 @@ function validateRecurringIncomeFields(fields) {
   // > 0 required — a deliberate divergence from `income`'s unconstrained
   // amount. A recurring source describes an ongoing schedule, not a single
   // historical fact, so a $0/negative one is meaningless and would propagate
-  // into every future total forever. See §2.1.
+  // into every future total forever.
   if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_MONEY) {
     return { ok: false, error: 'Amount must be between $0.01 and $1,000,000,000.' };
   }
-  const dueDate = fields.dueDate; // "First occurrence" in the UI — see §3
+  const dueDate = fields.dueDate; // "First occurrence" in the UI
   if (!dueDate) return { ok: false, error: 'First occurrence date is required.' };
   if (!isReasonableDateKey(dueDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
   const frequency = RECURRING_INCOME_FREQUENCIES.includes(fields.frequency) ? fields.frequency : 'biweekly';
@@ -1029,7 +1027,7 @@ function restoreRecurringIncome(id) {
 // Range-sum for a single recurring income source — the recurring-income
 // analog of incomeSumInRange, but built on occurrenceCountThrough's
 // closed-form counting (the count primitive), NOT unpaidAmountThrough (which
-// bakes in paid-filtering income has no equivalent of — see §3/§4). A plain
+// bakes in paid-filtering income has no equivalent of). A plain
 // range-difference, no day-by-day loop.
 function recurringIncomeSumInRange(startKey, endKey, source) {
   if (endKey < startKey) return 0;
@@ -1044,7 +1042,7 @@ function recurringIncomeSumInRange(startKey, endKey, source) {
 // incomeSumInRange, or the total will silently omit recurring occurrences the
 // calendar visibly displays. incomeSumInRange itself stays unchanged and
 // still exists as a standalone "manual entries only" helper — this is an
-// additive wrapper around it, not a rewrite. See §7.
+// additive wrapper around it, not a rewrite.
 function totalIncomeInRange(startKey, endKey, nonDeletedIncome, nonDeletedRecurringIncome) {
   const manual = incomeSumInRange(startKey, endKey, nonDeletedIncome);
   const recurring = nonDeletedRecurringIncome.reduce(
@@ -1480,10 +1478,9 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   }
 
   // Plain range-sum, deliberately not cumulative — see incomeSumInRange's
-  // own comment and docs/specs/budget-income.md §5. Uses totalIncomeInRange
-  // (manual `income` entries plus recurring projections), not the bare
-  // incomeSumInRange — see docs/specs/budget-income-followups.md §7, the
-  // mandatory fix keeping this total in sync with what the calendar shows.
+  // own comment. Uses totalIncomeInRange (manual `income` entries plus
+  // recurring projections), not the bare incomeSumInRange, so this total
+  // stays in sync with what the calendar shows.
   const monthIncome = totalIncomeInRange(monthStartKey, monthEndKey, nonDeletedIncome, nonDeletedRecurringIncome);
   const monthIncomeTotalEl = document.getElementById('budget-month-income-total');
   if (monthIncomeTotalEl) {
@@ -1494,7 +1491,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   // Mixes a cumulative expense figure (monthTotal, "everything unpaid as of
   // month end") with a period-scoped income figure (monthIncome, "only what
   // was entered this month") — a deliberate, reasoned tradeoff, not an
-  // oversight. See docs/specs/budget-income.md §6.
+  // oversight.
   const monthNet = monthIncome - monthTotal;
   const monthNetTotalEl = document.getElementById('budget-month-net-total');
   if (monthNetTotalEl) {
@@ -1586,9 +1583,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       occurrencesEl.className = 'budget-day-occurrences scroll-block';
 
       // Recurring income occurrences render first, in the SAME list bills
-      // use (not a separate section — see docs/specs/budget-income-followups.md
-      // §6.1), unconditionally (never filtered by selectedBillCategory —
-      // §2.3/§6.2), with no checkbox (nothing to toggle — §4), a literal
+      // use (not a separate section), unconditionally (never filtered by
+      // selectedBillCategory), with no checkbox (nothing to toggle), a literal
       // "+ " name prefix, a fixed --accent dot (never hashed), and never the
       // .overdue/.due-soon classes (those semantics don't exist for income).
       nonDeletedRecurringIncome
@@ -1618,9 +1614,9 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         // Calendar-only category filter — the same chip selection filters the
         // Bills list below. Deliberately does NOT touch weekTotal()/monthTotal
         // above or renderBudgetStats(), which always sum the full
-        // nonDeletedBills array regardless of the selected chip (see §3 of
-        // the cycle's spec: totals must never look smaller than the true
-        // unpaid amount just because a category filter is active).
+        // nonDeletedBills array regardless of the selected chip (totals must
+        // never look smaller than the true unpaid amount just because a
+        // category filter is active).
         .filter((bill) => matchesBillCategory(bill, selectedBillCategory))
         .forEach((bill) => {
           const itemEl = document.createElement('li');
@@ -1684,11 +1680,11 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         setIncomeForDate(dateKey, e.target.value);
       });
       // Sign-aware, not flat "always green" — a negative manually-entered
-      // income amount (income's amount is unconstrained, §1.2 of the income
-      // spec) must not be shown with a color that implies "good news." Never
+      // income amount (income's amount is unconstrained) must not be shown
+      // with a color that implies "good news." Never
       // --accent-2, reserved for error/overdue/destructive semantics. This
       // reflects only the manual `income` entry's sign — it is NOT a summary
-      // of the day's combined manual + recurring total. See §9/§12.
+      // of the day's combined manual + recurring total.
       if (incomeRecord) {
         const dotSpan = document.createElement('span');
         dotSpan.className = `budget-income-dot ${signedAmountClass(incomeRecord.amount)}`;
@@ -1714,17 +1710,16 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
-    // projections), not the bare incomeSumInRange — see
-    // docs/specs/budget-income-followups.md §7, the mandatory fix keeping
-    // this total in sync with what the calendar visibly shows.
+    // projections), not the bare incomeSumInRange, so this total stays in
+    // sync with what the calendar visibly shows.
     const weekIncome = totalIncomeInRange(weekDays[0], weekDays[6], nonDeletedIncome, nonDeletedRecurringIncome);
     const incomeTotalEl = document.createElement('p');
     incomeTotalEl.className = 'budget-week-income-total';
     incomeTotalEl.innerHTML = `Income: <strong>${formatSignedCurrency(weekIncome)}</strong>`;
     weekEl.appendChild(incomeTotalEl);
 
-    // See §6's numeric trace for why this mixes a cumulative expense figure
-    // with a period-scoped income figure, and the title tooltip below.
+    // This mixes a cumulative expense figure with a period-scoped income
+    // figure on purpose; the title tooltip below explains it to the user.
     const weekNet = weekIncome - weekTotal(weekEndKey, nonDeletedBills);
     const netTotalEl = document.createElement('p');
     netTotalEl.className = 'budget-week-net-total';
@@ -1877,9 +1872,8 @@ function renderBudgetList(nonDeletedBills, openEdit) {
 }
 
 // Direct structural mirror of renderBudgetList, minus the "mark oldest
-// unpaid" wiring (no paid concept — see §4) and any search/sort/category
-// filter (deliberately not built this cycle — see §2.3/§5.3, realistic scale
-// is a handful of sources).
+// unpaid" wiring (no paid concept) and any search/sort/category
+// filter (deliberately not built: realistic scale is a handful of sources).
 function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
   const list = document.getElementById('recurring-income-list');
   const template = document.getElementById('recurring-income-card-template');
@@ -1915,8 +1909,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     node.querySelector('.edit-btn').addEventListener('click', () => {
       // Only one recurring income source can be in edit mode at a time —
       // this is a separate invariant from the Bills list's own open-edit-form
-      // state, not a shared one (per-collection edit-form exclusivity — see
-      // docs/specs/budget-income-followups.md §5.5).
+      // state, not a shared one (edit-form exclusivity is per collection).
       const otherOpenForm = list.querySelector('.recurring-income-edit-form:not([hidden])');
       if (otherOpenForm && otherOpenForm !== editForm) {
         otherOpenForm.hidden = true;
@@ -1982,12 +1975,12 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
 // Bills list's open edit form (identical to every other collection), the
 // Recurring Income list's own open edit form (a separate, independent
 // invariant — per-collection edit-form exclusivity, not app-wide; a user CAN
-// have one Bill card and one Recurring Income card open simultaneously — see
-// docs/specs/budget-income-followups.md §5.5), AND a currently-focused
+// have one Bill card and one Recurring Income card open simultaneously),
+// AND a currently-focused
 // .budget-day-manual-input (a real, non-obvious risk unique to this tab —
 // toggling any single paid-checkbox anywhere calls renderBudget(), which
 // wipes and rebuilds all 35 day cells including whichever one the user might
-// be mid-typing into). See docs/specs/budget-tab.md §6.1.
+// be mid-typing into).
 function renderBudget() {
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
@@ -2377,7 +2370,7 @@ function applyEntrySnapshot(entry, which) {
     return;
   }
 
-  if (!record) return; // defensive: id no longer exists at all — see spec §7.1
+  if (!record) return; // defensive: id no longer exists at all
 
   // Case 2: the target state is deleted. Case 3: it is live but the record is deleted, so restore it first.
   if (target.deleted && !record.deleted) {
@@ -2941,8 +2934,8 @@ function deepEqual(a, b) {
 }
 
 // Fields that describe who/when touched a record rather than its actual
-// data. Mirrors sync_server.py's _BOOKKEEPING_FIELDS — see
-// docs/research/sync-version-inflation-bug.md §2 for the full reasoning.
+// data. Mirrors sync_server.py's _BOOKKEEPING_FIELDS. Comparing these would
+// make identical records look different and inflate `version` on every sync.
 // `dateAdded` and `deleted` are deliberately NOT here — they're meaningful
 // data, not bookkeeping.
 const BOOKKEEPING_FIELDS = new Set(['version', 'updatedAt', 'deviceId']);
@@ -2953,8 +2946,7 @@ const BOOKKEEPING_FIELDS = new Set(['version', 'updatedAt', 'deviceId']);
 // converge onto one record instead of duplicating — dateAdded differing
 // between two independently-created same-dateKey records is the expected
 // normal case here, not an anomaly, unlike every other collection where a
-// dateAdded mismatch on a shared id is a real red flag worth surfacing. See
-// docs/research/sync-version-inflation-bug.md.
+// dateAdded mismatch on a shared id is a real red flag worth surfacing.
 const EXTRA_BOOKKEEPING_FIELDS_BY_COLLECTION = { income: new Set(['dateAdded']) };
 
 // Port of sync_server.py's _content_matches(): true if two records
@@ -2963,7 +2955,7 @@ const EXTRA_BOOKKEEPING_FIELDS_BY_COLLECTION = { income: new Set(['dateAdded']) 
 // genuine conflicting edit. Already uses deepEqual() (not ===/==), so
 // array-valued fields like `paidDates` are compared correctly (JS's own
 // ===/== do NOT deep-compare arrays — confirmed this function already
-// avoids that footgun, see §3).
+// avoids that footgun).
 function contentMatchesIgnoringVersion(a, b, collectionName) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   BOOKKEEPING_FIELDS.forEach((k) => keys.delete(k));
@@ -2974,8 +2966,7 @@ function contentMatchesIgnoringVersion(a, b, collectionName) {
 
 // Port of sync_server.py's merge_collection(), adapted to merge an imported
 // file's records onto the in-memory client collection instead of the
-// server's onto a client's. Four cases now (previously three — see
-// docs/research/sync-version-inflation-bug.md §5.2): (a) new id -> add as a
+// server's onto a client's. Four cases now (previously three): (a) new id -> add as a
 // new record; (b) known id, incoming version equal-or-newer, content
 // IDENTICAL -> true no-op, don't touch the local record at all (THE FIX:
 // previously this unconditionally overwrote, silently replacing
@@ -3227,7 +3218,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 1;
+const APP_VERSION = 2;
 const THEME_KEY = 'budgetApp.theme.v1';
 const THEMES = ['auto', 'light', 'dark'];
 
