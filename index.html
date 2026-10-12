@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget</title>
+<!-- Applies a Light/Dark theme chosen in the Menu before the page paints, so it does not flash. -->
+<script>
+try { var t = localStorage.getItem('budgetApp.theme.v1'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) { /* storage unavailable: follow the device */ }
+// If an app lock is set, start locked (the lock screen is shown by CSS until the PIN is entered).
+try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.setAttribute('data-locked', '1'); } catch (e) { /* storage unavailable: no lock */ }
+</script>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2E5D34">
+</head>
+<body>
+<!-- App shell: the Menu (sidebar) on the left, the Budget on the right. -->
+<div class="app-shell">
+  <!-- Menu: app title, undo/redo, then sync and backup controls. On phones it collapses behind the Menu button. -->
+  <nav class="sidebar" id="sidebar-nav-content" aria-label="Menu">
+    <div class="sidebar-header">
+      <h1>Budget</h1>
+      <p class="tagline">Bills and income, offline.</p>
+      <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-expanded="false" aria-controls="sidebar-nav-content">
+        <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+        Menu
+      </button>
+    </div>
+    <!-- Undo/redo for the last add, edit, delete or move; enabled and labelled by app.js. -->
+    <div class="undo-redo-panel" id="undo-redo-panel">
+      <button type="button" id="undo-btn" disabled>Undo</button>
+      <button type="button" id="redo-btn" disabled>Redo</button>
+    </div>
+
+    <!-- Sync area: status line with Sync now / Change buttons, an unsynced-changes note, and the
+         passphrase form shown until sync is set up. Sync only runs when the user asks. -->
+    <div class="sync-panel">
+      <div class="sync-status" id="sync-status" hidden>
+        <span class="sync-status-text" id="sync-status-text" role="status">Sync not set up</span>
+        <button type="button" class="sync-change-btn" id="sync-now-btn">Sync now</button>
+        <button type="button" class="sync-change-btn" id="sync-change-btn">Change</button>
+      </div>
+      <p class="sync-pending" id="sync-pending" role="status" hidden></p>
+      <div id="sync-setup" hidden>
+        <form id="sync-setup-form" class="sync-setup-form">
+          <input type="password" id="sync-token-input" placeholder="Passphrase" required aria-label="Sync passphrase">
+          <button type="submit">Connect</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Backup area: export all data to a JSON file, or import one back (import merges, never wipes). -->
+    <div class="data-io">
+      <div class="data-io-buttons">
+        <button type="button" id="export-data-btn" class="data-io-btn">Export data</button>
+        <button type="button" id="import-data-btn" class="data-io-btn">Import data</button>
+      </div>
+      <input type="file" id="import-file-input" accept="application/json" hidden>
+      <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
+    </div>
+
+    <!-- Menu footer: Theme button (Auto / Light / Dark) and the app version, filled by app.js. -->
+    <div class="data-io">
+      <div class="data-io-buttons">
+        <button type="button" id="theme-btn" class="data-io-btn">Theme: Auto</button>
+        <button type="button" id="lock-btn" class="data-io-btn">App lock: Off</button>
+        <button type="button" id="lock-now-btn" class="data-io-btn" hidden>Lock now</button>
+      </div>
+      <p class="app-version" id="app-version"></p>
+    </div>
+  </nav>
+
+  <!-- Main content: the Budget, which starts with the bills banner and the backup reminders. -->
+  <main class="content">
+    <!-- Budget, top to bottom: month calendar with totals (renderBudgetCalendar), current pay period
+         (renderPayPeriod), paid history (renderPaidHistory), bills (budget-card-template via renderBudgetList),
+         and recurring income (recurring-income-card-template via renderRecurringIncomeList). renderBudget runs them all. -->
+    <section class="collection" id="budget-collection">
+      <!-- Banner for bills due within a couple of days or overdue (autopay bills are never counted as overdue); filled by renderReminderBanner. -->
+      <div class="reminder-banner" id="reminder-banner" role="status" hidden>
+        <span class="reminder-banner-text" id="reminder-banner-text"></span>
+        <button type="button" id="reminder-banner-dismiss" class="reminder-banner-btn" aria-label="Dismiss reminder">&times;</button>
+      </div>
+
+      <!-- Reminders to download a full backup or to sync; filled by renderBackupNotes. -->
+      <div id="backup-notes" hidden></div>
+
+      <div class="collection-toolbar">
+        <h2 id="budget-month-label">September 2026</h2>
+        <p class="budget-month-total" id="budget-month-total"></p>
+        <p class="budget-month-income-total" id="budget-month-income-total"></p>
+        <p class="budget-month-net-total" id="budget-month-net-total"></p>
+      </div>
+
+      <div class="budget-calendar" id="budget-calendar">
+        <div class="budget-weekday-row">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span>
+          <span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+      </div>
+
+      <!-- Reminder about how the day boxes work: they are extra income, added on top of recurring income. -->
+      <p class="stats-line budget-income-note" id="budget-income-note">The money boxes on each day are extra income (a refund, a side payment). They are added to your recurring income, so do not type a regular paycheck there.</p>
+
+      <p class="stats-line" id="budget-stats"></p>
+
+      <div class="collection-toolbar">
+        <h2>Current Pay Period</h2>
+      </div>
+      <form id="payday-settings-form" class="add-form">
+        <label class="date-field">A recent payday
+          <input type="date" id="payday-date-input" min="1990-01-01" max="2100-12-31" aria-label="A recent payday">
+        </label>
+        <select id="payday-frequency-input" aria-label="Pay frequency">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly" selected>Biweekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <button type="submit">Save</button>
+      </form>
+      <p class="stats-line" id="pay-period-summary"></p>
+      <p class="stats-line" id="pay-period-income-total"></p>
+      <p class="stats-line" id="pay-period-net-total"></p>
+      <ul class="card-list flat-list" id="pay-period-bills-list"></ul>
+      <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
+
+      <div class="collection-toolbar">
+        <h2>Paid History</h2>
+        <button type="button" class="paid-history-nav" id="paid-history-prev" aria-label="Previous month">&lsaquo;</button>
+        <span class="paid-history-label" id="paid-history-label"></span>
+        <button type="button" class="paid-history-nav" id="paid-history-next" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <ul class="card-list flat-list" id="paid-history-list"></ul>
+      <p class="empty-state" id="paid-history-empty" hidden>No bills marked paid this month.</p>
+
+      <div class="collection-toolbar">
+        <h2>Bills</h2>
+        <input type="search" id="budget-search-input" placeholder="Search bills…" aria-label="Search bills">
+        <select id="budget-sort-input" aria-label="Sort bills">
+          <option value="due_date_asc">Sort: Due Date (Soonest first)</option>
+          <option value="due_date_desc">Sort: Due Date (Latest first)</option>
+          <option value="name_asc">Sort: Name (A–Z)</option>
+          <option value="amount_desc">Sort: Amount (High to Low)</option>
+          <option value="amount_asc">Sort: Amount (Low to High)</option>
+        </select>
+      </div>
+
+      <form id="budget-add-form" class="add-form add-form-stacked">
+        <input type="text" id="budget-name-input" placeholder="Bill name" required aria-label="Bill name">
+        <input type="number" id="budget-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Bill amount">
+        <label class="date-field">Due date
+          <input type="date" id="budget-duedate-input" min="1990-01-01" max="2100-12-31" required aria-label="Due date">
+        </label>
+        <select id="budget-frequency-input" aria-label="Frequency">
+          <option value="monthly">Monthly</option>
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Biweekly</option>
+          <option value="yearly">Yearly</option>
+          <option value="one_time">One-time (no recurrence)</option>
+        </select>
+        <input type="text" id="budget-category-input" placeholder="Category (optional)" aria-label="Bill category">
+        <label class="check-field"><input type="checkbox" id="budget-autopay-input"> Pays automatically (autopay)</label>
+        <p class="form-error" id="budget-form-error" hidden></p>
+        <button type="submit">Add bill</button>
+      </form>
+
+      <div class="chip-row" id="budget-category-filters"></div>
+
+      <ul class="card-list flat-list" id="budget-list"></ul>
+
+      <p class="empty-state" id="budget-empty-state" hidden>No bills yet — add your first one above.</p>
+
+      <div class="collection-toolbar">
+        <h2>Recurring Income</h2>
+      </div>
+      <form id="recurring-income-add-form" class="add-form add-form-stacked">
+        <input type="text" id="recurring-income-name-input" placeholder="Source name (e.g. Paycheck)" required aria-label="Income source name">
+        <input type="number" id="recurring-income-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Income amount">
+        <label class="date-field">First occurrence
+          <input type="date" id="recurring-income-startdate-input" min="1990-01-01" max="2100-12-31" required aria-label="First occurrence date">
+        </label>
+        <select id="recurring-income-frequency-input" aria-label="Frequency">
+          <option value="biweekly">Biweekly</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+        <input type="text" id="recurring-income-category-input" placeholder="Category (optional)" aria-label="Income category">
+        <p class="form-error" id="recurring-income-form-error" hidden></p>
+        <button type="submit">Add recurring income</button>
+      </form>
+      <ul class="card-list flat-list" id="recurring-income-list"></ul>
+      <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
+    </section>
+  </main>
+</div>
+
+<!-- One bill in the Bills list on the Budget (renderBudgetList). -->
+<template id="budget-card-template">
+  <li class="bill-card">
+    <div class="bill-view">
+      <div class="bill-info">
+        <strong class="bill-name"></strong>
+        <span class="bill-amount"></span>
+        <span class="bill-due"></span>
+        <span class="bill-frequency"></span>
+        <span class="bill-autopay" hidden>Autopay</span>
+        <span class="bill-category badge" hidden></span>
+      </div>
+      <div class="bill-actions">
+        <button type="button" class="mark-oldest-paid-btn">Mark oldest unpaid as paid</button>
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn" aria-label="Delete bill">Delete</button>
+      </div>
+    </div>
+    <form class="bill-edit-form" hidden>
+      <input type="text" class="bill-edit-name" placeholder="Bill name" required aria-label="Edit bill name">
+      <input type="number" class="bill-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit bill amount">
+      <small class="bill-edit-hint">Payments already marked paid keep the amount they were paid at.</small>
+      <label class="date-field">Due date
+        <input type="date" class="bill-edit-duedate" min="1990-01-01" max="2100-12-31" required aria-label="Edit due date">
+      </label>
+      <select class="bill-edit-frequency" aria-label="Edit frequency">
+        <option value="monthly">Monthly</option>
+        <option value="weekly">Weekly</option>
+        <option value="biweekly">Biweekly</option>
+        <option value="yearly">Yearly</option>
+        <option value="one_time">One-time (no recurrence)</option>
+      </select>
+      <input type="text" class="bill-edit-category" placeholder="Category (optional)" aria-label="Edit bill category">
+      <label class="check-field"><input type="checkbox" class="bill-edit-autopay"> Pays automatically (autopay)</label>
+      <p class="form-error bill-edit-error" hidden></p>
+      <div class="bill-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One recurring income source on the Budget (renderRecurringIncomeList). -->
+<template id="recurring-income-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount"></span>
+        <span class="recurring-income-start"></span>
+        <span class="recurring-income-frequency"></span>
+        <span class="recurring-income-category badge" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn" aria-label="Delete recurring income source">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="text" class="recurring-income-edit-name" placeholder="Source name" required aria-label="Edit income source name">
+      <input type="number" class="recurring-income-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit income amount">
+      <label class="date-field">First occurrence
+        <input type="date" class="recurring-income-edit-startdate" min="1990-01-01" max="2100-12-31" required aria-label="Edit first occurrence date">
+      </label>
+      <select class="recurring-income-edit-frequency" aria-label="Edit frequency">
+        <option value="biweekly">Biweekly</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+      </select>
+      <input type="text" class="recurring-income-edit-category" placeholder="Category (optional)" aria-label="Edit income category">
+      <p class="form-error recurring-income-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- App lock screen: shown (by the data-locked attribute on <html>) until the right PIN is typed. -->
+<div class="lock-screen" id="lock-screen" role="dialog" aria-modal="true" aria-labelledby="lock-screen-title">
+  <form class="lock-card" id="lock-form">
+    <h2 id="lock-screen-title">Budget is locked</h2>
+    <input type="password" id="lock-pin-input" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="PIN" required>
+    <p class="form-error" id="lock-error" role="alert" hidden></p>
+    <button type="submit">Unlock</button>
+    <button type="button" class="lock-forgot" id="lock-forgot-btn">Forgot PIN?</button>
+  </form>
+</div>
+
+<!-- Turn the app lock on or off. In "on" mode it asks for a new PIN twice; in "off" mode, for the current PIN. -->
+<div class="lock-backdrop" id="lock-setup" role="dialog" aria-modal="true" aria-labelledby="lock-setup-title" hidden>
+  <form class="lock-card" id="lock-setup-form">
+    <h2 id="lock-setup-title">App lock</h2>
+    <p class="lock-note" id="lock-setup-note"></p>
+    <input type="password" id="lock-setup-current" inputmode="numeric" autocomplete="off" placeholder="Current PIN" aria-label="Current PIN">
+    <input type="password" id="lock-setup-new" inputmode="numeric" autocomplete="off" placeholder="New PIN (4 to 12 digits)" aria-label="New PIN">
+    <input type="password" id="lock-setup-confirm" inputmode="numeric" autocomplete="off" placeholder="Type it again" aria-label="Confirm new PIN">
+    <p class="form-error" id="lock-setup-error" role="alert" hidden></p>
+    <div class="lock-buttons">
+      <button type="submit" id="lock-setup-save">Save</button>
+      <button type="button" id="lock-setup-cancel">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- All app behaviour lives in app.js; it must load last so every element above exists. -->
+<script src="app.js"></script>
+</body>
+</html>

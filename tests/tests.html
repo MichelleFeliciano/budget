@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Budget tests</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 24px auto; max-width: 860px; padding: 0 16px; color: #1d2a1d; background: #f6faf4; }
+  h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  .sub { color: #5a6b5a; margin: 0 0 16px; }
+  #summary { padding: 12px 16px; border-radius: 12px; font-weight: 600; margin-bottom: 16px; background: #e4ecdf; }
+  #summary.ok { background: #cfe9cf; }
+  #summary.bad { background: #f5d0d0; }
+  button { padding: 8px 16px; border: 1px solid #2e5d34; border-radius: 10px; background: #2e5d34; color: #fff; font: inherit; cursor: pointer; }
+  details { margin: 8px 0; border: 1px solid #cdd9c8; border-radius: 10px; background: #fff; }
+  summary { padding: 8px 12px; cursor: pointer; font-weight: 600; }
+  ul { margin: 0; padding: 4px 12px 10px 32px; }
+  li.pass { color: #2a6a2a; }
+  li.fail { color: #a11; font-weight: 600; }
+  li small { color: #666; font-weight: 400; word-break: break-word; }
+  #frames { position: fixed; left: -12000px; top: 0; }
+  iframe { border: 0; }
+  code { background: #eaf0e6; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Budget tests</h1>
+<p class="sub">Each suite loads the real app in a hidden frame that uses <b>memory-only storage</b> and has no network, so running this never touches your saved data or the sync server (and never Second Memory's data on the same site).
+Serve the project folder first (<code>python -m http.server</code>) and open <code>/tests/tests.html</code>. The file checks are separate: <code>python -m unittest discover -s tests</code>.</p>
+<p><button id="run">Run all tests</button></p>
+<div id="summary">Loading…</div>
+<div id="out"></div>
+<div id="frames"></div>
+
+<script>
+// Suite files are plain async-function bodies. They are evaluated INSIDE a fresh copy of the app,
+// so they can use the app's own globals (bills, income, renderBudget, ...) plus these helpers:
+//   check(name, condition, detail?)   set(id, value)   sleep(ms)   dk(daysFromToday)   $(id)
+// Test runner for the front-end. Each suite is [title, file]; all of them run one after another.
+// A first line like "// @width 390" in a suite file sets the frame width (e.g. to test phone layout).
+const SUITES = [
+  ['Core: the Budget screen, lists, edit, delete, undo, import/export, Second Memory exports', 'suites/01-core.js'],
+  ['Budget: dates, totals, pay period, paid history, banner', 'suites/02-budget.js'],
+  ['Sync client: manual sync, indicator, in-flight edits (bills, income, recurring income)', 'suites/03-sync-client.js'],
+  ['Menu extras: theme, version, backup and sync reminders', 'suites/04-extras.js'],
+  ['App lock', 'suites/05-lock.js'],
+  ['Autopay bills and the bills banner', 'suites/06-autopay-and-banner.js'],
+  ['Review regressions: import, money, income, pay period', 'suites/07-review-fixes.js'],
+]
+
+// Injected into the app's <head> before its own scripts run. Swaps localStorage for an in-memory
+// copy (so real data is never touched), disables the network, and stubs print/confirm/service worker.
+// "failWrites" lets a suite simulate a full disk.
+const MEMORY_SHIM = `<script>
+(function () {
+  var store = new Map();
+  var mem = {
+    failWrites: false,
+    getItem: function (k) { return store.has(k) ? store.get(k) : null; },
+    setItem: function (k, v) { if (mem.failWrites) throw new DOMException('quota', 'QuotaExceededError'); store.set(String(k), String(v)); },
+    removeItem: function (k) { store.delete(k); },
+    clear: function () { store.clear(); },
+    key: function (i) { var keys = Array.from(store.keys()); return i < keys.length ? keys[i] : null; },
+    get length() { return store.size; }
+  };
+  Object.defineProperty(window, 'localStorage', { value: mem, configurable: true });
+  window.__mem = mem;
+  Object.defineProperty(navigator, 'serviceWorker', { value: { register: function () { return Promise.resolve({ update: function () {} }); } }, configurable: true });
+  window.fetch = function () { return Promise.reject(new Error('network is disabled in tests')); };
+  window.print = function () {};
+  window.confirm = function () { return true; };
+})();
+<\/script>`;
+
+let appHtml = null;
+
+// Loads a fresh copy of index.html into a hidden iframe (with the shim above) and waits for it to start.
+async function loadApp(width) {
+  if (!appHtml) {
+    const res = await fetch('../index.html', { cache: 'no-store' });
+    if (!res.ok) throw new Error('could not load ../index.html');
+    appHtml = await res.text();
+  }
+  const base = new URL('../', location.href).href;
+  const html = appHtml.replace(/<head>/i, '<head><base href="' + base + '">' + MEMORY_SHIM);
+  const frame = document.createElement('iframe');
+  frame.width = String(width || 1100);
+  frame.height = '900';
+  frame.srcdoc = html;
+  document.getElementById('frames').appendChild(frame);
+  await new Promise((resolve) => { frame.addEventListener('load', resolve, { once: true }); });
+  await new Promise((r) => setTimeout(r, 400));
+  return frame;
+}
+
+// Runs one suite in its own app copy, adds its PASS/FAIL lines under a collapsible heading,
+// and returns the pass/fail counts. A suite that throws is reported as a failure, not a crash.
+async function runSuite(title, file, out) {
+  const section = document.createElement('details');
+  const head = document.createElement('summary');
+  head.textContent = title + ' ...';
+  section.appendChild(head);
+  const list = document.createElement('ul');
+  section.appendChild(list);
+  out.appendChild(section);
+
+  let passed = 0;
+  let failed = 0;
+  const add = (ok, text, detail) => {
+    ok ? passed++ : failed++;
+    const li = document.createElement('li');
+    li.className = ok ? 'pass' : 'fail';
+    li.textContent = (ok ? 'PASS  ' : 'FAIL  ') + text;
+    if (detail) {
+      const small = document.createElement('small');
+      small.textContent = '  (' + detail + ')';
+      li.appendChild(small);
+    }
+    list.appendChild(li);
+  };
+
+  let frame;
+  try {
+    const source = await (await fetch(file, { cache: 'no-store' })).text();
+    const widthMatch = source.match(/^\/\/ @width (\d+)/m);
+    frame = await loadApp(widthMatch ? Number(widthMatch[1]) : 1100);
+    const win = frame.contentWindow;
+    // Any error the app throws on its own during the suite counts as a failure too.
+    const uncaught = [];
+    win.addEventListener('error', (e) => uncaught.push(e.message));
+    win.addEventListener('unhandledrejection', (e) => uncaught.push(String(e.reason)));
+    // The helpers described at the top of this script, made available to the suite code.
+    win.check = (name, cond, detail) => add(!!cond, name, cond ? '' : detail === undefined ? '' : String(detail));
+    win.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    win.$ = (id) => win.document.getElementById(id);
+    win.set = (id, v) => { win.document.getElementById(id).value = v; };
+    win.dk = (n) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    };
+    await win.eval('(async () => {\n' + source + '\n})()');
+    await win.sleep(50);
+    add(uncaught.length === 0, 'no uncaught errors in this suite', uncaught.join(' | '));
+  } catch (err) {
+    add(false, 'suite crashed', err && err.stack ? err.stack.split('\n').slice(0, 3).join(' / ') : String(err));
+  } finally {
+    if (frame) frame.remove();
+  }
+  head.textContent = (failed ? 'FAIL ' : 'PASS ') + title + ' - ' + passed + ' passed' + (failed ? ', ' + failed + ' failed' : '');
+  if (failed) section.open = true;
+  return { passed, failed };
+}
+
+// Runs every suite in order, keeps a running total in the summary bar, and records the final
+// counts in the page title and window.__testResults so they can be read without opening the page.
+async function runAll() {
+  const summary = document.getElementById('summary');
+  const out = document.getElementById('out');
+  const button = document.getElementById('run');
+  out.innerHTML = '';
+  button.disabled = true;
+  summary.className = '';
+  summary.textContent = 'Running...';
+  let passed = 0;
+  let failed = 0;
+  try {
+    for (const [title, file] of SUITES) {
+      const result = await runSuite(title, file, out);
+      passed += result.passed;
+      failed += result.failed;
+      summary.textContent = 'Running... ' + passed + ' passed, ' + failed + ' failed';
+    }
+  } catch (err) {
+    failed += 1;
+    out.textContent = 'Could not run: ' + err.message + ' (open this page through a local web server, not as a file)';
+  }
+  summary.className = failed ? 'bad' : 'ok';
+  summary.textContent = (failed ? 'FAILED: ' : 'All passed: ') + passed + ' passed, ' + failed + ' failed';
+  document.title = 'Budget tests - ' + (failed ? 'FAIL ' : 'OK ') + passed + '/' + (passed + failed);
+  window.__testResults = { passed, failed };
+  button.disabled = false;
+}
+
+document.getElementById('run').addEventListener('click', runAll);
+runAll();
+</script>
+</body>
+</html>
