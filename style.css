@@ -44,6 +44,8 @@
    (that choice is the data-theme attribute on <html>, set by the script at the top of index.html). */
 
 @media (prefers-color-scheme: dark) {
+  /* Dark values for the same variable names. */
+
   :root:not([data-theme="light"]) {
     --bg: #121A14;
     --surface: #1B271D;
@@ -62,6 +64,8 @@
 /* Light and dark chosen by hand in the Menu (same dark values as above). */
 
 :root[data-theme="light"] { color-scheme: light; }
+
+/* The same dark values, for when Dark is picked by hand. */
 
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -82,6 +86,8 @@
 
 * { box-sizing: border-box; }
 
+/* Page background, text colour, font and line height. */
+
 body {
   margin: 0;
   padding: 0;
@@ -90,6 +96,8 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.6;
 }
+
+/* Headings use the handwriting-style heading font. */
 
 h1, h2, h3 {
   font-family: var(--font-heading);
@@ -115,6 +123,8 @@ h1, h2, h3 {
   --sprig: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 84'%3E%3Cpath d='M76 6 C58 22 44 40 34 70' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(66 14) rotate(120) scale(0.95)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(54 30) rotate(20) scale(0.9)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(46 46) rotate(130) scale(0.8)'/%3E%3Cpath d='M0 0 C8 -11 26 -11 34 0 C26 11 8 11 0 0 Z' transform='translate(38 62) rotate(25) scale(0.7)'/%3E%3C/svg%3E");
 }
 
+/* Shared look of the four corner vines: a fixed, inert square filled with the theme colour and shaped by the vine mask. */
+
 html::before,
 html::after,
 body::before,
@@ -131,11 +141,19 @@ body::after {
   mask: var(--vine) no-repeat center / contain;
 }
 
+/* Top-left corner: the drawing as it is. */
+
 html::before { top: 0; left: 0; }
+
+/* Top-right corner: mirrored left to right. */
 
 html::after { top: 0; right: 0; transform: scaleX(-1); }
 
+/* Bottom-left corner: flipped top to bottom. */
+
 body::before { bottom: 0; left: 0; transform: scaleY(-1); }
+
+/* Bottom-right corner: flipped both ways. */
 
 body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
@@ -144,6 +162,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 .sidebar-header {
   position: relative;
 }
+
+/* The sprig itself: a small theme-coloured mask at the top right of the title. */
 
 .sidebar-header::after {
   content: '';
@@ -167,6 +187,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   align-items: stretch;
 }
 
+/* The Menu column: a fixed-width panel with its sections stacked. */
+
 .sidebar {
   flex: 0 0 220px;
   background: var(--surface);
@@ -177,10 +199,14 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 24px;
 }
 
+/* The app title in the Menu. */
+
 .sidebar-header h1 {
   margin: 0;
   font-size: 1.3rem;
 }
+
+/* The short line under the title. */
 
 .sidebar-header .tagline {
   color: var(--muted);
@@ -203,6 +229,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   background: currentColor;
 }
 
+/* The two outer bars of the Menu button's icon. */
+
 .sidebar-toggle-icon::before,
 .sidebar-toggle-icon::after {
   content: '';
@@ -213,9 +241,13 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   background: currentColor;
 }
 
+/* Upper bar. */
+
 .sidebar-toggle-icon::before {
   top: -6px;
 }
+
+/* Lower bar. */
 
 .sidebar-toggle-icon::after {
   top: 6px;
@@ -229,6 +261,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 8px;
 }
 
+/* Outlined pill buttons in the Menu: Undo, Redo, Export, Import, Theme and App lock. */
+
 .undo-redo-panel button,
 .data-io-btn {
   flex: 1;
@@ -241,11 +275,15 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   font-size: 0.78rem;
 }
 
+/* Accent colour when hovered (but not while disabled). */
+
 .undo-redo-panel button:hover:not(:disabled),
 .data-io-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Dimmed when there is nothing to undo or redo. */
 
 .undo-redo-panel button:disabled {
   opacity: 0.45;
@@ -263,6 +301,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 8px;
 }
 
+/* Row holding the sync message and the Sync now and Change buttons. */
+
 .sync-status {
   display: flex;
   align-items: center;
@@ -276,6 +316,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   display: none;
 }
 
+/* The sync message line. */
+
 .sync-status-text {
   font-size: 0.78rem;
   color: var(--muted);
@@ -285,7 +327,11 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 .sync-status-text.sync-ok { color: var(--accent); }
 
+/* Orange-red for a failed sync or one that needs attention. */
+
 .sync-status-text.sync-failed { color: var(--accent-2); }
+
+/* Small outlined buttons beside the sync message (Sync now and Change). */
 
 .sync-change-btn {
   padding: 3px 10px;
@@ -296,6 +342,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   cursor: pointer;
   font-size: 0.72rem;
 }
+
+/* Accent colour when hovered. */
 
 .sync-change-btn:hover {
   color: var(--accent);
@@ -328,6 +376,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 6px;
 }
 
+/* The passphrase box. */
+
 .sync-setup-form input {
   padding: 7px 10px;
   border: 1px solid var(--border);
@@ -339,6 +389,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   width: 100%;
 }
 
+/* The Connect button. */
+
 .sync-setup-form button {
   padding: 6px 12px;
   border: none;
@@ -349,6 +401,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   font-weight: 600;
   font-size: 0.82rem;
 }
+
+/* Slightly dimmed when hovered. */
 
 .sync-setup-form button:hover { opacity: 0.9; }
 
@@ -362,10 +416,14 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 8px;
 }
 
+/* A row of Menu buttons side by side. */
+
 .data-io-buttons {
   display: flex;
   gap: 8px;
 }
+
+/* The version line at the bottom of the Menu. */
 
 .app-version {
   margin: 4px 0 0;
@@ -396,7 +454,11 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   margin-bottom: 16px;
 }
 
+/* Section titles sit flush in the toolbar row. */
+
 .collection-toolbar h2 { margin: 0; }
+
+/* The Bills search box. */
 
 .collection-toolbar input[type="search"] {
   flex: 1 1 220px;
@@ -439,6 +501,8 @@ select[id$="-sort-input"] {
   gap: 12px;
 }
 
+/* Looser spacing between cards. */
+
 .flat-list {
   gap: 16px;
 }
@@ -454,6 +518,8 @@ select[id$="-sort-input"] {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.035);
   transition: box-shadow 0.2s ease;
 }
+
+/* Cards lift slightly when hovered. */
 
 .bill-card:hover, .recurring-income-card:hover {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.055);
@@ -475,9 +541,13 @@ select[id$="-sort-input"] {
   font-size: 0.8rem;
 }
 
+/* Delete button on every card, pushed to the right end of its row. */
+
 .delete-btn {
   margin-left: auto;
 }
+
+/* Accent colour when hovered (but not while disabled). */
 
 .edit-btn:hover,
 .cancel-btn:hover,
@@ -486,10 +556,14 @@ select[id$="-sort-input"] {
   border-color: var(--accent);
 }
 
+/* Orange-red when hovered, as a warning. */
+
 .delete-btn:hover {
   color: var(--accent-2);
   border-color: var(--accent-2);
 }
+
+/* Dimmed when nothing is owed. */
 
 .mark-oldest-paid-btn:disabled {
   opacity: 0.45;
@@ -523,6 +597,8 @@ select[id$="-sort-input"] {
   margin-bottom: 16px;
 }
 
+/* A filter chip: a small outlined pill. */
+
 .chip {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -536,6 +612,8 @@ select[id$="-sort-input"] {
   overflow-wrap: anywhere;
   text-align: left;
 }
+
+/* Accent colour when hovered. */
 
 .chip:hover {
   border-color: var(--accent);
@@ -571,6 +649,8 @@ select[id$="-sort-input"] {
   align-items: flex-start;
 }
 
+/* Text, date, number and select fields in the add forms. */
+
 .add-form input[type="text"],
 .add-form input[type="date"],
 .add-form input[type="number"],
@@ -584,10 +664,14 @@ select[id$="-sort-input"] {
   font-family: inherit;
 }
 
+/* Stacked add forms lay their fields out in one column. */
+
 .add-form-stacked {
   flex-direction: column;
   align-items: stretch;
 }
+
+/* In stacked forms every field is full width and does not stretch vertically. */
 
 .add-form-stacked input[type="text"],
 .add-form-stacked input[type="date"],
@@ -602,6 +686,8 @@ select[id$="-sort-input"] {
   flex: none;
 }
 
+/* The add form's submit button. */
+
 .add-form button {
   padding: 10px 20px;
   border: none;
@@ -612,6 +698,8 @@ select[id$="-sort-input"] {
   font-weight: 600;
   align-self: flex-start;
 }
+
+/* Slightly dimmed when hovered. */
 
 .add-form button:hover { opacity: 0.9; }
 
@@ -626,6 +714,8 @@ select[id$="-sort-input"] {
   flex: 1 1 160px;
   min-width: 0; /* lets the date box shrink to fit a phone screen */
 }
+
+/* The date box inside a labelled date field. */
 
 .date-field input[type="date"] {
   padding: 9px 12px;
@@ -659,6 +749,8 @@ input[type="date"] {
   text-align: left;
 }
 
+/* Left-aligns the date text on iPhone Safari. */
+
 input[type="date"]::-webkit-date-and-time-value {
   text-align: left;
   min-width: 0;
@@ -668,6 +760,8 @@ input[type="date"]::-webkit-date-and-time-value {
    inside the edit forms (which style every input like a text box). */
 
 .check-field { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); }
+
+/* A checkbox in a check field stays a plain checkbox. */
 
 .check-field input[type="checkbox"] {
   padding: 0;
@@ -735,6 +829,8 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.8rem;
 }
 
+/* Slightly dimmed when hovered. */
+
 .bill-edit-form button[type="submit"]:hover, .recurring-income-edit-form button[type="submit"]:hover {
   opacity: 0.9;
 }
@@ -759,19 +855,27 @@ input[type="date"]::-webkit-date-and-time-value {
   margin-bottom: 8px;
 }
 
+/* Everything in a card's info block stays inside the card and wraps long words. */
+
 .bill-info > *,
 .recurring-income-info > * {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
 
+/* A category badge is only as wide as its text. */
+
 .bill-info .badge,
 .recurring-income-info .badge {
   border-radius: 14px;
 }
 
+/* Bill and income source names. */
+
 .bill-name,
 .recurring-income-name { font-size: 0.95rem; }
+
+/* Amount, due date, repeat label and start date: small muted text. */
 
 .bill-amount,
 .bill-due,
@@ -793,6 +897,8 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--accent);
 }
 
+/* Row of card buttons, aligned to the right. */
+
 .bill-actions,
 .recurring-income-actions {
   display: flex;
@@ -809,6 +915,8 @@ input[type="date"]::-webkit-date-and-time-value {
   margin-bottom: 20px;
 }
 
+/* The Mon to Sun labels above the calendar, lined up with the day columns. */
+
 .budget-weekday-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -819,6 +927,8 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--muted);
   padding: 0 13px; /* same inset as a week row (12px padding + 1px border), so the labels sit over their day cells */
 }
+
+/* One week: a rounded box holding seven days and its totals. */
 
 .budget-week {
   border: 1px solid var(--border-soft);
@@ -853,6 +963,8 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .amount-positive { color: var(--accent); }
 
+/* Negative amounts are rose, never the error colour. */
+
 .amount-negative { color: var(--accent-rose); }
 
 /* The seven day cells of one week. */
@@ -868,7 +980,11 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .budget-day-body { display: contents; }
 
+/* The Close button only shows on the open phone sheet. */
+
 .budget-day-close { display: none; }
+
+/* The invisible open-day button only shows in the compact calendar. */
 
 .budget-day-open-btn { display: none; }
 
@@ -894,9 +1010,13 @@ input[type="date"]::-webkit-date-and-time-value {
   box-shadow: 0 0 0 2px var(--accent) inset;
 }
 
+/* The day number sits at the right of the cell. */
+
 .budget-day-header {
   text-align: right;
 }
+
+/* The day number: small and muted. */
 
 .budget-day-date {
   font-size: 0.8rem;
@@ -919,6 +1039,8 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.75rem;
   margin-bottom: 2px;
 }
+
+/* A bill row: checkbox, dot and name on one line; the whole row is clickable. */
 
 .budget-occurrence label {
   display: flex;
@@ -946,6 +1068,8 @@ input[type="date"]::-webkit-date-and-time-value {
   border-radius: 50%;
 }
 
+/* A name that does not fit is cut off with an ellipsis. */
+
 .budget-occurrence-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -961,6 +1085,8 @@ input[type="date"]::-webkit-date-and-time-value {
   font-weight: 600;
 }
 
+/* Due within two days: rose and bold. */
+
 .budget-occurrence.due-soon .budget-occurrence-name {
   color: var(--accent-rose);
   font-weight: 600;
@@ -975,6 +1101,8 @@ input[type="date"]::-webkit-date-and-time-value {
   justify-content: flex-end;
   gap: 4px;
 }
+
+/* The box for extra income on a day. */
 
 .budget-day-manual-input {
   width: 100%;
@@ -1001,7 +1129,11 @@ input[type="date"]::-webkit-date-and-time-value {
   border-radius: 50%;
 }
 
+/* A positive income entry shows a green dot. */
+
 .budget-income-dot.amount-positive { background: var(--accent); }
+
+/* A negative one shows a rose dot. */
 
 .budget-income-dot.amount-negative { background: var(--accent-rose); }
 
@@ -1034,14 +1166,20 @@ input[type="date"]::-webkit-date-and-time-value {
     gap: 4px;
   }
 
+  /* In the compact calendar the labels are centred and inset to match the narrower week box. */
+
   .budget-weekday-row {
     text-align: center;
     padding: 0 9px; /* week padding 8px + 1px border, so labels sit over their day cells */
   }
 
+  /* Tighter padding in the compact calendar. */
+
   .budget-week {
     padding: 8px;
   }
+
+  /* Compact day cell: just the date and dots; tap to open. */
 
   .budget-day-cell {
     position: relative;
@@ -1068,16 +1206,26 @@ input[type="date"]::-webkit-date-and-time-value {
     cursor: pointer;
   }
 
+  /* A clear ring when the open-day button has keyboard focus. */
+
   .budget-day-open-btn:focus-visible {
     outline: 3px solid var(--accent);
     outline-offset: -3px;
   }
 
+  /* Hide the open-day button once the day is open. */
+
   .budget-day-open .budget-day-open-btn { display: none; }
+
+  /* The sheet takes focus from script, so it needs no outline. */
 
   .budget-day-body:focus { outline: none; }
 
+  /* The compact calendar centres the day number. */
+
   .budget-day-header { text-align: center; }
+
+  /* Compact day: the bill dots wrap in a row. */
 
   .budget-day-occurrences {
     display: flex;
@@ -1088,10 +1236,14 @@ input[type="date"]::-webkit-date-and-time-value {
     margin: 3px 0 0;
   }
 
+  /* Each row shrinks to just its dot. */
+
   .budget-day-occurrences .budget-occurrence {
     margin: 0;
     font-size: 0;
   }
+
+  /* Names, checkboxes, the income box and Close are hidden in the compact grid (shown again in the open sheet). */
 
   .budget-occurrence-name,
   .budget-occurrence-checkbox,
@@ -1099,6 +1251,8 @@ input[type="date"]::-webkit-date-and-time-value {
   .budget-day-close {
     display: none;
   }
+
+  /* A recurring income row has no dot of its own, so it gets a neutral one. */
 
   .budget-occurrence:not(:has(.budget-occurrence-dot)) label::before {
     content: '';
@@ -1108,24 +1262,34 @@ input[type="date"]::-webkit-date-and-time-value {
     background: var(--muted);
   }
 
+  /* An overdue bill's dot gets an orange-red ring. */
+
   .budget-occurrence.overdue .budget-occurrence-dot,
   .budget-occurrence.overdue:not(:has(.budget-occurrence-dot)) label::before {
     outline: 2px solid var(--accent-2);
   }
+
+  /* A due-soon bill's dot gets a rose ring. */
 
   .budget-occurrence.due-soon .budget-occurrence-dot,
   .budget-occurrence.due-soon:not(:has(.budget-occurrence-dot)) label::before {
     outline: 2px solid var(--accent-rose);
   }
 
+  /* The income dot is centred in the compact cell. */
+
   .budget-day-footer {
     justify-content: center;
     min-height: 8px;
   }
 
+  /* The opened day is outlined in the accent colour. */
+
   .budget-day-cell.budget-day-open {
     border-color: var(--accent);
   }
+
+  /* The opened day becomes a bottom sheet over a dimmed page. */
 
   .budget-day-open .budget-day-body {
     display: block;
@@ -1145,6 +1309,8 @@ input[type="date"]::-webkit-date-and-time-value {
     box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.4);
   }
 
+  /* Sheet header: the date on the left, Close on the right. */
+
   .budget-day-open .budget-day-header {
     display: flex;
     align-items: center;
@@ -1152,9 +1318,13 @@ input[type="date"]::-webkit-date-and-time-value {
     text-align: left;
   }
 
+  /* Hide the short day number; the full date is drawn by the rule below. */
+
   .budget-day-open .budget-day-date {
     font-size: 0;
   }
+
+  /* The full date (text taken from data-full), large and bold. */
 
   .budget-day-open .budget-day-date::before {
     content: attr(data-full);
@@ -1162,6 +1332,8 @@ input[type="date"]::-webkit-date-and-time-value {
     font-weight: 600;
     color: var(--text);
   }
+
+  /* Show the Close button. */
 
   .budget-day-open .budget-day-close {
     display: inline-block;
@@ -1173,25 +1345,35 @@ input[type="date"]::-webkit-date-and-time-value {
     font-size: 0.85rem;
   }
 
+  /* In the sheet the bill list is a normal vertical list. */
+
   .budget-day-open .budget-day-occurrences {
     display: block;
     margin: 12px 0;
   }
+
+  /* Bigger rows for fingers. */
 
   .budget-day-open .budget-day-occurrences .budget-occurrence {
     font-size: 0.95rem;
     margin-bottom: 8px;
   }
 
+  /* Show names and checkboxes again. */
+
   .budget-day-open .budget-occurrence-name,
   .budget-day-open .budget-occurrence-checkbox {
     display: inline-block;
   }
 
+  /* Names wrap instead of being cut off. */
+
   .budget-day-open .budget-occurrence-name {
     display: block;
     white-space: normal;
   }
+
+  /* Show a finger-sized income box. */
 
   .budget-day-open .budget-day-manual-input {
     display: block;
@@ -1216,13 +1398,19 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.9rem;
 }
 
+/* A hidden banner must stay hidden even though .reminder-banner sets display:flex. */
+
 .reminder-banner[hidden] { display: none; }
+
+/* The message takes the free space and wraps. */
 
 .reminder-banner-text {
   flex: 1;
   overflow-wrap: break-word;
   min-width: 0;
 }
+
+/* Small outlined buttons (the action and the dismiss cross). */
 
 .reminder-banner-btn {
   padding: 4px 12px;
@@ -1233,6 +1421,8 @@ input[type="date"]::-webkit-date-and-time-value {
   cursor: pointer;
   font-size: 0.8rem;
 }
+
+/* Accent colour when hovered. */
 
 .reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
 
@@ -1255,6 +1445,8 @@ input[type="date"]::-webkit-date-and-time-value {
   border-radius: 13px;
   font-size: 0.9rem;
 }
+
+/* The Dismiss button on the storage warning. */
 
 .storage-warning button {
   flex: none;
@@ -1280,9 +1472,15 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 1.1rem;
 }
 
+/* Accent colour when hovered. */
+
 .paid-history-nav:hover { color: var(--accent); border-color: var(--accent); }
 
+/* The month name between the arrows. */
+
 .paid-history-label { font-weight: 600; }
+
+/* One category row: its name on the left, the amount on the right. */
 
 .paid-history-row {
   display: flex;
@@ -1293,6 +1491,8 @@ input[type="date"]::-webkit-date-and-time-value {
   border-radius: 14px;
   background: var(--bg);
 }
+
+/* The total row is bold. */
 
 .paid-history-total { font-weight: 700; }
 
@@ -1316,7 +1516,11 @@ input[type="date"]::-webkit-date-and-time-value {
   background: var(--bg);
 }
 
+/* Show the lock screen while the app is locked. */
+
 html[data-locked] .lock-screen { display: flex; }
+
+/* Hide the app, the storage warning and the dialogs behind the lock screen. */
 
 html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-locked] .lock-backdrop { visibility: hidden; }
 
@@ -1333,7 +1537,11 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
   background: rgba(0, 0, 0, 0.55);
 }
 
+/* A hidden dialog backdrop must stay hidden. */
+
 .lock-backdrop[hidden] { display: none; }
+
+/* The card holding a PIN form. */
 
 .lock-card {
   display: flex;
@@ -1347,9 +1555,15 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
   color: var(--text);
 }
 
+/* The card's title. */
+
 .lock-card h2 { margin: 0 0 4px; font-size: 1.2rem; }
 
+/* Explanatory text in the dialog. */
+
 .lock-note { margin: 0; font-size: 0.85rem; color: var(--muted); }
+
+/* The PIN boxes. */
 
 .lock-card input {
   padding: 10px 12px;
@@ -1361,6 +1575,8 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
   font-size: 16px;
 }
 
+/* The main button. */
+
 .lock-card button {
   padding: 10px 18px;
   border: none;
@@ -1371,6 +1587,8 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
   font-weight: 600;
 }
 
+/* Quiet buttons: Forgot PIN and Cancel. */
+
 .lock-card .lock-forgot,
 .lock-card #lock-setup-cancel {
   border: 1px solid var(--border);
@@ -1380,7 +1598,11 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
   font-size: 0.85rem;
 }
 
+/* Dialog buttons side by side. */
+
 .lock-buttons { display: flex; gap: 8px; }
+
+/* Both buttons get equal width. */
 
 .lock-buttons button { flex: 1; }
 
@@ -1393,11 +1615,15 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
 
   .app-shell { flex-direction: column; }
 
+  /* On phones the sidebar stacks above the content and sizes to its contents. */
+
   .sidebar {
     flex: 0 0 auto;
     border-right: 0;
     border-bottom: 1px solid var(--border); /* stacked on top, so the divider goes underneath */
   }
+
+  /* On phones the Menu button is shown. */
 
   .sidebar-toggle {
     display: flex;
@@ -1413,10 +1639,14 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
     margin-top: 12px;
   }
 
+  /* Accent colour when hovered. */
+
   .sidebar-toggle:hover {
     color: var(--accent);
     border-color: var(--accent);
   }
+
+  /* While the Menu is collapsed, hide Undo/Redo, sync and the backup buttons. */
 
   .sidebar:not(.sidebar-open) .undo-redo-panel,
   .sidebar:not(.sidebar-open) .sync-panel,
@@ -1431,6 +1661,8 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
     flex-wrap: wrap;
     row-gap: 8px;
   }
+
+  /* On phones the message takes the full width, with the buttons underneath. */
 
   .reminder-banner-text {
     flex: 1 1 100%;

@@ -32,3 +32,7 @@ bills.push(edited2);
 bootstrapSyncSnapshot({ collections: { bills: [{ ...edited2, name: 'Older server copy', version: 2, updatedAt: '2026-02-01T00:00:00.000Z' }], income: [], recurringIncome: [] } });
 check('a live bill edited here after the server copy is still kept as the newer one', bills.length === 1 && bills[0].name === 'Edited after delete', JSON.stringify(bills));
 bills.length = 0; renderBudget();
+
+// ---- a day cell's list of bills scrolls instead of spilling over the income box ----
+const dayList = document.querySelector('.budget-day-occurrences');
+check('the bills listed in a day cell scroll when there are many', !!dayList && getComputedStyle(dayList).overflowY === 'auto');

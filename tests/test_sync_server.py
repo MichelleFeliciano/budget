@@ -330,6 +330,12 @@ class Http(unittest.TestCase):
         self.assertEqual(self.call({"clientVersion": 2, "collections": {}}, token="nope")[0], 401)
         self.assertEqual(self.call({"clientVersion": 2, "collections": {}}, token="")[0], 401)
 
+    def test_a_wrong_passphrase_with_a_large_upload_still_gets_a_clean_401(self):
+        """The server must finish reading the upload before refusing it, or the browser sees a reset instead of the 401."""
+        big = {"clientVersion": 2, "collections": {"bills": [rec(f"big{i}", 0, name="x" * 80) for i in range(3000)]}}
+        for _ in range(5):
+            self.assertEqual(self.call(big, token="nope")[0], 401)
+
     def test_old_app_copies_are_turned_away(self):
         status, body, _ = self.call({"collections": {}})
         self.assertEqual(status, 426)

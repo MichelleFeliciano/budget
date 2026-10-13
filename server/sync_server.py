@@ -389,6 +389,15 @@ class SyncHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _discard_body(self):
+        """Reads and throws away (up to 1 MB of) the request body. Replying before the client has finished
+        sending can reset the connection, so the browser would see a network error instead of the reply."""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            self.rfile.read(min(max(length, 0), 1024 * 1024))
+        except (ValueError, OSError):
+            pass
+
     def _check_token(self):
         """True if the X-Sync-Token header matches SYNC_TOKEN (constant-time compare)."""
         expected = self.server.sync_token
@@ -427,6 +436,7 @@ class SyncHandler(BaseHTTPRequestHandler):
         """POST /api/backup. No body (or no "date"): list the restore points.
         {"date": "YYYY-MM-DD"}: return that day's saved copy of all the data."""
         if not self._check_token():
+            self._discard_body()
             self._send_json(401, {"error": "invalid or missing X-Sync-Token"})
             return
         try:
@@ -479,9 +489,11 @@ class SyncHandler(BaseHTTPRequestHandler):
             self._handle_backup()
             return
         if self.path != "/api/sync":
+            self._discard_body()
             self._send_json(404, {"error": "not found"})
             return
         if not self._check_token():
+            self._discard_body()
             self._send_json(401, {"error": "invalid or missing X-Sync-Token"})
             return
 

@@ -275,7 +275,9 @@ renderBudget = withFocusRestore(renderBudget);
 
 // ---- Device identity & sync metadata ----
 
+// Where this browser's permanent random id is saved.
 const DEVICE_KEY = 'budgetApp.device.v1';
+// The device id once read, so storage is only parsed once.
 let cachedDeviceId = null;
 
 // This browser's permanent random id (created on first use); stamped onto every record it edits.
@@ -340,8 +342,10 @@ function migrateSyncFields(items, key, deviceId) {
 
 // Each entry is { collection, id, before, after, timestamp }; before is null for a brand-new record.
 let undoStack = [];
+// Undone changes that can be re-applied (any new change clears this list).
 let redoStack = [];
 let isApplyingHistory = false; // guard: undo/redo replays never re-record themselves
+// How many changes undo remembers; older ones are dropped.
 const MAX_UNDO_DEPTH = 50;
 
 // Remembers one change (the record before and after) so it can be undone; clears the redo list.
@@ -362,13 +366,16 @@ function recordUndo(collectionName, id, before, after) {
 // ---- Budget (Bills + rolling 5-week calendar) ----
 // Storage key: budgetApp.bills.v1.
 
+// localStorage key for the bills list.
 const BILLS_KEY = 'budgetApp.bills.v1';
 // How often a bill repeats, and the label shown for each option.
 const BILL_FREQUENCIES = ['one_time', 'weekly', 'biweekly', 'monthly', 'yearly'];
+// Display text for each bill repeat option.
 const BILL_FREQUENCY_LABELS = {
   one_time: 'One-time', weekly: 'Weekly', biweekly: 'Biweekly', monthly: 'Monthly', yearly: 'Yearly',
 };
 
+// Every bill, including deleted ones (kept as tombstones), loaded and upgraded at startup.
 let bills = migrateSyncFields(loadCollection(BILLS_KEY), BILLS_KEY, getDeviceId());
 
 // ---- Date helpers ----
@@ -593,7 +600,9 @@ function weekTotal(weekEndKey, allBills) {
 // across the normal sync-merge paths, at the cost of setIncomeForDate needing to find-or-create
 // by dateKey instead of blindly pushing.
 
+// localStorage key for the per-day income entries.
 const INCOME_KEY = 'budgetApp.income.v1';
+// Every per-day income record, loaded and upgraded at startup.
 let income = migrateSyncFields(loadCollection(INCOME_KEY), INCOME_KEY, getDeviceId());
 
 // Sets (or clears, when the value is '') the manual income number for one calendar day.
@@ -718,12 +727,14 @@ function signedAmountClass(amount) {
 // Dates outside this range are almost always a typo (typing "26" for the year gives 0026),
 // and a year before 1000 breaks the schedule math and makes the budget screen crawl.
 const DATE_YEAR_MIN = 1990;
+// Latest year a date field accepts.
 const DATE_YEAR_MAX = 2100;
 // True if a YYYY-MM-DD string has a year inside the allowed range.
 function isReasonableDateKey(key) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key || '');
   return !!m && Number(m[1]) >= DATE_YEAR_MIN && Number(m[1]) <= DATE_YEAR_MAX;
 }
+// Error text shown when a date is outside that range.
 const DATE_RANGE_MESSAGE = `Pick a date between the years ${DATE_YEAR_MIN} and ${DATE_YEAR_MAX}.`;
 
 // The largest amount accepted for a bill or income entry (keeps totals and displays sane).
@@ -902,13 +913,16 @@ function toggleBillPaid(billId, dateKey, paid) {
 // No `paidDates` equivalent: occurrences are purely computed/projected,
 // never individually toggled.
 
+// localStorage key for the recurring income sources.
 const RECURRING_INCOME_KEY = 'budgetApp.recurringIncome.v1';
 // How often a recurring income source repeats (no one-time option), and the label shown for each.
 const RECURRING_INCOME_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'yearly'];
+// Display text for each recurring income repeat option.
 const RECURRING_INCOME_FREQUENCY_LABELS = {
   weekly: 'Weekly', biweekly: 'Biweekly', monthly: 'Monthly', yearly: 'Yearly',
 };
 
+// Every recurring income source, loaded and upgraded at startup.
 let recurringIncome = migrateSyncFields(loadCollection(RECURRING_INCOME_KEY), RECURRING_INCOME_KEY, getDeviceId());
 
 // Checks and cleans a recurring income source's form values (unknown frequency becomes biweekly).
@@ -1090,6 +1104,7 @@ function shiftPaidHistoryMonth(delta) {
   renderPaidHistory();
 }
 
+// The month arrows on the Paid History panel.
 document.getElementById('paid-history-prev').addEventListener('click', () => shiftPaidHistoryMonth(-1));
 document.getElementById('paid-history-next').addEventListener('click', () => shiftPaidHistoryMonth(1));
 
@@ -1143,6 +1158,7 @@ function renderBillCategoryFilters(nonDeletedBills) {
 // <select>'s first (and pre-selected) option.
 let selectedBillsSort = 'due_date_asc';
 
+// The Bills sort orders, keyed by the values of the sort <select>'s options.
 const BILL_SORTS = {
   due_date_asc: compareByField((b) => b.dueDate, 1, { text: false }),
   due_date_desc: compareByField((b) => b.dueDate, -1, { text: false }),
@@ -1169,6 +1185,7 @@ function renderBudgetStats(nonDeletedBills) {
 // to follow the user across devices it would have to become a real synced collection
 // (id/updatedAt/deviceId/deleted/version, listed in SYNC_COLLECTIONS).
 
+// localStorage key for the payday date and pay frequency.
 const PAYDAY_SETTINGS_KEY = 'budgetApp.paydaySettings.v1';
 // How often payday comes around, for the Current Pay Period panel.
 const PAY_PERIOD_FREQUENCIES = ['weekly', 'biweekly', 'monthly'];
@@ -1389,6 +1406,7 @@ function closeCalendarDay({ refocus = false } = {}) {
   }
 }
 
+// While a day sheet is open: Escape closes it and Tab stays inside it.
 document.addEventListener('keydown', (e) => {
   if (!openCalendarDayKey) return;
   const sheet = document.querySelector('.budget-day-cell.budget-day-open .budget-day-body');
@@ -1557,7 +1575,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       bodyEl.appendChild(headerEl);
 
       const occurrencesEl = document.createElement('ul');
-      occurrencesEl.className = 'budget-day-occurrences scroll-block';
+      occurrencesEl.className = 'budget-day-occurrences';
 
       // Recurring income occurrences render first, in the SAME list bills
       // use (not a separate section), unconditionally (never filtered by
@@ -2016,6 +2034,7 @@ function renderBudget() {
   });
 })();
 
+// Add-bill form: validate, add the bill, and clear the form when it worked.
 document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const nameInput = document.getElementById('budget-name-input');
@@ -2050,13 +2069,16 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   nameInput.focus();
 });
 
+// Typing in the search box redraws the Bills list.
 document.getElementById('budget-search-input').addEventListener('input', renderBudget);
 
+// Choosing a sort order redraws the Bills list.
 document.getElementById('budget-sort-input').addEventListener('change', (e) => {
   selectedBillsSort = e.target.value;
   renderBudget();
 });
 
+// Add-recurring-income form: validate, add the source, and clear the form when it worked.
 document.getElementById('recurring-income-add-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const nameInput = document.getElementById('recurring-income-name-input');
@@ -2096,6 +2118,7 @@ document.getElementById('recurring-income-add-form').addEventListener('submit', 
 
 // Where the time of the last full export is remembered, and how many days before a reminder.
 const EXPORT_AT_KEY = 'budgetApp.exportAt.v1';
+// Days after the last full export before the app reminds you to download another.
 const EXPORT_DUE_DAYS = 30;
 
 // Remembers that a backup file was just downloaded.
@@ -2113,13 +2136,6 @@ function daysSinceBackup(key) {
   } catch {
     return null;
   }
-}
-
-// "never", "today", "yesterday" or "N days ago" for the backup reminders.
-function backupAgeText(days) {
-  if (days === null) return 'never';
-  if (days === 0) return 'today';
-  return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
 // Set when the user dismisses the backup reminders; they stay hidden until the page is reloaded.
@@ -2225,6 +2241,7 @@ function daysUntilDateKey(dateKey) {
   return utcDayDiff(todayKey(), dateKey);
 }
 
+// Set when the bills banner is dismissed; it comes back on a new day.
 let reminderBannerDismissed = false;
 
 // Shows or hides the bills banner (bills due within a few days, plus a count of overdue ones).
@@ -2250,6 +2267,7 @@ function renderBillReminders() {
   renderReminderBanner(overdue, dueSoon);
 }
 
+// The cross on the bills banner.
 document.getElementById('reminder-banner-dismiss').addEventListener('click', () => {
   reminderBannerDismissed = true;
   document.getElementById('reminder-banner').hidden = true;
@@ -2266,6 +2284,7 @@ document.getElementById('reminder-banner-dismiss').addEventListener('click', () 
 // It is this app's own sync server (server/sync_server.py, deployed with render.yaml).
 const SYNC_SERVER_URL = 'https://budget-sync.onrender.com';
 
+// localStorage key for the saved sync passphrase.
 const SYNC_CONFIG_KEY = 'budgetApp.syncConfig.v1';
 
 // Reads the saved sync settings ({ token }); null if none or damaged.
@@ -2406,16 +2425,17 @@ function updateUndoRedoButtons() {
   redoBtn.title = topRedo ? `Redo: ${describeEntry(topRedo)}` : 'Redo';
 }
 
+// The Undo and Redo buttons in the Menu.
 document.getElementById('undo-btn').addEventListener('click', undo);
 document.getElementById('redo-btn').addEventListener('click', redo);
 
 // Sync progress state: a sync is running, when the last one finished, and whether its message was ok/failed.
 let syncInFlight = false;
-let lastSyncedAt = null;
+let lastSyncedAt = null; // when the last sync finished (drives the "Synced Xm ago" label)
 // The last successful sync is also saved, so the backup notes can warn when it has been too long.
 const LAST_SYNC_AT_KEY = 'budgetApp.lastSyncAt.v1';
-const SYNC_STALE_DAYS = 7;
-let lastSyncTone = null;
+const SYNC_STALE_DAYS = 7; // days without a sync before the reminder shows
+let lastSyncTone = null; // 'ok', 'failed' or null: the tone of the last status message
 
 // Shows a sync message in the sidebar; tone is 'ok', 'failed' or null (neutral).
 function setSyncStatus(text, tone) {
@@ -3106,6 +3126,7 @@ function importData(parsed) {
   setDataIoStatus(`Import complete — ${summaries.join('; ')}.${skippedNote}`, 'ok');
 }
 
+// Menu buttons: Export downloads a backup; Import opens the file picker.
 document.getElementById('export-data-btn').addEventListener('click', exportData);
 
 document.getElementById('import-data-btn').addEventListener('click', () => {
@@ -3140,6 +3161,7 @@ document.getElementById('import-file-input').addEventListener('change', (e) => {
 // midnight (or comes back to the foreground on a new day), redraw the date-dependent
 // screen. Local redraw only; nothing is synced.
 
+// The calendar day the screen was last drawn for.
 let lastRenderedDayKey = todayKey();
 
 // Redraws the Budget when the calendar day has changed since the last check.
@@ -3152,6 +3174,7 @@ function refreshForNewDay() {
 }
 
 setInterval(refreshForNewDay, 60000);
+// Redraw when the app comes back to the foreground on a new day.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refreshForNewDay();
 });
@@ -3160,8 +3183,10 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 5;
+const APP_VERSION = 6;
+// localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
+// The theme choices, in the order the Theme button cycles through them.
 const THEMES = ['auto', 'light', 'dark'];
 
 // Reads the saved theme choice; anything unexpected means "auto" (follow the device).
@@ -3191,6 +3216,7 @@ document.getElementById('theme-btn').addEventListener('click', () => {
   applyTheme(THEMES[(THEMES.indexOf(loadTheme()) + 1) % THEMES.length]);
 });
 applyTheme(loadTheme());
+// Show the version number in the Menu.
 document.getElementById('app-version').textContent = `Version ${APP_VERSION}`;
 
 // ---- App lock ----
@@ -3199,14 +3225,23 @@ document.getElementById('app-version').textContent = `Version ${APP_VERSION}`;
 // The lock starts shown (a script in index.html sets data-locked on <html> before the page paints),
 // comes back after the app has been in the background a couple of minutes, and "Lock now" locks at once.
 
+// localStorage key for the saved PIN lock (a salt and a hash, never the PIN itself).
 const LOCK_KEY = 'budgetApp.lock.v1';
+// How long the app can be out of sight before it locks again.
 const LOCK_AFTER_MS = 2 * 60 * 1000;
+// A valid PIN: 4 to 12 digits.
 const LOCK_PIN_RE = /^\d{4,12}$/;
+// Wrong PINs allowed before a pause.
 const LOCK_MAX_TRIES = 5;
+// Length of that pause.
 const LOCK_COOLDOWN_MS = 30000;
+// localStorage key for the wrong-try count and pause end, so reloading cannot skip the pause.
 const LOCK_TRIES_KEY = 'budgetApp.lockTries.v1';
+// Wrong PINs typed so far.
 let lockFailures = 0;
+// Time (in ms) until which PIN entry is paused.
 let lockBlockedUntil = 0;
+// When the app went out of sight, or null while it is visible.
 let lockHiddenAt = null;
 let lockChecking = false; // true while a PIN is being checked, so a double tap cannot run two checks
 
@@ -3238,7 +3273,7 @@ function lockSupported() {
 
 // Byte array <-> hex text, for storing the salt and hash.
 const toHex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
-const fromHex = (hex) => Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16)));
+const fromHex = (hex) => Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16))); // hex text -> bytes
 
 // Turns a PIN and a salt into the stored hash (PBKDF2, SHA-256, 150,000 rounds).
 async function hashPin(pin, saltHex) {
@@ -3377,6 +3412,7 @@ function closeLockSetup() {
   document.getElementById('lock-btn').focus();
 }
 
+// Menu lock button: opens the turn-on dialog, or the turn-off dialog when a lock is set.
 document.getElementById('lock-btn').addEventListener('click', () => {
   if (!lockSupported()) {
     setDataIoStatus('App lock needs a secure page (https). It is not available here.', 'failed');
@@ -3384,6 +3420,7 @@ document.getElementById('lock-btn').addEventListener('click', () => {
   }
   openLockSetup(loadLock() ? 'off' : 'on');
 });
+// Lock now, Cancel, and Escape in the lock dialog.
 document.getElementById('lock-now-btn').addEventListener('click', lockNow);
 document.getElementById('lock-setup-cancel').addEventListener('click', closeLockSetup);
 document.getElementById('lock-setup').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLockSetup(); });
