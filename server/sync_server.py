@@ -2,7 +2,10 @@
 """Budget sync server.
 
 Serves a single API endpoint, POST /api/sync, over plain HTTP. Intended to
-run on Render (Starter plan + persistent disk); Render terminates TLS at its
+run on Render's free plan, which has no persistent disk: the data file lives in a
+temporary folder and is lost whenever the service sleeps (after about 15 minutes
+idle) or redeploys. That is acceptable because every device keeps its own full copy
+and re-sends it on the next sync. Render terminates TLS at its
 edge, so this process never handles certificates itself. The app's static
 files (index.html/style.css/app.js) are hosted separately on GitHub Pages —
 this server does not serve them. Stdlib only — no pip installs.
@@ -24,12 +27,15 @@ this server does not serve them. Stdlib only — no pip installs.
 #   - Resending identical content is a no-op and does not bump the version.
 #
 # Backups: the first save each UTC day keeps a copy of the data as it was before
-# that save, under DATA_DIR/backups, and the newest 30 are kept.
+# that save, under DATA_DIR/backups, and the newest 30 are kept. On the free plan these
+# disappear together with the data file, so they only help while the service stays awake.
 #
 # Environment variables:
 #   PORT        Port to listen on (default 8443).
 #   SYNC_TOKEN  Shared passphrase clients must send; the server refuses to start without it.
-#   DATA_DIR    Folder holding sync_data.json and backups/ (default /var/data, the Render disk).
+#   DATA_DIR    Folder holding sync_data.json and backups/. Defaults to a folder named
+#               budget-data inside the system's temporary folder, which is always writable.
+#               Point it at a persistent disk's mount path if the service ever gets one.
 
 import hmac
 import json
@@ -37,6 +43,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -45,7 +52,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 PORT = int(os.environ.get("PORT", "8443"))
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/var/data"))
+DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(tempfile.gettempdir()) / "budget-data")
 DATA_PATH = DATA_DIR / "sync_data.json"
 
 # Automatic daily restore points. The first save on each UTC day first copies
@@ -131,6 +138,8 @@ def save_dataset(data):
     # The threading.Lock around every caller of this function is the real
     # correctness mechanism; os.replace() is defense in depth on top of it
     # (its atomicity isn't fully guaranteed on Windows, per CPython #143909).
+    # The folder is recreated if it has vanished (temporary storage can be cleared under a running service).
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp_path = DATA_PATH.with_suffix(".tmp")
     with tmp_path.open("w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -534,8 +543,14 @@ def main():
               "the Render dashboard before starting this service.", file=sys.stderr)
         sys.exit(1)
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Using data directory: {DATA_DIR}")
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as err:
+        print(f"FATAL: cannot use the data folder {DATA_DIR} ({err}). Set DATA_DIR to a folder "
+              "this service can write to.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Using data directory: {DATA_DIR} (temporary on Render's free plan: devices re-send "
+          "their data after a reset)")
 
     if not DATA_PATH.exists():
         save_dataset(empty_dataset())

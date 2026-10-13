@@ -109,8 +109,9 @@ const localCount = bills.length;
 server.collections.bills = [];
 await runSync(); await sleep(60);
 check('local data is kept when the server comes back empty', bills.length === localCount);
-await runSync(); await sleep(60);
-check('the next sync sends it all back', server.collections.bills.length === localCount, server.collections.bills.length + ' of ' + localCount);
+check('one sync sends it all back (no second tap needed)', server.collections.bills.length === localCount, server.collections.bills.length + ' of ' + localCount);
+check('it says the server had been reset, as a success', /server had been reset/.test(status()) && $('sync-status-text').classList.contains('sync-ok'), status());
+check('after that everything is in step', pending() === '');
 
 // ---- problems are reported plainly ----
 server.mode = '426'; await runSync(); await sleep(30);

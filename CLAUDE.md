@@ -20,11 +20,16 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
 - The sync server lives here (`server/sync_server.py`). Its `COLLECTION_NAMES` must stay exactly `bills`,
   `income` and `recurringIncome`: the app sends and expects those names. Changing the server's merge rules
   changes every device's data, so test it (`tests/test_sync_server.py`) and treat it carefully.
+- The sync server runs on Render's FREE plan with no disk (`render.yaml`: `plan: free`, no `disk:`,
+  `DATA_DIR=/tmp/budget-data`). Its data is temporary and is lost whenever it sleeps or redeploys, so devices hold
+  the real copy and re-send everything after a reset (`runSync` does this in one tap). Never add a disk or a paid
+  plan back without being asked, and never default `DATA_DIR` to a path that needs a disk. Pushing changes
+  `render.yaml`, which Render applies automatically, so ask before pushing.
 - Comments must say what the rule is. Do not cite design notes that are not in this repo.
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 240/240).
+  about 15 seconds. The title ends `OK n/n` (currently 242/242).
 - Python: `python -m unittest discover -s tests` (app file checks plus the sync server tests).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:

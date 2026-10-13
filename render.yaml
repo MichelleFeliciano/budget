@@ -1,20 +1,22 @@
 # Budget's own sync server, as a Render "Blueprint" (render.yaml in the repo root).
 # Create it with: Render dashboard > New > Blueprint > pick the MichelleFeliciano/budget repo.
 # Render asks for SYNC_TOKEN on first deploy: type the new sync passphrase there (it is never stored
-# in this repo). A persistent disk needs a paid instance type, hence "starter".
+# in this repo).
+#
+# This runs on Render's FREE plan, which has no persistent disk. The server's data file therefore
+# lives in a temporary folder (DATA_DIR) and is lost whenever the service sleeps (after about 15
+# minutes idle) or redeploys. The devices keep the real copy and send it again on their next sync.
 services:
   - type: web
     name: budget-sync
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: echo "nothing to install (standard library only)"
     startCommand: python server/sync_server.py
-    disk:
-      name: budget-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: SYNC_TOKEN
         sync: false
       - key: ALLOWED_ORIGINS
         value: https://michellefeliciano.github.io
+      - key: DATA_DIR
+        value: /tmp/budget-data

@@ -131,6 +131,11 @@ class AppFiles(unittest.TestCase):
         service = re.search(r"^\s*-\s*type: web\s*\n\s*name: (\S+)", render, re.M).group(1)
         self.assertEqual(url, f"https://{service}.onrender.com")
         self.assertIn("startCommand: python server/sync_server.py", render)
+        # Free plan: no disk (a disk needs a paid plan), and a writable temporary data folder.
+        self.assertRegex(render, r"(?m)^\s*plan: free\s*$")
+        self.assertNotRegex(render, r"(?m)^\s*disk:")
+        self.assertNotIn("plan: starter", render)
+        self.assertRegex(render, r"key: DATA_DIR\s*\n\s*value: /tmp/")
         listed = re.search(r"COLLECTION_NAMES = \[(.*?)\]", server, re.S).group(1)
         self.assertEqual(re.findall(r'"(\w+)"', listed), ["bills", "income", "recurringIncome"])
         for other in ("second memory", "secondmemory", "second-memory"):

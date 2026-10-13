@@ -21,6 +21,20 @@ kept even if Budget moves to its own address, because they cost nothing and the 
 the app sends. Anything else found in the data file is dropped on the next save. Allowed website addresses (CORS)
 come from the `ALLOWED_ORIGINS` environment variable, so moving the site only needs a settings change.
 
+## Free hosting: the server's data is temporary
+`budget-sync` runs on Render's free plan with no disk, so the data file is in `/tmp/budget-data` and is erased
+whenever the service sleeps (about 15 idle minutes) or redeploys. Daily server backups are erased with it. This is
+a deliberate cost trade-off, accepted because every device keeps a full copy:
+- The server is a meeting point, not a backup. Real backups are the app's **Export data** file.
+- The app copes with an empty server: `runSync` sees that records it had confirmed are missing from the reply
+  (the server never removes records, only marks them deleted), then immediately sends everything again in the
+  same tap and says the server had been reset.
+- The first sync after a sleep can take a minute or more, so the timeout is 90 seconds and a wake-up notice shows
+  after 5 seconds.
+- Known weakness: after a reset, if a stale device that never saw a delete syncs first, it re-uploads the deleted
+  item as live and the delete is lost. Sync first from the device you trust most after a long gap.
+- `render.yaml` is Blueprint-managed, so it overrides the dashboard; the plan and the missing disk are set there.
+
 ## Income id is the date
 An `income` record's `id` is its own date key (one manual income entry per day), unlike every other
 collection, which uses a fresh UUID. This gives "one entry per date" an identity-level guarantee across sync

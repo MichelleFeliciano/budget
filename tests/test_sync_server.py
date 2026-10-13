@@ -7,6 +7,7 @@ They use a throw-away data folder and a local port, never the real server or dat
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import threading
@@ -187,6 +188,21 @@ class Storage(unittest.TestCase):
         data = s.load_dataset()
         self.assertEqual(sorted(data), sorted(s.COLLECTION_NAMES))
         self.assertTrue(all(v == [] for v in data.values()))
+
+    def test_saving_recreates_a_data_folder_that_has_vanished(self):
+        """Temporary storage can be cleared under a running service: the next save must still work."""
+        gone = self.dir / "wiped"
+        s.DATA_DIR, s.DATA_PATH, s.BACKUP_DIR = gone, gone / "sync_data.json", gone / "backups"
+        s.save_dataset(s.empty_dataset())
+        self.assertTrue(s.DATA_PATH.exists())
+
+    def test_the_default_data_folder_is_a_writable_temp_folder_not_a_disk_path(self):
+        """Without DATA_DIR the server must not default to a path that only exists on a paid disk."""
+        env = {k: v for k, v in os.environ.items() if k != "DATA_DIR"}
+        out = subprocess.run([sys.executable, "-c", "import sync_server; print(sync_server.DATA_DIR)"],
+                             cwd=ROOT / "server", env=env, capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(pathlib.Path(out), pathlib.Path(tempfile.gettempdir()) / "budget-data")
+        self.assertNotIn("/var/data", (ROOT / "server" / "sync_server.py").read_text(encoding="utf-8"))
 
     def test_a_data_file_with_invalid_text_bytes_is_set_aside_not_fatal(self):
         """Bytes that are not valid UTF-8 must not make every request fail: set the file aside and carry on."""

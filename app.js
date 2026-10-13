@@ -2512,7 +2512,7 @@ function syncTokenHeader(token) {
 let SYNC_WAKE_NOTICE_MS = 5000;
 // After this long the request is abandoned and the sync reports a timeout, so a stalled
 // connection cannot leave "Sync now" disabled until the browser gives up.
-const SYNC_TIMEOUT_MS = 60000; // generous: a sleeping free-tier server can take ~30s to wake
+const SYNC_TIMEOUT_MS = 90000; // generous: a sleeping free-tier server can take a minute or more to wake
 
 // Sends the changed records to the server and returns { kind: 'ok', data } or a failure kind:
 // 'unauthorized' (wrong passphrase), 'outdated' (this copy of the app is too old) or 'error'.
@@ -2651,7 +2651,7 @@ async function runSync() {
   syncInFlight = true;
   setSyncStatus('Syncing…', null);
   const wakeTimer = setTimeout(() => {
-    if (syncInFlight) setSyncStatus('Still syncing. The server may be waking up, which can take up to a minute.', null);
+    if (syncInFlight) setSyncStatus('Still syncing. The server may be waking up, which can take a minute or more.', null);
   }, SYNC_WAKE_NOTICE_MS);
   const syncNowBtn = document.getElementById('sync-now-btn');
   if (syncNowBtn) syncNowBtn.disabled = true;
@@ -2678,58 +2678,78 @@ async function runSync() {
       snapshot = bootstrapSyncSnapshot(boot.data);
     }
 
-    // Step 3: work out what changed here since the server last confirmed, and remember how every record looked when sent.
-    const outgoing = {};
-    const preFlight = {};
-    SYNC_COLLECTIONS.forEach((c) => {
-      const items = c.get();
-      const known = snapshot[c.name] || {};
-      outgoing[c.name] = items.filter((item) => known[item.id] !== JSON.stringify(item));
-      preFlight[c.name] = snapshotOfItems(items);
-    });
+    // Steps 3 to 5 normally run once. If the server turns out to have lost its data (free hosting
+    // clears it whenever the service sleeps or redeploys), they run a second time straight away so
+    // that one tap on Sync now sends everything back.
+    let serverWasReset = false;
+    const collectedConflicts = [];
+    for (let pass = 0; pass < 2; pass += 1) {
+      // Step 3: work out what changed here since the server last confirmed, and remember how every record looked when sent.
+      const outgoing = {};
+      const preFlight = {};
+      SYNC_COLLECTIONS.forEach((c) => {
+        const items = c.get();
+        const known = snapshot[c.name] || {};
+        outgoing[c.name] = items.filter((item) => known[item.id] !== JSON.stringify(item));
+        preFlight[c.name] = snapshotOfItems(items);
+      });
 
-    // Step 4: send the changes and stop with a message if the server refuses.
-    const result = await postSync(config, outgoing);
-    if (result.kind === 'unauthorized') {
-      setSyncStatus('Sync failed — check passphrase', 'failed');
-      return;
-    }
-    if (result.kind === 'outdated') {
-      setSyncStatus('This copy is out of date — close and reopen the app, then tap Sync now', 'failed');
-      return;
-    }
-    if (result.kind !== 'ok') {
-      setSyncStatus('Sync failed — tap Sync now to try again', 'failed');
-      return;
-    }
-    const data = result.data;
-
-    // Step 5: merge the server's reply into each list, redrawing only lists that changed.
-    const nextSnapshot = { ...snapshot };
-    SYNC_COLLECTIONS.forEach((c) => {
-      const incoming = data.collections && Array.isArray(data.collections[c.name]) ? data.collections[c.name] : null;
-      if (!incoming) {
-        incompleteReply = true;
+      // Step 4: send the changes and stop with a message if the server refuses.
+      const result = await postSync(config, outgoing);
+      if (result.kind === 'unauthorized') {
+        setSyncStatus('Sync failed — check passphrase', 'failed');
         return;
       }
-      const before = JSON.stringify(c.get());
-      const { result, known } = reconcileServerReply(c, incoming, preFlight[c.name]);
-      nextSnapshot[c.name] = known;
-      if (JSON.stringify(result) !== before) {
-        c.set(result);
-        saveCollection(c.key, result);
-        safeRender(() => c.render());
+      if (result.kind === 'outdated') {
+        setSyncStatus('This copy is out of date — close and reopen the app, then tap Sync now', 'failed');
+        return;
       }
-      // Anything still different from what the server confirmed (an in-flight
-      // change, or a record the server was missing) goes out on a quick retry.
-      if (result.some((item) => known[item.id] !== JSON.stringify(item))) resyncSoon = true;
-    });
-    saveSyncSnapshot(nextSnapshot);
+      if (result.kind !== 'ok') {
+        setSyncStatus('Sync failed — tap Sync now to try again', 'failed');
+        return;
+      }
+      const data = result.data;
+      if (Array.isArray(data.conflicts)) collectedConflicts.push(...data.conflicts);
+
+      // Step 5: merge the server's reply into each list, redrawing only lists that changed.
+      resyncSoon = false;
+      incompleteReply = false;
+      let serverLostRecords = false;
+      const nextSnapshot = { ...snapshot };
+      SYNC_COLLECTIONS.forEach((c) => {
+        const incoming = data.collections && Array.isArray(data.collections[c.name]) ? data.collections[c.name] : null;
+        if (!incoming) {
+          incompleteReply = true;
+          return;
+        }
+        // The server never removes a record (deletes are kept as tombstones), so a record this device
+        // had confirmed that is now missing from the reply means the server lost its data.
+        const serverIds = new Set(incoming.map((item) => item.id));
+        if (Object.keys(snapshot[c.name] || {}).some((id) => !serverIds.has(id))) serverLostRecords = true;
+        const before = JSON.stringify(c.get());
+        const { result, known } = reconcileServerReply(c, incoming, preFlight[c.name]);
+        nextSnapshot[c.name] = known;
+        if (JSON.stringify(result) !== before) {
+          c.set(result);
+          saveCollection(c.key, result);
+          safeRender(() => c.render());
+        }
+        // Anything still different from what the server confirmed (an in-flight
+        // change, or a record the server was missing) goes out on a quick retry.
+        if (result.some((item) => known[item.id] !== JSON.stringify(item))) resyncSoon = true;
+      });
+      saveSyncSnapshot(nextSnapshot);
+
+      if (!serverLostRecords || pass === 1) break;
+      serverWasReset = true;
+      snapshot = nextSnapshot; // the records the server lost are no longer marked confirmed, so pass 2 sends them
+      setSyncStatus('The server had lost its data. Sending everything to it again…', null);
+    }
 
     // Step 6: report the outcome (conflicts, an incomplete reply, edits made mid-sync, or success).
     lastSyncedAt = new Date();
     recordBackupTime(LAST_SYNC_AT_KEY); // the server was reached and answered, whatever the details below
-    const conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
+    const conflicts = collectedConflicts;
     if (conflicts.length > 0) {
       const collectionNames = [...new Set(conflicts.map((c) => c.collection))]
         .map((name) => SYNC_COLLECTIONS.find((c) => c.name === name)?.label || name);
@@ -2742,6 +2762,8 @@ async function runSync() {
       setSyncStatus('Synced, but the server reply was incomplete. Tap Sync now again.', 'failed');
     } else if (resyncSoon) {
       setSyncStatus('Synced — you changed something during the sync. Tap Sync now again to send it.', 'failed');
+    } else if (serverWasReset) {
+      setSyncStatus('Synced — the server had been reset, so everything was sent to it again', 'ok');
     } else {
       setSyncStatus('Synced just now', 'ok');
     }
@@ -3138,7 +3160,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 const THEME_KEY = 'budgetApp.theme.v1';
 const THEMES = ['auto', 'light', 'dark'];
 

@@ -29,7 +29,7 @@ can be hosted at the root of an address or in a folder (for example `/budget/`).
 ## Sync (optional, manual)
 
 Sync talks to Budget's own server only when you press **Sync now**, and only for bills, income and recurring
-income. Type the sync passphrase into the Menu at runtime; it is kept only in this browser. Never put it in the
+income. It runs on a free host whose data is temporary, so keep your own backups (see below). Type the sync passphrase into the Menu at runtime; it is kept only in this browser. Never put it in the
 code, a test or a document. Nothing runs in the background.
 
 The server is `server/sync_server.py` (Python standard library only, no installs). The address the app calls is
@@ -39,15 +39,30 @@ variables (`ALLOWED_ORIGINS`, `SYNC_TOKEN`), described in the file's header.
 ### Deploy the server (Render)
 
 1. Render dashboard > **New** > **Blueprint** > choose this repository. It reads `render.yaml` (service
-   `budget-sync`, Starter plan, 1 GB disk at `/var/data`).
+   `budget-sync`, **Free** plan, no disk).
 2. When asked for `SYNC_TOKEN`, type a new sync passphrase.
 3. If the service address Render gives you is not `https://budget-sync.onrender.com`, change
    `SYNC_SERVER_URL` in `app.js` to it, bump the version (see below) and redeploy the site.
 4. If the app is hosted somewhere other than `https://michellefeliciano.github.io`, set `ALLOWED_ORIGINS` in the
    Render dashboard to that address (no trailing slash; several can be comma-separated).
 
-The server keeps its data in `/var/data/sync_data.json`, with daily restore points under `/var/data/backups`
-(the newest 30).
+### What the free plan means (read this)
+
+The free plan has no persistent disk, so the server keeps its data in a temporary folder (`DATA_DIR`, set to
+`/tmp/budget-data` in `render.yaml`). **That data is erased whenever the service goes to sleep (about 15 minutes
+without a request) or redeploys, and the server's own daily backups go with it.** So:
+
+- **Your devices hold the real copy.** The server is only a meeting point. Never treat it as a backup; use
+  **Export data** in the Menu for real backups (the app reminds you every 30 days).
+- **After a reset, one tap on Sync now refills it.** The app notices the server lost records it had confirmed and
+  sends everything again straight away. The status line says so.
+- **The first sync after a sleep can take a minute or more** while the server wakes up. The status line says
+  "Still syncing. The server may be waking up…" after a few seconds, and the app waits up to 90 seconds.
+- **A delete can come back.** If the server was reset and a device that never saw the delete syncs first, it
+  re-uploads the deleted item as live. After a long gap, sync first from the device you trust most (the one
+  with the latest, correct list), then the others.
+- If you ever want the server's data to survive, move the service to a paid plan, add a disk, and set `DATA_DIR`
+  to its mount path.
 
 ## Bringing data in from Second Memory (one time)
 
