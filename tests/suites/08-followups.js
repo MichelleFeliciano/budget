@@ -55,7 +55,8 @@ bills.length = 0; income.length = 0; renderBudget();
 // ---- the undo toast after Mark paid and Delete ----
 bills.length = 0; income.length = 0; renderBudget(); hideUndoToast();
 addBill({ name: 'Toast bill', amount: '30', dueDate: dk(1), frequency: 'monthly', category: '', autopay: false });
-check('adding a bill shows no undo toast', $('undo-toast').hidden === true);
+check('adding a bill shows an Added toast', !$('undo-toast').hidden && /Added Toast bill/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+hideUndoToast();
 toggleBillPaid(bills[0].id, dk(1), true);
 check('marking a bill paid shows a toast naming it', !$('undo-toast').hidden && /Marked Toast bill paid/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
 $('undo-toast-btn').click();
@@ -111,3 +112,78 @@ toggleBillPaid(bills[0].id, dk(1), true);
 const paidAheadLine = document.querySelector('.bill-card .bill-due').textContent;
 check('a bill paid for its next date shows the date after it', !/tomorrow/.test(paidAheadLine) && /^Due /.test(paidAheadLine), paidAheadLine);
 bills.length = 0; renderBudget(); hideUndoToast();
+
+// ---- Earlier / Today / Later slide the calendar ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; calendarWeekOffset = 0; renderBudget();
+const weekHeads = () => [...document.querySelectorAll('.budget-week-total')].map((e) => e.textContent.split(':')[0]);
+check('the calendar starts on last, this and next week', weekHeads().join('|') === 'Last week|This week|Next week', weekHeads().join('|'));
+check('Today is disabled while the calendar is in its usual place', $('calendar-today').disabled === true);
+$('calendar-next').click();
+check('Later slides it forward a week', weekHeads()[0] === 'This week' && weekHeads()[1] === 'Next week' && /^Week of /.test(weekHeads()[2]) && !$('calendar-today').disabled, weekHeads().join('|'));
+check('the week holding today is still the highlighted one', document.querySelectorAll('.budget-week-current').length === 1 && document.querySelector('.budget-week-current .budget-week-total').textContent.startsWith('This week'));
+$('calendar-prev').click(); $('calendar-prev').click();
+check('Earlier slides it back', /^Week of /.test(weekHeads()[0]) && weekHeads()[2] === 'This week', weekHeads().join('|'));
+$('calendar-today').click();
+check('Today puts it back', weekHeads().join('|') === 'Last week|This week|Next week' && $('calendar-today').disabled === true);
+
+// ---- the pay period uses the paycheck's schedule until a payday is saved ----
+localStorage.removeItem('budgetApp.paydaySettings.v1');
+renderBudget();
+check('with no payday and no income source the pay period asks for one', /Set a recent payday/.test($('pay-period-empty-state').textContent) && $('pay-period-source').hidden === true);
+addRecurringIncome({ name: 'Paycheck', amount: '1000', dueDate: dk(-20), frequency: 'biweekly', category: '' });
+addRecurringIncome({ name: 'Side gig', amount: '50', dueDate: dk(-20), frequency: 'weekly', category: '' });
+check('the biggest income source sets the pay period', !$('pay-period-source').hidden && /Paycheck/.test($('pay-period-source').textContent) && /Payday /.test($('pay-period-summary').textContent), $('pay-period-source').textContent + ' / ' + $('pay-period-summary').textContent);
+localStorage.setItem('budgetApp.paydaySettings.v1', JSON.stringify({ payDateKey: dk(-3), frequency: 'monthly' }));
+renderBudget();
+check('a payday saved by hand wins over the income source', $('pay-period-source').hidden === true);
+localStorage.removeItem('budgetApp.paydaySettings.v1');
+recurringIncome.length = 0; renderBudget();
+
+// ---- adding: the date starts on today, amounts get the decimal keypad, and the new card flashes ----
+check('the due date starts on today', $('budget-duedate-input').value === todayKey(), $('budget-duedate-input').value);
+check('amount boxes ask for the decimal keypad', ['budget-amount-input', 'recurring-income-amount-input'].every((id) => $(id).getAttribute('inputmode') === 'decimal') && document.querySelector('#budget-card-template').content.querySelector('.bill-edit-amount').getAttribute('inputmode') === 'decimal');
+$('budget-name-input').value = 'Flash bill'; $('budget-amount-input').value = '12';
+$('budget-add-form').requestSubmit();
+check('adding from the form puts the date back to today and flashes the new card', $('budget-duedate-input').value === todayKey() && !!document.querySelector('.bill-card.bill-card-new'));
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- a day on the calendar can start a bill ----
+startBillOnDate(dk(3));
+check('"Add a bill on this day" fills in that date', $('budget-duedate-input').value === dk(3));
+check('every day has the button for it', document.querySelectorAll('.budget-day-add-bill').length === document.querySelectorAll('.budget-day-cell').length);
+$('budget-duedate-input').value = todayKey();
+
+// ---- the Bills list sorts by the next date to pay, and can show only what is due soon ----
+bills.length = 0; renderBudget();
+addBill({ name: 'Zed old monthly', amount: '10', dueDate: dk(-200), frequency: 'monthly', category: '', autopay: false });
+addBill({ name: 'Far one-time', amount: '10', dueDate: dk(60), frequency: 'one_time', category: '', autopay: false });
+addBill({ name: 'Late one-time', amount: '10', dueDate: dk(-4), frequency: 'one_time', category: '', autopay: false });
+addBill({ name: 'Soon one-time', amount: '10', dueDate: dk(5), frequency: 'one_time', category: '', autopay: false });
+const cardNames = () => [...document.querySelectorAll('#budget-list .bill-name')].map((e) => e.textContent);
+check('Soon comes before Far, by next date', cardNames().indexOf('Soon one-time') < cardNames().indexOf('Far one-time'), cardNames().join('|'));
+check('a bill that is late comes before one due soon', cardNames().indexOf('Late one-time') < cardNames().indexOf('Soon one-time'), cardNames().join('|'));
+$('budget-soon-filter').click();
+check('the Due in the next 2 weeks chip hides bills due later', !cardNames().includes('Far one-time') && cardNames().includes('Soon one-time') && cardNames().includes('Late one-time') && $('budget-soon-filter').getAttribute('aria-pressed') === 'true', cardNames().join('|'));
+$('budget-soon-filter').click();
+check('turning it off shows them all again', cardNames().includes('Far one-time'));
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- the long parts of the page fold up and remember it ----
+const payFold = $('fold-pay-period');
+check('Pay Period, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 3 && payFold.open === true);
+payFold.open = false; await sleep(30);
+check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
+document.querySelector('[data-jump="fold-pay-period"]').click();
+check('a jump link opens the part it points to', payFold.open === true);
+check('there is a jump link for every part', ['budget-month', 'fold-pay-period', 'fold-paid-history', 'budget-bills', 'fold-recurring-income'].every((id) => !!document.querySelector(`[data-jump="${id}"]`) && !!$(id)));
+await sleep(30);
+localStorage.removeItem('budgetApp.folds.v1');
+
+// ---- a bill's name shows on its day in the compact calendar ----
+bills.length = 0; renderBudget();
+addBill({ name: 'Peek one', amount: '5', dueDate: dk(1), frequency: 'one_time', category: '', autopay: false });
+addBill({ name: 'Peek two', amount: '5', dueDate: dk(1), frequency: 'one_time', category: '', autopay: false });
+const peekCell = document.querySelector(`.budget-day-cell[data-date-key="${dk(1)}"]`);
+check('a day with bills carries the first name and how many more', !!peekCell && /Peek/.test(peekCell.querySelector('.budget-day-peek-name').textContent) && peekCell.querySelector('.budget-day-peek-more').textContent === '+1');
+check('a day with nothing has no name line', !document.querySelector(`.budget-day-cell[data-date-key="${dk(2)}"] .budget-day-peek`));
+hideUndoToast(); bills.length = 0; renderBudget();

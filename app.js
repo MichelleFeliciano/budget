@@ -563,14 +563,19 @@ function oldestUnpaidOccurrence(bill, throughKey) {
 
 // ---- Calendar window ----
 
-// The 21 days the budget calendar shows: three Monday-start weeks (last week, this week, next week).
-function getCalendarWindowDays(today = new Date()) {
+// How many weeks the calendar is slid from its usual place (0 = last week, this week and next week);
+// the Earlier / Later buttons change it and Today resets it.
+let calendarWeekOffset = 0;
+
+// The 21 days the budget calendar shows: three Monday-start weeks. Normally last week, this week and next
+// week; weekOffset slides the window by whole weeks.
+function getCalendarWindowDays(today = new Date(), weekOffset = calendarWeekOffset) {
   const dow = (today.getDay() + 6) % 7; // days since Monday (getDay() is 0 = Sunday)
   const startOfThisWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
   const windowStart = new Date(
     startOfThisWeek.getFullYear(),
     startOfThisWeek.getMonth(),
-    startOfThisWeek.getDate() - 7
+    startOfThisWeek.getDate() - 7 + weekOffset * 7
   );
   const days = [];
   for (let i = 0; i < 21; i++) {
@@ -583,8 +588,15 @@ function getCalendarWindowDays(today = new Date()) {
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
 
-// Headings for the three calendar weeks, in order.
-const BUDGET_WEEK_LABELS = ['Last week', 'This week', 'Next week'];
+// Heading for a calendar week, from how many weeks it is from this one: Last week, This week or Next week,
+// and "Week of Oct 5" for any other.
+function calendarWeekLabel(weeksFromThis, firstDayKey) {
+  if (weeksFromThis === -1) return 'Last week';
+  if (weeksFromThis === 0) return 'This week';
+  if (weeksFromThis === 1) return 'Next week';
+  const { m, d } = parseDateKey(firstDayKey);
+  return `Week of ${MONTH_NAMES[m].slice(0, 3)} ${d}`;
+}
 
 // Everything due from startKey to endKey inclusive (a paid occurrence counts at the amount it was paid at).
 // With unpaidOnly, paid occurrences are skipped, which is the week's "Due" (what is left to pay). Without it
@@ -788,7 +800,7 @@ function addBill(fields) {
   saveCollection(BILLS_KEY, bills);
   recordUndo('bills', bill.id, null, structuredClone(bill));
   renderBudget();
-  return { ok: true };
+  return { ok: true, id: bill.id };
 }
 
 // The date of a schedule's nth (0-based) occurrence, or null if it has none.
@@ -1167,10 +1179,13 @@ function renderBillCategoryFilters(nonDeletedBills) {
 // <select>'s first (and pre-selected) option.
 let selectedBillsSort = 'due_date_asc';
 
-// The Bills sort orders, keyed by the values of the sort <select>'s options.
+// When on, the Bills list shows only bills that are overdue or due within DUE_SOON_LIST_DAYS days.
+let onlyDueSoon = false;
+const DUE_SOON_LIST_DAYS = 14;
+
+// The Bills sort orders, keyed by the values of the sort <select>'s options. The two due date orders
+// are not here: they sort by each bill's next date to pay (see renderBudgetList), not its first date.
 const BILL_SORTS = {
-  due_date_asc: compareByField((b) => b.dueDate, 1, { text: false }),
-  due_date_desc: compareByField((b) => b.dueDate, -1, { text: false }),
   name_asc: compareByField((b) => b.name, 1),
   amount_desc: compareByField((b) => b.amount, -1, { text: false }),
   amount_asc: compareByField((b) => b.amount, 1, { text: false }),
@@ -1226,6 +1241,19 @@ function savePaydaySettings(settings) {
     reportStorageProblem();
     return false;
   }
+}
+
+// The payday schedule to use: the one saved by hand, otherwise the biggest Recurring Income source that has
+// started and repeats weekly, biweekly or monthly (usually the paycheck), so nothing has to be set up twice.
+// derivedFrom names that source when the schedule was taken from it.
+function effectivePaydaySettings() {
+  const saved = loadPaydaySettings();
+  if (saved.payDateKey) return saved;
+  const todayK = todayKey();
+  const paycheck = recurringIncome
+    .filter((r) => !r.deleted && PAY_PERIOD_FREQUENCIES.includes(r.frequency) && r.dueDate <= todayK)
+    .sort((a, b) => b.amount - a.amount)[0];
+  return paycheck ? { payDateKey: paycheck.dueDate, frequency: paycheck.frequency, derivedFrom: paycheck.name } : saved;
 }
 
 // Finds the current pay period: { periodStart, periodEnd } where periodStart is the latest payday
@@ -1309,7 +1337,12 @@ function renderPayPeriod() {
 
   listEl.innerHTML = '';
 
-  const settings = loadPaydaySettings();
+  const settings = effectivePaydaySettings();
+  const sourceEl = document.getElementById('pay-period-source');
+  if (sourceEl) {
+    sourceEl.hidden = !settings.derivedFrom;
+    if (settings.derivedFrom) sourceEl.textContent = `Using the schedule of your ${settings.derivedFrom} income. Save a payday below to use your own.`;
+  }
   // No settings configured yet, or a (defensively handled, shouldn't happen
   // for weekly/biweekly/monthly within the 31-day scan bound) undetermined
   // period — treated identically: empty state, no summary, no crash.
@@ -1451,6 +1484,14 @@ function closeCalendarDay({ refocus = false } = {}) {
   }
 }
 
+// Starts a new bill on a given day: closes the day sheet, puts that date in the Add bill form and moves there.
+function startBillOnDate(dateKey) {
+  closeCalendarDay();
+  document.getElementById('budget-duedate-input').value = dateKey;
+  document.getElementById('budget-add-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.getElementById('budget-name-input').focus({ preventScroll: true });
+}
+
 // While a day sheet is open: Escape closes it and Tab stays inside it.
 document.addEventListener('keydown', (e) => {
   if (!openCalendarDayKey) return;
@@ -1500,6 +1541,9 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   const today = new Date();
   const todayK = todayKey();
   const dueSoonEndK = shiftDateKey(todayK, REMINDER_BANNER_DAYS); // same window as the banner
+  // Today only does something while the calendar is slid away from its usual place.
+  const calendarTodayBtn = document.getElementById('calendar-today');
+  if (calendarTodayBtn) calendarTodayBtn.disabled = calendarWeekOffset === 0;
   document.getElementById('budget-month-label').textContent =
     `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -1548,7 +1592,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     const weekEl = document.createElement('div');
     weekEl.className = 'budget-week';
     weekEl.dataset.weekIndex = String(weekIndex);
-    weekEl.classList.toggle('budget-week-current', weekIndex === 1);
+    weekEl.classList.toggle('budget-week-current', weekDays.includes(todayK));
 
     const cellsEl = document.createElement('div');
     cellsEl.className = 'budget-week-cells';
@@ -1596,6 +1640,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       if (startsOpen) setDayDialog(cellEl, true);
 
       const daySummary = []; // what this day holds, for the open button's accessible name
+      const peekNames = []; // the bills due this day, for the short name shown in the compact cell
 
       // Day header: the date number, plus the Close button used by the compact layout.
       const headerEl = document.createElement('div');
@@ -1691,6 +1736,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
           daySummary.push(`${bill.name}${paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
+          peekNames.push(bill.name);
           label.appendChild(checkbox);
           if (dotSpan) label.appendChild(dotSpan);
           label.appendChild(nameSpan);
@@ -1698,6 +1744,25 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           occurrencesEl.appendChild(itemEl);
         });
       bodyEl.appendChild(occurrencesEl);
+
+      // Compact calendar only (CSS): the first bill's name, cut short to fit, and how many more there are,
+      // so a day says what is due without opening it.
+      if (peekNames.length) {
+        const peekEl = document.createElement('div');
+        peekEl.className = 'budget-day-peek';
+        peekEl.setAttribute('aria-hidden', 'true'); // the open button already names everything
+        const peekName = document.createElement('span');
+        peekName.className = 'budget-day-peek-name';
+        peekName.textContent = peekNames[0];
+        peekEl.appendChild(peekName);
+        if (peekNames.length > 1) {
+          const peekMore = document.createElement('span');
+          peekMore.className = 'budget-day-peek-more';
+          peekMore.textContent = `+${peekNames.length - 1}`;
+          peekEl.appendChild(peekMore);
+        }
+        bodyEl.insertBefore(peekEl, occurrencesEl);
+      }
 
       // Day footer: the box for typing a manual income amount for this day.
       const footerEl = document.createElement('div');
@@ -1729,6 +1794,14 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       footerEl.appendChild(manualInput);
       bodyEl.appendChild(footerEl);
 
+      // In the day sheet: start a bill on this day (the Add bill form gets the date).
+      const addOnDayBtn = document.createElement('button');
+      addOnDayBtn.type = 'button';
+      addOnDayBtn.className = 'budget-day-add-bill';
+      addOnDayBtn.textContent = 'Add a bill on this day';
+      addOnDayBtn.addEventListener('click', (e) => { e.stopPropagation(); startBillOnDate(dateKey); });
+      bodyEl.appendChild(addOnDayBtn);
+
       if (incomeRecord) daySummary.push(`income entered $${Number(incomeRecord.amount).toFixed(2)}`);
       openBtn.setAttribute('aria-label',
         `${MONTH_NAMES[m]} ${d}${dateKey === todayK ? ', today' : ''}: ` +
@@ -1744,7 +1817,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     const totalEl = document.createElement('p');
     totalEl.className = 'budget-week-total';
     const weekTotalDue = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills);
-    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekTotalDue.toFixed(2)}</strong>`;
+    totalEl.innerHTML = `${calendarWeekLabel(weekIndex - 1 + calendarWeekOffset, weekDays[0])}: <strong>$${weekTotalDue.toFixed(2)}</strong>`;
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
@@ -1791,15 +1864,30 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 function renderBudgetList(nonDeletedBills, openEdit) {
   // Apply the search box, category chip and sort choice.
   const searchTerm = document.getElementById('budget-search-input').value;
-  const comparator = BILL_SORTS[selectedBillsSort] || BILL_SORTS.due_date_asc;
-  const visible = nonDeletedBills
+  const todayK = todayKey();
+  let visible = nonDeletedBills
     .filter((b) => matchesBillSearch(b, searchTerm))
-    .filter((b) => matchesBillCategory(b, selectedBillCategory))
-    .sort(comparator);
+    .filter((b) => matchesBillCategory(b, selectedBillCategory));
+
+  // The next date each bill needs paying (late ones first); a bill with none left sorts last.
+  const nextDue = new Map(visible.map((b) => [b.id, nextDueDateKey(b, todayK) || '9999-12-31']));
+  if (onlyDueSoon) {
+    const lastKey = shiftDateKey(todayK, DUE_SOON_LIST_DAYS);
+    visible = visible.filter((b) => nextDue.get(b.id) <= lastKey);
+  }
+  let comparator = BILL_SORTS[selectedBillsSort];
+  if (!comparator) {
+    const dir = selectedBillsSort === 'due_date_desc' ? -1 : 1;
+    comparator = (a, b) => {
+      const x = nextDue.get(a.id);
+      const y = nextDue.get(b.id);
+      return (x < y ? -dir : x > y ? dir : 0) || BILL_SORTS.name_asc(a, b);
+    };
+  }
+  visible.sort(comparator);
 
   const list = document.getElementById('budget-list');
   const template = document.getElementById('budget-card-template');
-  const todayK = todayKey();
 
   list.innerHTML = '';
 
@@ -1906,6 +1994,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
   });
 
   document.getElementById('budget-empty-state').hidden = nonDeletedBills.length !== 0;
+  document.getElementById('budget-filter-empty').hidden = !(onlyDueSoon && nonDeletedBills.length !== 0 && visible.length === 0);
 }
 
 // Draws the Recurring Income list. Same shape as renderBudgetList, minus "mark oldest unpaid"
@@ -2109,11 +2198,23 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   document.getElementById('budget-autopay-input').checked = false;
   nameInput.value = '';
   amountInput.value = '';
-  dueDateInput.value = '';
+  dueDateInput.value = todayKey();
   frequencyInput.value = 'monthly';
   categoryInput.value = '';
-  nameInput.focus();
+  showNewBillCard(result.id);
 });
+
+// The due date starts on today (a day's "Add a bill on this day" button changes it).
+document.getElementById('budget-duedate-input').value = todayKey();
+
+// Scrolls to a just-added bill's card and flashes it, so it is clear where it landed in the sorted list.
+function showNewBillCard(billId) {
+  const card = document.querySelector(`#budget-list [data-bill-id="${billId}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.add('bill-card-new');
+  setTimeout(() => card.classList.remove('bill-card-new'), 1800);
+}
 
 // Typing in the search box redraws the Bills list.
 document.getElementById('budget-search-input').addEventListener('input', renderBudget);
@@ -2121,6 +2222,14 @@ document.getElementById('budget-search-input').addEventListener('input', renderB
 // Choosing a sort order redraws the Bills list.
 document.getElementById('budget-sort-input').addEventListener('change', (e) => {
   selectedBillsSort = e.target.value;
+  renderBudget();
+});
+
+// The "Due in the next 2 weeks" chip turns that filter on and off.
+document.getElementById('budget-soon-filter').addEventListener('click', (e) => {
+  onlyDueSoon = !onlyDueSoon;
+  e.currentTarget.classList.toggle('chip-active', onlyDueSoon);
+  e.currentTarget.setAttribute('aria-pressed', String(onlyDueSoon));
   renderBudget();
 });
 
@@ -2508,7 +2617,7 @@ document.getElementById('redo-btn').addEventListener('click', redo);
 
 // ---- Undo toast ----
 // A short bar at the bottom of the screen after a delete or a Mark paid, with an Undo button, so a
-// mis-tap can be fixed without opening the Menu. Adds, edits and typing a day's income get no toast.
+// mis-tap can be fixed without opening the Menu. Edits and typing a day's income get no toast.
 
 // How long the toast stays before it hides itself.
 const UNDO_TOAST_MS = 6000;
@@ -2516,8 +2625,9 @@ var undoToastTimer = null; // var, not let: recordUndo can run before this line 
 
 // What the toast should say about a change, or null when the change does not get one.
 function undoToastMessage(collectionName, before, after) {
-  if (!before || !after) return null;
+  if (!after) return null;
   const name = after.name || 'item';
+  if (!before) return collectionName === 'income' ? null : `Added ${name}`;
   if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
   if (collectionName === 'bills') {
     const paidBefore = (before.paidDates || []).length;
@@ -2685,6 +2795,9 @@ let SYNC_WAKE_NOTICE_MS = 5000;
 // connection cannot leave "Sync now" disabled until the browser gives up.
 const SYNC_TIMEOUT_MS = 90000; // generous: a sleeping free-tier server can take a minute or more to wake
 
+// How long to wait before the one automatic retry. `let` so a test can shorten it.
+let SYNC_RETRY_DELAY_MS = 1500;
+
 // Sends the changed records to the server and returns { kind: 'ok', data } or a failure kind:
 // 'unauthorized' (wrong passphrase), 'outdated' (this copy of the app is too old) or 'error'.
 // Gives up after SYNC_TIMEOUT_MS; network errors and timeouts are thrown to the caller.
@@ -2705,6 +2818,22 @@ async function postSync(config, collections) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// postSync, plus one automatic retry when the server did not answer properly (a sleeping free server often
+// fails the first request while it wakes up). A wrong passphrase or an out-of-date copy is never retried.
+// A second failure is thrown (or returned as 'error') for runSync to report.
+async function postSyncWithRetry(config, collections) {
+  let first;
+  try {
+    first = await postSync(config, collections);
+  } catch {
+    first = { kind: 'error' };
+  }
+  if (first.kind !== 'error') return first;
+  setSyncStatus('The server did not answer yet. Trying once more…', null);
+  await new Promise((resolve) => setTimeout(resolve, SYNC_RETRY_DELAY_MS));
+  return postSync(config, collections);
 }
 
 // First sync on a device with no snapshot: pull the server's state, then
@@ -2821,8 +2950,17 @@ async function runSync() {
   if (!config || syncInFlight) return;
   syncInFlight = true;
   setSyncStatus('Syncing…', null);
+  // After a few seconds the status explains the wait and counts the seconds, so it never looks stuck.
+  const startedAt = Date.now();
+  let wakeTicker = null;
   const wakeTimer = setTimeout(() => {
-    if (syncInFlight) setSyncStatus('Still syncing. The server may be waking up, which can take a minute or more.', null);
+    const say = () => {
+      if (!syncInFlight) return;
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      setSyncStatus(`Still syncing. The server may be waking up, which can take a minute or more. (${seconds}s)`, null);
+    };
+    say();
+    wakeTicker = setInterval(say, 5000);
   }, SYNC_WAKE_NOTICE_MS);
   const syncNowBtn = document.getElementById('sync-now-btn');
   if (syncNowBtn) syncNowBtn.disabled = true;
@@ -2833,7 +2971,7 @@ async function runSync() {
     // Step 2: first sync on this device (no snapshot yet): pull the server's data and reconcile without sending.
     let snapshot = loadSyncSnapshot();
     if (!snapshot) {
-      const boot = await postSync(config, {});
+      const boot = await postSyncWithRetry(config, {});
       if (boot.kind === 'unauthorized') {
         setSyncStatus('Sync failed — check passphrase', 'failed');
         return;
@@ -2866,7 +3004,7 @@ async function runSync() {
       });
 
       // Step 4: send the changes and stop with a message if the server refuses.
-      const result = await postSync(config, outgoing);
+      const result = await postSyncWithRetry(config, outgoing);
       if (result.kind === 'unauthorized') {
         setSyncStatus('Sync failed — check passphrase', 'failed');
         return;
@@ -2948,6 +3086,7 @@ async function runSync() {
     );
   } finally {
     clearTimeout(wakeTimer);
+    clearInterval(wakeTicker);
     syncInFlight = false;
     if (syncNowBtn) syncNowBtn.disabled = false;
     updateSyncPending();
@@ -3335,7 +3474,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -3624,6 +3763,48 @@ if (sidebarToggleBtn) {
     sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   });
 }
+
+// The Earlier / Today / Later buttons slide the calendar's three weeks (Today puts them back).
+function slideCalendar(weeks) {
+  closeCalendarDay();
+  calendarWeekOffset = weeks === 0 ? 0 : Math.max(-520, Math.min(520, calendarWeekOffset + weeks));
+  renderBudget();
+}
+document.getElementById('calendar-prev').addEventListener('click', () => slideCalendar(-1));
+document.getElementById('calendar-today').addEventListener('click', () => slideCalendar(0));
+document.getElementById('calendar-next').addEventListener('click', () => slideCalendar(1));
+
+// Collapsible parts of the page (Pay Period, Paid History, Recurring Income): each remembers on this device
+// whether it was left open or folded up.
+const FOLDS_KEY = 'budgetApp.folds.v1';
+
+// Reads which folds were left closed ({ id: false }); empty if nothing was saved or it is damaged.
+function loadFolds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FOLDS_KEY));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+document.querySelectorAll('details.fold').forEach((fold) => {
+  if (loadFolds()[fold.id] === false) fold.open = false;
+  fold.addEventListener('toggle', () => {
+    const folds = loadFolds();
+    folds[fold.id] = fold.open;
+    try { localStorage.setItem(FOLDS_KEY, JSON.stringify(folds)); } catch { /* not saved: it simply opens again next time */ }
+  });
+});
+
+// The jump links scroll to a part of the page, opening it first if it is folded up.
+document.querySelectorAll('[data-jump]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const target = document.getElementById(button.dataset.jump);
+    if (!target) return;
+    if (target.tagName === 'DETAILS') target.open = true;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
 
 // The floating + button: scrolls down to the Add bill form (a long way down the page) and puts the
 // cursor in its first box. It hides itself while that form is already on screen.

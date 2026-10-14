@@ -6,15 +6,16 @@ Optional manual sync goes to its own small server (`server/`).
 
 It has one screen:
 
-- a three-week calendar (last week, this week, next week) with weekly and monthly totals (bills, income and net) and a weekly Due line (what is left to pay), where each day has a box for extra income
-- the **Current Pay Period** (enter a recent payday and how often you are paid)
+- a three-week calendar (last week, this week, next week; Earlier and Later slide it, Today brings it back; on a phone each day shows its first bill's name) with weekly and monthly totals (bills, income and net) and a weekly Due line (what is left to pay), where each day has a box for extra income
+- the **Current Pay Period** (taken from your biggest Recurring Income source until you save a payday by hand)
 - **Paid History** by month and category
-- **Bills** (add, edit, delete, mark paid, autopay, category filter, search, sort)
+- **Bills** (add, edit, delete, mark paid, autopay, category filter, search, sort by the next date to pay, a "due in the next 2 weeks" filter)
 - **Recurring Income** (a paycheck, for example)
 - a banner at the top for bills due within two days or overdue (autopay bills are never flagged, in the banner or on the calendar)
   with a Mark paid button for each bill listed
 - a + button that jumps to the Add bill form, and a bar with Undo after every delete or Mark paid
 
+Pay Period, Paid History and Recurring Income fold up (and stay folded), and a row of jump links near the top scrolls to each part.
 On a phone the top bar also has a Sync button and a one-line sync note, so syncing does not need the Menu.
 The Menu has Undo/Redo, Sync, Export/Import, Theme (Auto, Light, Dark), App lock and the version.
 

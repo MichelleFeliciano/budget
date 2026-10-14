@@ -64,6 +64,21 @@ Dark. The palette is the variables at the top of `style.css`. The icon is a crea
 ## Comments do not cite design notes
 Second Memory's design notes were not copied here, so comments state the rule directly.
 
+## The pay period follows the paycheck
+Until a payday is saved by hand, the Current Pay Period uses the biggest weekly, biweekly or monthly Recurring Income
+source that has started, so the schedule is only entered once. A payday saved by hand always wins, and saving the
+form with an empty date goes back to the paycheck.
+
+## Bills sort by the next date to pay
+The two due date sorts use each bill's next unpaid date (late bills first), not the date it was first due, because
+for a monthly bill that was added months ago the first date says nothing about what is coming. A bill with nothing
+left to pay sorts last.
+
+## A failed sync is tried once more
+If the server does not answer (a sleeping free server often fails the first request while it wakes), the app waits
+a moment and retries once on its own. A wrong passphrase or an out-of-date copy is never retried. While waiting, the
+status counts the seconds so it does not look stuck.
+
 ## Reminders stay out of the way
 The "download a full backup" reminder is only shown to a device that has never exported and does not sync (a
 syncing device's data also lives on its other devices), and again once an export is older than 30 days. The

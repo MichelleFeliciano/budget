@@ -102,11 +102,27 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <!-- Reminders to download a full backup or to sync; filled by renderBackupNotes. -->
       <div id="backup-notes" hidden></div>
 
-      <div class="collection-toolbar">
+      <!-- Jump links: the page is long, so these scroll to a part (and open it if it is folded up). -->
+      <nav class="jump-links" aria-label="Jump to a part of the page">
+        <button type="button" class="chip" data-jump="budget-month">Calendar</button>
+        <button type="button" class="chip" data-jump="fold-pay-period">Pay period</button>
+        <button type="button" class="chip" data-jump="fold-paid-history">Paid</button>
+        <button type="button" class="chip" data-jump="budget-bills">Bills</button>
+        <button type="button" class="chip" data-jump="fold-recurring-income">Income</button>
+      </nav>
+
+      <div class="collection-toolbar" id="budget-month">
         <h2 id="budget-month-label">This month</h2>
         <p class="budget-month-total" id="budget-month-total"></p>
         <p class="budget-month-income-total" id="budget-month-income-total"></p>
         <p class="budget-month-net-total" id="budget-month-net-total"></p>
+      </div>
+
+      <!-- Slide the three weeks shown earlier or later; Today brings them back (the totals above stay this month's). -->
+      <div class="calendar-nav">
+        <button type="button" class="calendar-nav-btn" id="calendar-prev" aria-label="Show earlier weeks">&lsaquo; Earlier</button>
+        <button type="button" class="calendar-nav-btn" id="calendar-today" disabled>Today</button>
+        <button type="button" class="calendar-nav-btn" id="calendar-next" aria-label="Show later weeks">Later &rsaquo;</button>
       </div>
 
       <div class="budget-calendar" id="budget-calendar">
@@ -121,9 +137,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
       <p class="stats-line" id="budget-stats"></p>
 
-      <div class="collection-toolbar">
-        <h2>Current Pay Period</h2>
-      </div>
+      <details class="fold" id="fold-pay-period" open>
+      <summary class="fold-summary"><h2>Current Pay Period</h2></summary>
       <form id="payday-settings-form" class="add-form">
         <label class="date-field">A recent payday
           <input type="date" id="payday-date-input" min="1990-01-01" max="2100-12-31" aria-label="A recent payday">
@@ -135,22 +150,27 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         </select>
         <button type="submit">Save</button>
       </form>
+      <!-- Says where the payday schedule came from when it was taken from Recurring Income; filled by renderPayPeriod. -->
+      <p class="stats-line" id="pay-period-source" hidden></p>
       <p class="stats-line" id="pay-period-summary"></p>
       <p class="stats-line" id="pay-period-income-total"></p>
       <p class="stats-line" id="pay-period-net-total"></p>
       <ul class="card-list flat-list" id="pay-period-bills-list"></ul>
       <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
+      </details>
 
+      <details class="fold" id="fold-paid-history" open>
+      <summary class="fold-summary"><h2>Paid History</h2></summary>
       <div class="collection-toolbar">
-        <h2>Paid History</h2>
         <button type="button" class="paid-history-nav" id="paid-history-prev" aria-label="Previous month">&lsaquo;</button>
         <span class="paid-history-label" id="paid-history-label"></span>
         <button type="button" class="paid-history-nav" id="paid-history-next" aria-label="Next month">&rsaquo;</button>
       </div>
       <ul class="card-list flat-list" id="paid-history-list"></ul>
       <p class="empty-state" id="paid-history-empty" hidden>No bills marked paid this month.</p>
+      </details>
 
-      <div class="collection-toolbar">
+      <div class="collection-toolbar" id="budget-bills">
         <h2>Bills</h2>
         <input type="search" id="budget-search-input" placeholder="Search bills…" aria-label="Search bills">
         <select id="budget-sort-input" aria-label="Sort bills">
@@ -160,11 +180,13 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <option value="amount_desc">Sort: Amount (High to Low)</option>
           <option value="amount_asc">Sort: Amount (Low to High)</option>
         </select>
+        <!-- Shows only bills that are overdue or due within two weeks. -->
+        <button type="button" class="chip" id="budget-soon-filter" aria-pressed="false">Due in the next 2 weeks</button>
       </div>
 
       <form id="budget-add-form" class="add-form add-form-stacked">
         <input type="text" id="budget-name-input" placeholder="Bill name" required aria-label="Bill name">
-        <input type="number" id="budget-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Bill amount">
+        <input type="number" inputmode="decimal" id="budget-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Bill amount">
         <label class="date-field">Due date
           <input type="date" id="budget-duedate-input" min="1990-01-01" max="2100-12-31" required aria-label="Due date">
         </label>
@@ -186,13 +208,13 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <ul class="card-list flat-list" id="budget-list"></ul>
 
       <p class="empty-state" id="budget-empty-state" hidden>No bills yet — add your first one above.</p>
+      <p class="empty-state" id="budget-filter-empty" hidden>No bills are overdue or due in the next two weeks.</p>
 
-      <div class="collection-toolbar">
-        <h2>Recurring Income</h2>
-      </div>
+      <details class="fold" id="fold-recurring-income" open>
+      <summary class="fold-summary"><h2>Recurring Income</h2></summary>
       <form id="recurring-income-add-form" class="add-form add-form-stacked">
         <input type="text" id="recurring-income-name-input" placeholder="Source name (e.g. Paycheck)" required aria-label="Income source name">
-        <input type="number" id="recurring-income-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Income amount">
+        <input type="number" inputmode="decimal" id="recurring-income-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Income amount">
         <label class="date-field">First occurrence
           <input type="date" id="recurring-income-startdate-input" min="1990-01-01" max="2100-12-31" required aria-label="First occurrence date">
         </label>
@@ -208,6 +230,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </form>
       <ul class="card-list flat-list" id="recurring-income-list"></ul>
       <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
+      </details>
     </section>
   </main>
 </div>
@@ -232,7 +255,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     </div>
     <form class="bill-edit-form" hidden>
       <input type="text" class="bill-edit-name" placeholder="Bill name" required aria-label="Edit bill name">
-      <input type="number" class="bill-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit bill amount">
+      <input type="number" inputmode="decimal" class="bill-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit bill amount">
       <small class="bill-edit-hint">Payments already marked paid keep the amount they were paid at.</small>
       <label class="date-field">Due date
         <input type="date" class="bill-edit-duedate" min="1990-01-01" max="2100-12-31" required aria-label="Edit due date">
@@ -273,7 +296,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     </div>
     <form class="recurring-income-edit-form" hidden>
       <input type="text" class="recurring-income-edit-name" placeholder="Source name" required aria-label="Edit income source name">
-      <input type="number" class="recurring-income-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit income amount">
+      <input type="number" inputmode="decimal" class="recurring-income-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit income amount">
       <label class="date-field">First occurrence
         <input type="date" class="recurring-income-edit-startdate" min="1990-01-01" max="2100-12-31" required aria-label="Edit first occurrence date">
       </label>

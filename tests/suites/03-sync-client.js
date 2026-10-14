@@ -113,6 +113,7 @@ check('one sync sends it all back (no second tap needed)', server.collections.bi
 check('it says the server had been reset, as a success', /server had been reset/.test(status()) && $('sync-status-text').classList.contains('sync-ok'), status());
 check('after that everything is in step', pending() === '');
 
+SYNC_RETRY_DELAY_MS = 0; // the one automatic retry (tested below) would otherwise add a wait to every failing case
 // ---- problems are reported plainly ----
 server.mode = '426'; await runSync(); await sleep(30);
 check('an out-of-date copy is told to reload', /out of date/.test(status()), status());
@@ -150,6 +151,14 @@ await runSync(); await sleep(30);
 check('a request that times out says so', /timed out/i.test(status()), status());
 window.fetch = realFetch;
 SYNC_WAKE_NOTICE_MS = 5000;
+
+// ---- one automatic retry when the server does not answer the first time ----
+let failedOnce = false;
+window.fetch = (...args) => { if (!failedOnce) { failedOnce = true; return Promise.reject(new TypeError('network')); } return realFetch(...args); };
+await runSync(); await sleep(60);
+window.fetch = realFetch;
+check('a first request that fails is retried once and the sync then succeeds', failedOnce && /Synced/.test(status()), status());
+SYNC_RETRY_DELAY_MS = 1500;
 
 // ---- only the three Budget lists are ever sent ----
 check('every request names only bills, income and recurringIncome', server.calls.every((c) => Object.keys(c.body.collections).every((k) => ['bills', 'income', 'recurringIncome'].includes(k))));
