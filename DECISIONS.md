@@ -79,6 +79,17 @@ If the server does not answer (a sleeping free server often fails the first requ
 a moment and retries once on its own. A wrong passphrase or an out-of-date copy is never retried. While waiting, the
 status counts the seconds so it does not look stuck.
 
+## A repeating bill with an old date can start caught up
+A monthly bill first due months ago would show every month since as unpaid and overdue. The Add bill form offers
+"I'm caught up" (ticked) for a repeating bill whose date is in the past, which marks every date before today paid in
+the bill's first save, so one Undo still removes the whole bill. One-time bills are never offered it, because an old
+one-time bill really is overdue. A card with two or more unpaid earlier dates can do the same in one tap.
+
+## Calendar reminders are a file, not notifications
+The app cannot push alerts (there is no server that knows when you are away), so the Menu can export the bills as an
+.ics file for the phone's own calendar, which does send reminders. Each bill starts at its next unpaid date, because
+the file cannot know what is paid. A bill due on the 29th or 30th is skipped by calendars in months without that day.
+
 ## Reminders stay out of the way
 The "download a full backup" reminder is only shown to a device that has never exported and does not sync (a
 syncing device's data also lives on its other devices), and again once an export is older than 30 days. The

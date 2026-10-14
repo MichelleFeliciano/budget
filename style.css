@@ -278,7 +278,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 .undo-redo-panel button,
 .data-io-btn {
-  flex: 1;
+  flex: 1 1 40%;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -433,6 +433,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 .data-io-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -773,6 +774,10 @@ input[type="date"]::-webkit-date-and-time-value {
    inside the edit forms (which style every input like a text box). */
 
 .check-field { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); }
+
+/* display: flex above would otherwise beat the hidden attribute. */
+
+.check-field[hidden] { display: none; }
 
 /* A checkbox in a check field stays a plain checkbox. */
 
@@ -1766,6 +1771,15 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 /* ===== 11b. Folding parts, jump links and calendar buttons ===== */
 
+/* The Text size button in the Menu scales everything: sizes are in rem, so changing the root size is enough. */
+
+html[data-text="large"] { font-size: 112.5%; }
+html[data-text="xlarge"] { font-size: 125%; }
+
+/* The "new version is ready" bar stands out from the reminder banners with the accent colour. */
+
+.update-banner { border-color: var(--accent); }
+
 /* The Earlier / Today / Later buttons above the calendar. */
 
 .calendar-nav {
@@ -2040,7 +2054,8 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* Mark as paid gets a full-width row on top. */
 
-  .bill-actions .mark-oldest-paid-btn { flex: 1 1 100%; }
+  .bill-actions .mark-oldest-paid-btn,
+  .bill-actions .catch-up-btn { flex: 1 1 100%; }
 
   /* The other card buttons (Edit, Delete) share the row below it and are finger-sized. */
 

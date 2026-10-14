@@ -16,6 +16,11 @@ It has one screen:
 - a + button that jumps to the Add bill form, and a bar with Undo after every delete or Mark paid
 
 Pay Period, Paid History and Recurring Income fold up (and stay folded), and a row of jump links near the top scrolls to each part.
+Adding a repeating bill with an old date offers "I'm caught up" (earlier dates start paid), and a card can mark its
+earlier dates paid in one tap. The pay period shows the next payday and what is left after unpaid bills. The Menu also
+has Text size (Normal, Large, Largest), Share backup (where the phone can share files) and Calendar reminders (a
+calendar file with each bill as a repeating event). When a newer version of the app has installed itself, a bar at the
+top offers Update now. `DEVICE-CHECKLIST.md` lists what to try on real phones.
 On a phone the top bar also has a Sync button and a one-line sync note, so syncing does not need the Menu.
 The Menu has Undo/Redo, Sync, Export/Import, Theme (Auto, Light, Dark), App lock and the version.
 

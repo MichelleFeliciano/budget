@@ -7,6 +7,8 @@
 <!-- Applies a Light/Dark theme chosen in the Menu before the page paints, so it does not flash. -->
 <script>
 try { var t = localStorage.getItem('budgetApp.theme.v1'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) { /* storage unavailable: follow the device */ }
+// The text size chosen in the Menu (Large or Largest) is applied before the page paints too.
+try { var sz = localStorage.getItem('budgetApp.textSize.v1'); if (sz === 'large' || sz === 'xlarge') document.documentElement.setAttribute('data-text', sz); } catch (e) { /* storage unavailable: normal size */ }
 // If an app lock is set, start locked (the lock screen is shown by CSS until the PIN is entered).
 try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.setAttribute('data-locked', '1'); } catch (e) { /* storage unavailable: no lock */ }
 </script>
@@ -69,6 +71,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <div class="data-io-buttons">
         <button type="button" id="export-data-btn" class="data-io-btn">Export data</button>
         <button type="button" id="import-data-btn" class="data-io-btn">Import data</button>
+        <!-- Only shown where the browser can share a file (most phones); app.js decides. -->
+        <button type="button" id="share-data-btn" class="data-io-btn" hidden>Share backup</button>
+        <button type="button" id="calendar-export-btn" class="data-io-btn" title="Download a calendar file with your bills, to add reminders to your phone's calendar">Calendar reminders</button>
       </div>
       <input type="file" id="import-file-input" accept="application/json,.json" hidden>
       <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
@@ -78,6 +83,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     <div class="data-io">
       <div class="data-io-buttons">
         <button type="button" id="theme-btn" class="data-io-btn">Theme: Auto</button>
+        <button type="button" id="text-size-btn" class="data-io-btn">Text size: Normal</button>
         <button type="button" id="lock-btn" class="data-io-btn">App lock: Off</button>
         <button type="button" id="lock-now-btn" class="data-io-btn" hidden>Lock now</button>
       </div>
@@ -91,6 +97,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
          (renderPayPeriod), paid history (renderPaidHistory), bills (budget-card-template via renderBudgetList),
          and recurring income (recurring-income-card-template via renderRecurringIncomeList). renderBudget runs them all. -->
     <section class="collection" id="budget-collection">
+      <!-- Shown when a newer copy of the app has been installed in the background; Update now reloads into it. -->
+      <div class="reminder-banner update-banner" id="update-banner" role="status" hidden>
+        <span class="reminder-banner-text">A new version of Budget is ready.</span>
+        <button type="button" id="update-now-btn" class="reminder-banner-btn">Update now</button>
+      </div>
       <!-- Banner for bills due within a couple of days or overdue (autopay bills are never counted as overdue); filled by renderReminderBanner. -->
       <div class="reminder-banner" id="reminder-banner" role="status" hidden>
         <span class="reminder-banner-text" id="reminder-banner-text"></span>
@@ -155,6 +166,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <p class="stats-line" id="pay-period-summary"></p>
       <p class="stats-line" id="pay-period-income-total"></p>
       <p class="stats-line" id="pay-period-net-total"></p>
+      <p class="stats-line" id="pay-period-next"></p>
+      <p class="stats-line" id="pay-period-left"></p>
       <ul class="card-list flat-list" id="pay-period-bills-list"></ul>
       <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
       </details>
@@ -199,6 +212,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         </select>
         <input type="text" id="budget-category-input" placeholder="Category (optional)" aria-label="Bill category">
         <label class="check-field"><input type="checkbox" id="budget-autopay-input"> Pays automatically (autopay)</label>
+        <!-- Offered only for a repeating bill with a due date in the past (see updateCaughtUpOption). -->
+        <label class="check-field" id="budget-caughtup-field" hidden><input type="checkbox" id="budget-caughtup-input" checked> I'm caught up: mark the dates before today as paid</label>
         <p class="form-error" id="budget-form-error" hidden></p>
         <button type="submit">Add bill</button>
       </form>
@@ -249,6 +264,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </div>
       <div class="bill-actions">
         <button type="button" class="mark-oldest-paid-btn" title="Mark the oldest unpaid date as paid">Mark paid</button>
+        <!-- Shown only when two or more earlier dates are unpaid. -->
+        <button type="button" class="catch-up-btn" title="Mark every unpaid date before today as paid" hidden>Mark earlier dates paid</button>
         <button type="button" class="edit-btn">Edit</button>
         <button type="button" class="delete-btn" aria-label="Delete bill">Delete</button>
       </div>

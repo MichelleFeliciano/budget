@@ -187,3 +187,74 @@ const peekCell = document.querySelector(`.budget-day-cell[data-date-key="${dk(1)
 check('a day with bills carries the first name and how many more', !!peekCell && /Peek/.test(peekCell.querySelector('.budget-day-peek-name').textContent) && peekCell.querySelector('.budget-day-peek-more').textContent === '+1');
 check('a day with nothing has no name line', !document.querySelector(`.budget-day-cell[data-date-key="${dk(2)}"] .budget-day-peek`));
 hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- "I'm caught up" when adding a repeating bill with a past date, and one-tap catch-up on a card ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; renderBudget(); hideUndoToast();
+const fire = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
+$('budget-name-input').value = 'Old rent'; $('budget-amount-input').value = '100';
+$('budget-duedate-input').value = dk(-70); fire($('budget-duedate-input'), 'input');
+check('a repeating bill with a past date offers "I\'m caught up", ticked', !$('budget-caughtup-field').hidden && $('budget-caughtup-input').checked === true);
+$('budget-frequency-input').value = 'one_time'; fire($('budget-frequency-input'), 'change');
+check('a one-time bill with a past date does not', $('budget-caughtup-field').hidden === true);
+$('budget-frequency-input').value = 'monthly'; fire($('budget-frequency-input'), 'change');
+check('switching back to monthly offers it again', !$('budget-caughtup-field').hidden);
+$('budget-add-form').requestSubmit();
+const unpaidBefore = (name) => unpaidAmountThrough(bills.find((b) => b.name === name), dk(-1));
+check('caught up: nothing earlier is unpaid, and the amounts paid are recorded', unpaidBefore('Old rent') === 0 && bills[0].paidDates.length >= 2 && Object.keys(bills[0].paidAmounts).length === bills[0].paidDates.length);
+check('the box goes away again after adding', $('budget-caughtup-field').hidden === true);
+$('budget-name-input').value = 'Left behind'; $('budget-amount-input').value = '50';
+$('budget-duedate-input').value = dk(-70); fire($('budget-duedate-input'), 'input');
+$('budget-caughtup-input').checked = false;
+$('budget-add-form').requestSubmit();
+check('not ticked: the old dates stay unpaid', unpaidBefore('Left behind') > 50);
+const behindCard = document.querySelector(`.bill-card[data-bill-id="${bills.find((b) => b.name === 'Left behind').id}"]`);
+check('the card offers Mark earlier dates paid', !behindCard.querySelector('.catch-up-btn').hidden);
+check('a caught-up bill\'s card does not', document.querySelector(`.bill-card[data-bill-id="${bills.find((b) => b.name === 'Old rent').id}"] .catch-up-btn`).hidden === true);
+behindCard.querySelector('.catch-up-btn').click();
+check('one tap catches it up', unpaidBefore('Left behind') === 0 && /paid/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click();
+check('one undo puts every date back', unpaidBefore('Left behind') > 50);
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- the "new version is ready" bar ----
+check('the new-version bar starts hidden, with an Update now button', $('update-banner').hidden === true && !!$('update-now-btn'));
+showUpdateBanner();
+check('and shows when asked', $('update-banner').hidden === false);
+$('update-banner').hidden = true;
+
+// ---- text size ----
+applyTextSize('large');
+check('Large sets the size on the page and remembers it', document.documentElement.getAttribute('data-text') === 'large' && localStorage.getItem('budgetApp.textSize.v1') === 'large' && /Large/.test($('text-size-btn').textContent), $('text-size-btn').textContent);
+$('text-size-btn').click();
+check('the button goes on to Largest', document.documentElement.getAttribute('data-text') === 'xlarge' && /Largest/.test($('text-size-btn').textContent));
+$('text-size-btn').click();
+check('and back to Normal, forgetting the choice', !document.documentElement.hasAttribute('data-text') && localStorage.getItem('budgetApp.textSize.v1') === null && /Normal/.test($('text-size-btn').textContent));
+
+// ---- next payday and what is left after unpaid bills ----
+income.length = 0; recurringIncome.length = 0; bills.length = 0;
+localStorage.setItem('budgetApp.paydaySettings.v1', JSON.stringify({ payDateKey: dk(-3), frequency: 'biweekly' }));
+addBill({ name: 'Pay bill', amount: '100', dueDate: dk(2), frequency: 'one_time', category: '', autopay: false });
+check('the pay period says when the next payday is', /^Next payday: .* · in 11 days$/.test($('pay-period-next').textContent), $('pay-period-next').textContent);
+check('and what is left after the unpaid bills', /Left after unpaid bills: -\$100\.00/.test($('pay-period-left').textContent), $('pay-period-left').textContent);
+toggleBillPaid(bills[0].id, dk(2), true);
+check('paying the bill raises what is left', /Left after unpaid bills: \$0\.00/.test($('pay-period-left').textContent), $('pay-period-left').textContent);
+check('while the net, as always, does not move', /Net this pay period: -\$100\.00/.test($('pay-period-net-total').textContent), $('pay-period-net-total').textContent);
+localStorage.removeItem('budgetApp.paydaySettings.v1');
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- sharing a backup ----
+check('the Share backup button shows only where the browser can share files', $('share-data-btn').hidden === !CAN_SHARE_FILES);
+
+// ---- calendar reminders (.ics) ----
+check('with no bills there is no calendar file', buildCalendarFile() === null);
+addBill({ name: 'Rent, home', amount: '900', dueDate: dk(2), frequency: 'monthly', category: '', autopay: false });
+addBill({ name: 'Netflix', amount: '15', dueDate: dk(3), frequency: 'monthly', category: '', autopay: true });
+addBill({ name: 'Old one-off', amount: '5', dueDate: dk(-30), frequency: 'one_time', category: '', autopay: false });
+const ics = buildCalendarFile();
+check('the file is a calendar with CRLF line endings', ics.startsWith('BEGIN:VCALENDAR\r\n') && ics.endsWith('END:VCALENDAR\r\n') && !/[^\r]\n/.test(ics));
+check('a monthly bill repeats monthly and its comma is escaped', ics.includes('RRULE:FREQ=MONTHLY') && ics.includes('SUMMARY:Pay Rent\\, home ($900.00)'));
+check('only a bill that does not pay itself gets an alert', (ics.match(/BEGIN:VALARM/g) || []).length === 1 && ics.includes('SUMMARY:Netflix autopay ($15.00)'));
+check('a one-time bill that is long past is left out', !ics.includes('Old one-off'));
+check('the file holds no passphrase or device id', !/tok|deviceId/.test(ics));
+check('events start on a date, with no time', /DTSTART;VALUE=DATE:\d{8}\r\n/.test(ics));
+hideUndoToast(); bills.length = 0; renderBudget();

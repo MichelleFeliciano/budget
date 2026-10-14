@@ -796,6 +796,12 @@ function addBill(fields) {
     deleted: false,
     version: 0,
   };
+  // "I'm caught up": every date up to paidThrough starts out paid (one undo still removes the whole bill).
+  if (fields.paidThrough) {
+    const dates = occurrenceDatesThrough(bill, fields.paidThrough);
+    bill.paidDates = dates;
+    bill.paidAmounts = Object.fromEntries(dates.map((dateKey) => [dateKey, bill.amount]));
+  }
   bills.push(bill);
   saveCollection(BILLS_KEY, bills);
   recordUndo('bills', bill.id, null, structuredClone(bill));
@@ -821,6 +827,36 @@ function nthOccurrenceDate(bill, n) {
     return dateKeyFromParts(y, anchor.m, Math.min(anchor.d, daysInMonth(y, anchor.m)));
   }
   return null;
+}
+
+// Every date a bill is due on, from its first one up to and including throughKey (5000 at most, as a safety stop).
+function occurrenceDatesThrough(bill, throughKey) {
+  const dates = [];
+  for (let n = 0; n < 5000; n += 1) {
+    const dateKey = nthOccurrenceDate(bill, n);
+    if (!dateKey || dateKey > throughKey) break;
+    dates.push(dateKey);
+  }
+  return dates;
+}
+
+// Marks every unpaid date of a bill up to throughKey as paid in one change, so one Undo undoes them all.
+function catchUpBill(billId, throughKey) {
+  const bill = bills.find((b) => b.id === billId);
+  if (!bill) return;
+  const before = structuredClone(bill);
+  const paidSet = new Set(bill.paidDates || []);
+  const amounts = { ...(bill.paidAmounts || {}) };
+  occurrenceDatesThrough(bill, throughKey).forEach((dateKey) => {
+    paidSet.add(dateKey);
+    if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = bill.amount;
+  });
+  bill.paidDates = [...paidSet];
+  bill.paidAmounts = amounts;
+  stampSync(bill);
+  saveCollection(BILLS_KEY, bills);
+  recordUndo('bills', billId, before, structuredClone(bill));
+  renderBudget();
 }
 
 // Saves edits to a bill. Never touches paidDates except to carry existing payments over to a new
@@ -1353,6 +1389,8 @@ function renderPayPeriod() {
     summaryEl.textContent = '';
     if (incomeEl) incomeEl.textContent = '';
     if (netEl) netEl.textContent = '';
+    document.getElementById('pay-period-next').textContent = '';
+    document.getElementById('pay-period-left').textContent = '';
     emptyEl.textContent = settings.payDateKey
       ? 'That payday is in the future, so there is no current pay period yet.'
       : 'Set a recent payday above to see the current pay period.';
@@ -1401,6 +1439,16 @@ function renderPayPeriod() {
     recurringIncome.filter((r) => !r.deleted)
   );
   const periodNet = periodIncome - grandTotal;
+  // The next payday, and what is left once the bills in this period that are still unpaid are covered.
+  const periodUnpaid = matches.reduce((sum, m) => sum + m.occurrenceDates
+    .filter((dateKey) => !(m.bill.paidDates || []).includes(dateKey))
+    .reduce((s, dateKey) => s + occurrenceAmount(m.bill, dateKey), 0), 0);
+  const periodLeft = periodIncome - periodUnpaid;
+  document.getElementById('pay-period-next').textContent = periodEnd
+    ? `Next payday: ${formatDateKeyShort(periodEnd)} · ${whenLabel(daysUntilDateKey(periodEnd))}`
+    : '';
+  document.getElementById('pay-period-left').innerHTML =
+    `Left after unpaid bills: <strong class="${signedAmountClass(periodLeft)}">${formatSignedCurrency(periodLeft)}</strong>`;
   if (incomeEl) {
     incomeEl.innerHTML = `Income this pay period: <strong>${formatSignedCurrency(periodIncome)}</strong>`;
   }
@@ -1488,6 +1536,7 @@ function closeCalendarDay({ refocus = false } = {}) {
 function startBillOnDate(dateKey) {
   closeCalendarDay();
   document.getElementById('budget-duedate-input').value = dateKey;
+  updateCaughtUpOption();
   document.getElementById('budget-add-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
   document.getElementById('budget-name-input').focus({ preventScroll: true });
 }
@@ -1922,6 +1971,12 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       if (target) toggleBillPaid(bill.id, target, true);
     });
 
+    // Offered when two or more earlier dates are unpaid (a bill added with an old date, say): one tap catches up.
+    const catchUpBtn = node.querySelector('.catch-up-btn');
+    const yesterdayK = shiftDateKey(todayK, -1);
+    catchUpBtn.hidden = Math.round(unpaidAmountThrough(bill, yesterdayK) / bill.amount) < 2;
+    catchUpBtn.addEventListener('click', () => catchUpBill(bill.id, yesterdayK));
+
     const editNameInput = node.querySelector('.bill-edit-name');
     const editAmountInput = node.querySelector('.bill-edit-amount');
     const editDueDateInput = node.querySelector('.bill-edit-duedate');
@@ -2186,6 +2241,10 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
     frequency: frequencyInput.value,
     category: categoryInput.value,
     autopay: document.getElementById('budget-autopay-input').checked,
+    // When the "I'm caught up" box is showing and ticked, every date before today starts out paid.
+    paidThrough: !document.getElementById('budget-caughtup-field').hidden && document.getElementById('budget-caughtup-input').checked
+      ? shiftDateKey(todayKey(), -1)
+      : null,
   });
 
   if (!result.ok) {
@@ -2201,11 +2260,26 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   dueDateInput.value = todayKey();
   frequencyInput.value = 'monthly';
   categoryInput.value = '';
+  updateCaughtUpOption();
   showNewBillCard(result.id);
 });
 
 // The due date starts on today (a day's "Add a bill on this day" button changes it).
 document.getElementById('budget-duedate-input').value = todayKey();
+
+// Shows the "I'm caught up" tick box only for a repeating bill whose due date is in the past (a one-time
+// bill that old really is overdue); it starts ticked each time it appears, so the usual answer is one tap fewer.
+function updateCaughtUpOption() {
+  const field = document.getElementById('budget-caughtup-field');
+  const dueDate = document.getElementById('budget-duedate-input').value;
+  const show = !!dueDate && dueDate < todayKey() && document.getElementById('budget-frequency-input').value !== 'one_time';
+  if (show && field.hidden) document.getElementById('budget-caughtup-input').checked = true;
+  field.hidden = !show;
+}
+['budget-duedate-input', 'budget-frequency-input'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', updateCaughtUpOption);
+  document.getElementById(id).addEventListener('change', updateCaughtUpOption);
+});
 
 // Scrolls to a just-added bill's card and flashes it, so it is clear where it landed in the sorted list.
 function showNewBillCard(billId) {
@@ -2977,7 +3051,7 @@ async function runSync() {
         return;
       }
       if (boot.kind === 'outdated') {
-        setSyncStatus('This copy is out of date — close and reopen the app, then tap Sync now', 'failed');
+        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed'); checkForNewVersion();
         return;
       }
       if (boot.kind !== 'ok') {
@@ -3010,7 +3084,7 @@ async function runSync() {
         return;
       }
       if (result.kind === 'outdated') {
-        setSyncStatus('This copy is out of date — close and reopen the app, then tap Sync now', 'failed');
+        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed'); checkForNewVersion();
         return;
       }
       if (result.kind !== 'ok') {
@@ -3183,6 +3257,115 @@ function exportData() {
   setTimeout(() => URL.revokeObjectURL(url), 10000); // revoking at once can cancel the download on iOS/Safari
   setDataIoStatus('Backup downloaded. Keep the file somewhere private.', 'ok');
   renderBackupNotes();
+}
+
+// True where the browser can hand a file to the phone's share sheet (Files, Drive, email, messages...).
+const CAN_SHARE_FILES = (() => {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['{}'], 'budget.json', { type: 'application/json' })] })); } catch { return false; }
+})();
+
+// Shares the full backup through the share sheet instead of downloading it. Cancelling the sheet is not an error.
+async function shareBackup() {
+  const file = new File([JSON.stringify(buildExportPayload(), null, 2)], `budget-export-${todayKey()}.json`, { type: 'application/json' });
+  try {
+    await navigator.share({ files: [file], title: 'Budget backup' });
+    recordBackupTime(EXPORT_AT_KEY);
+    setDataIoStatus('Backup shared. Keep the file somewhere private.', 'ok');
+    renderBackupNotes();
+  } catch (err) {
+    if (!err || err.name !== 'AbortError') setDataIoStatus('Could not share the backup. Use Export data instead.', 'failed');
+  }
+}
+
+// ---- Calendar reminders (.ics) ----
+// A calendar file with each bill as a repeating all-day event (and, unless it pays itself, an alert at 9am the day
+// before), so the phone's own calendar can remind you with no server. It cannot know what is paid, so each bill
+// starts at its next unpaid date. Importing it again updates the same events in most calendar apps.
+
+// Escapes text for an .ics field.
+function icsEscape(text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+}
+
+// Folds a long line the way calendar files require (a continuation line starts with a space).
+function icsFold(line) {
+  const parts = [];
+  let rest = line;
+  while (rest.length > 60) {
+    parts.push(rest.slice(0, 60));
+    rest = ` ${rest.slice(60)}`;
+  }
+  parts.push(rest);
+  return parts.join('\r\n');
+}
+
+// The repeat rule for a bill, or null for a one-time bill. A bill due on the 31st repeats on each month's last
+// day (like the calendar on screen); the 29th and 30th are skipped by calendars in months without them.
+function icsRepeatRule(bill) {
+  const day = parseDateKey(bill.dueDate).d;
+  if (bill.frequency === 'weekly') return 'FREQ=WEEKLY';
+  if (bill.frequency === 'biweekly') return 'FREQ=WEEKLY;INTERVAL=2';
+  if (bill.frequency === 'yearly') return 'FREQ=YEARLY';
+  if (bill.frequency === 'monthly') {
+    if (day <= 28) return 'FREQ=MONTHLY';
+    return day === 31 ? 'FREQ=MONTHLY;BYMONTHDAY=-1' : `FREQ=MONTHLY;BYMONTHDAY=${day}`;
+  }
+  return null;
+}
+
+// The text of the calendar file, or null when no bill has an upcoming date.
+function buildCalendarFile() {
+  const todayK = todayKey();
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const events = [];
+  bills.filter((b) => !b.deleted).forEach((bill) => {
+    let start = null;
+    for (let i = 0; i <= 366 && !start; i += 1) {
+      const dateKey = shiftDateKey(todayK, i);
+      if (occursOnDate(bill, dateKey) && !(bill.paidDates || []).includes(dateKey)) start = dateKey;
+    }
+    if (!start) return;
+    const rule = icsRepeatRule(bill);
+    const money = `$${bill.amount.toFixed(2)}`;
+    const lines = [
+      'BEGIN:VEVENT',
+      `UID:${bill.id}@budget-app`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${start.replace(/-/g, '')}`,
+    ];
+    if (rule) lines.push(`RRULE:${rule}`);
+    lines.push(
+      `SUMMARY:${icsEscape(bill.autopay ? `${bill.name} autopay (${money})` : `Pay ${bill.name} (${money})`)}`,
+      'DESCRIPTION:From your Budget app. Tick it paid there.',
+      'TRANSP:TRANSPARENT'
+    );
+    if (!bill.autopay) {
+      lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(`${bill.name} is due tomorrow`)}`, 'TRIGGER:-PT15H', 'END:VALARM');
+    }
+    lines.push('END:VEVENT');
+    events.push(...lines);
+  });
+  if (!events.length) return null;
+  return [...['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Budget//Bills//EN', 'CALSCALE:GREGORIAN'], ...events, 'END:VCALENDAR']
+    .map(icsFold).join('\r\n') + '\r\n';
+}
+
+// Downloads that calendar file.
+function exportCalendar() {
+  const text = buildCalendarFile();
+  if (!text) {
+    setDataIoStatus('No upcoming bills to add to a calendar.', 'failed');
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'budget-reminders.ics';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  setDataIoStatus('Calendar file downloaded. Open it to add your bills to your calendar.', 'ok');
 }
 
 // Finds the lists in a parsed file: `{ collections: {...} }` (what buildExportPayload makes) or a
@@ -3419,6 +3602,9 @@ function importData(parsed) {
 
 // Menu buttons: Export downloads a backup; Import opens the file picker.
 document.getElementById('export-data-btn').addEventListener('click', exportData);
+document.getElementById('share-data-btn').hidden = !CAN_SHARE_FILES;
+document.getElementById('share-data-btn').addEventListener('click', shareBackup);
+document.getElementById('calendar-export-btn').addEventListener('click', exportCalendar);
 
 document.getElementById('import-data-btn').addEventListener('click', () => {
   document.getElementById('import-file-input').click();
@@ -3474,7 +3660,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -3507,6 +3693,39 @@ document.getElementById('theme-btn').addEventListener('click', () => {
   applyTheme(THEMES[(THEMES.indexOf(loadTheme()) + 1) % THEMES.length]);
 });
 applyTheme(loadTheme());
+
+// localStorage key for the chosen text size, and the choices in the order the Text size button cycles them.
+const TEXT_SIZE_KEY = 'budgetApp.textSize.v1';
+const TEXT_SIZES = ['normal', 'large', 'xlarge'];
+const TEXT_SIZE_LABELS = { normal: 'Normal', large: 'Large', xlarge: 'Largest' };
+
+// Reads the saved text size; anything unexpected means normal.
+function loadTextSize() {
+  try {
+    const value = localStorage.getItem(TEXT_SIZE_KEY);
+    return TEXT_SIZES.includes(value) ? value : 'normal';
+  } catch {
+    return 'normal';
+  }
+}
+
+// Applies and saves a text size: Large and Largest set <html data-text> (CSS scales everything from it), Normal removes it.
+function applyTextSize(size) {
+  if (size === 'normal') document.documentElement.removeAttribute('data-text');
+  else document.documentElement.setAttribute('data-text', size);
+  try {
+    if (size === 'normal') localStorage.removeItem(TEXT_SIZE_KEY);
+    else localStorage.setItem(TEXT_SIZE_KEY, size);
+  } catch { /* storage unavailable: the choice lasts until the page closes */ }
+  const btn = document.getElementById('text-size-btn');
+  if (btn) btn.textContent = `Text size: ${TEXT_SIZE_LABELS[size]}`;
+}
+
+// The Text size button cycles Normal -> Large -> Largest.
+document.getElementById('text-size-btn').addEventListener('click', () => {
+  applyTextSize(TEXT_SIZES[(TEXT_SIZES.indexOf(loadTextSize()) + 1) % TEXT_SIZES.length]);
+});
+applyTextSize(loadTextSize());
 // Show the version number in the Menu.
 document.getElementById('app-version').textContent = `Version ${APP_VERSION}`;
 
@@ -3824,7 +4043,30 @@ safeRender(renderBudget);
 updateUndoRedoButtons();
 initSyncUI();
 
+// Shows the "new version is ready" bar at the top of the page.
+function showUpdateBanner() {
+  document.getElementById('update-banner').hidden = false;
+}
+
+// Asks the browser to look for a newer copy of the app now; if there is one it installs in the background
+// and the "new version is ready" bar appears.
+function checkForNewVersion() {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.getRegistration().then((registration) => registration && registration.update()).catch(() => {});
+  } catch {
+    // Some pages cannot use a service worker (private windows, embedded frames): there is just nothing to check.
+  }
+}
+
+// The bar's button reloads into the new copy.
+document.getElementById('update-now-btn').addEventListener('click', () => location.reload());
+
 if ('serviceWorker' in navigator) {
+  // A new service worker taking over a page that already had one means a newer app is installed than the
+  // one this page is running; offer the reload. (The very first install has no earlier worker: no bar.)
+  const hadServiceWorker = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadServiceWorker) showUpdateBanner(); });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then((registration) => {
       registration.update();
