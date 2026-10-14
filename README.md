@@ -12,7 +12,10 @@ It has one screen:
 - **Bills** (add, edit, delete, mark paid, autopay, category filter, search, sort)
 - **Recurring Income** (a paycheck, for example)
 - a banner at the top for bills due within two days or overdue (autopay bills are never flagged, in the banner or on the calendar)
+  with a Mark paid button for each bill listed
+- a + button that jumps to the Add bill form, and a bar with Undo after every delete or Mark paid
 
+On a phone the top bar also has a Sync button and a one-line sync note, so syncing does not need the Menu.
 The Menu has Undo/Redo, Sync, Export/Import, Theme (Auto, Light, Dark), App lock and the version.
 
 ## Run it

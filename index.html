@@ -26,12 +26,20 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
   <!-- Menu: app title, undo/redo, then sync and backup controls. On phones it collapses behind the Menu button. -->
   <nav class="sidebar" id="sidebar-nav-content" aria-label="Menu">
     <div class="sidebar-header">
-      <h1>Budget</h1>
-      <p class="tagline">Bills and income, offline.</p>
-      <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-expanded="false" aria-controls="sidebar-nav-content">
-        <span class="sidebar-toggle-icon" aria-hidden="true"></span>
-        Menu
-      </button>
+      <div class="header-title">
+        <h1>Budget</h1>
+        <p class="tagline">Bills and income, offline.</p>
+        <!-- Phones only: the sync state in a few words, filled by updateQuickSync (shown once sync is set up). -->
+        <p class="quick-sync-note" id="quick-sync-note" role="status" hidden></p>
+      </div>
+      <div class="header-actions">
+        <!-- Phones only: Sync now without opening the Menu (shown once sync is set up). -->
+        <button type="button" id="quick-sync-btn" class="quick-sync-btn" title="Sync now" hidden>Sync</button>
+        <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-expanded="false" aria-controls="sidebar-nav-content">
+          <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+          Menu
+        </button>
+      </div>
     </div>
     <!-- Undo/redo for the last add, edit, delete or move; enabled and labelled by app.js. -->
     <div class="undo-redo-panel">
@@ -87,6 +95,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <div class="reminder-banner" id="reminder-banner" role="status" hidden>
         <span class="reminder-banner-text" id="reminder-banner-text"></span>
         <button type="button" id="reminder-banner-dismiss" class="reminder-banner-btn" aria-label="Dismiss reminder">&times;</button>
+        <!-- One Mark paid button per bill listed (the first few); filled by renderReminderBanner. -->
+        <div class="reminder-banner-actions" id="reminder-banner-actions"></div>
       </div>
 
       <!-- Reminders to download a full backup or to sync; filled by renderBackupNotes. -->
@@ -107,7 +117,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </div>
 
       <!-- Reminder about how the day boxes work: they are extra income, added on top of recurring income. -->
-      <p class="stats-line budget-income-note" id="budget-income-note">The money boxes on each day are extra income (a refund, a side payment). They are added to your recurring income, so do not type a regular paycheck there.</p>
+      <p class="stats-line budget-income-note" id="budget-income-note">The day boxes are for extra income only (a refund, a side payment). Regular paychecks go in Recurring Income below.</p>
 
       <p class="stats-line" id="budget-stats"></p>
 
@@ -215,7 +225,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <span class="bill-category badge" hidden></span>
       </div>
       <div class="bill-actions">
-        <button type="button" class="mark-oldest-paid-btn">Mark oldest unpaid as paid</button>
+        <button type="button" class="mark-oldest-paid-btn" title="Mark the oldest unpaid date as paid">Mark paid</button>
         <button type="button" class="edit-btn">Edit</button>
         <button type="button" class="delete-btn" aria-label="Delete bill">Delete</button>
       </div>
@@ -282,6 +292,15 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     </form>
   </li>
 </template>
+
+<!-- Bar at the bottom after a delete or Mark paid, so a mis-tap can be undone without opening the Menu (showUndoToast). -->
+<div class="undo-toast" id="undo-toast" role="status" hidden>
+  <span id="undo-toast-text"></span>
+  <button type="button" id="undo-toast-btn">Undo</button>
+</div>
+
+<!-- Jumps down to the Add bill form, which is a long way down the page; hidden while the form is on screen. -->
+<button type="button" class="fab" id="add-bill-fab" aria-label="Add a bill" title="Add a bill">+</button>
 
 <!-- App lock screen: shown (by the data-locked attribute on <html>) until the right PIN is typed. -->
 <div class="lock-screen" id="lock-screen" role="dialog" aria-modal="true" aria-labelledby="lock-screen-title">

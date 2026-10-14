@@ -63,3 +63,8 @@ Dark. The palette is the variables at the top of `style.css`. The icon is a crea
 
 ## Comments do not cite design notes
 Second Memory's design notes were not copied here, so comments state the rule directly.
+
+## Reminders stay out of the way
+The "download a full backup" reminder is only shown to a device that has never exported and does not sync (a
+syncing device's data also lives on its other devices), and again once an export is older than 30 days. The
+undo bar appears only after a delete or a Mark paid, never for adds, edits or typing a day's income.

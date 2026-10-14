@@ -214,6 +214,19 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   font-size: 0.85rem;
 }
 
+/* The top-bar Sync button and note only exist on phones; the phone block at the end of the file turns them on. */
+
+.quick-sync-btn,
+.quick-sync-note { display: none; }
+
+/* The title (and the phone sync note) on one side, the buttons on the other. */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* The Menu button only exists on phones; the phone block at the end of the file turns it on. */
 
 .sidebar-toggle {
@@ -1390,6 +1403,7 @@ input[type="date"]::-webkit-date-and-time-value {
 .reminder-banner {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 16px;
   padding: 10px 14px;
@@ -1426,6 +1440,96 @@ input[type="date"]::-webkit-date-and-time-value {
 /* Accent colour when hovered. */
 
 .reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* The Mark paid buttons under a banner's message: a row of their own, gone when there are none. */
+
+.reminder-banner-actions {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Nothing to show when no bill in the banner can be ticked off. */
+
+.reminder-banner-actions:empty { display: none; }
+
+/* A long bill name is cut short rather than stretching the button. */
+
+.reminder-banner-actions .reminder-banner-btn {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar that follows a delete or a Mark paid. It sits under the day sheet (z-index 60) so it never
+   covers the sheet's income box, and leaves room on the right for the + button. */
+
+.undo-toast {
+  position: fixed;
+  left: 12px;
+  right: 76px;
+  bottom: 12px;
+  max-width: 420px;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 13px;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* display: flex above would otherwise beat the hidden attribute. */
+
+.undo-toast[hidden] { display: none; }
+
+/* The toast's Undo button. */
+
+.undo-toast button {
+  flex: none;
+  min-height: 40px;
+  padding: 4px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The round + button that jumps to the Add bill form. */
+
+.fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
+
+.fab[hidden] { display: none; }
+
+/* A bill that is past due says so in the warm accent colour. */
+
+.bill-due-late { color: var(--accent-2); }
 
 /* Shown when the browser refuses to save (storage full or blocked). */
 
@@ -1523,7 +1627,8 @@ html[data-locked] .lock-screen { display: flex; }
 
 /* Hide the app, the storage warning and the dialogs behind the lock screen. */
 
-html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-locked] .lock-backdrop { visibility: hidden; }
+html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-locked] .lock-backdrop,
+html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 /* The dialog for turning the lock on or off sits over the page like a small sheet. */
 
@@ -1668,7 +1773,55 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
   }
+
+  /* The title column may shrink so the buttons never get pushed off the screen. */
+
+  .header-title { min-width: 0; }
+
+  /* The sync state under the title, once sync is set up. */
+
+  .quick-sync-note:not([hidden]) {
+    display: block;
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  /* A failed or attention-needing sync is warm-coloured. */
+
+  .quick-sync-note.sync-failed { color: var(--accent-2); }
+
+  /* The Sync button beside Menu, outlined like it; it fills in while there is something to send. */
+
+  .quick-sync-btn:not([hidden]) {
+    display: block;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  /* Filled in while there are changes to send. */
+
+  .quick-sync-btn.sync-needed {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 600;
+  }
+
+  /* Dimmed while a sync is running. */
+
+  .quick-sync-btn:disabled { opacity: 0.6; }
+
+  /* Room under the last card so the + button never covers its buttons. */
+
+  .content { padding-bottom: 84px; }
 
   /* The Menu button no longer needs a gap above it once it sits beside the title. */
 

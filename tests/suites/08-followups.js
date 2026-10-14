@@ -51,3 +51,63 @@ check('marking a bill paid leaves every total and net unchanged', weekLines() ==
 setIncomeForDate(dk(0), '60'); renderBudget();
 check('entering income changes the net', /-\$40\.00/.test(textOf('.budget-week-net-total')) && /-\$40\.00/.test($('budget-month-net-total').textContent), textOf('.budget-week-net-total'));
 bills.length = 0; income.length = 0; renderBudget();
+
+// ---- the undo toast after Mark paid and Delete ----
+bills.length = 0; income.length = 0; renderBudget(); hideUndoToast();
+addBill({ name: 'Toast bill', amount: '30', dueDate: dk(1), frequency: 'monthly', category: '', autopay: false });
+check('adding a bill shows no undo toast', $('undo-toast').hidden === true);
+toggleBillPaid(bills[0].id, dk(1), true);
+check('marking a bill paid shows a toast naming it', !$('undo-toast').hidden && /Marked Toast bill paid/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click();
+check('the toast Undo button un-marks it and hides the toast', $('undo-toast').hidden === true && !(bills[0].paidDates || []).includes(dk(1)));
+deleteBill(bills[0].id);
+check('deleting a bill shows a toast', !$('undo-toast').hidden && /Deleted Toast bill/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click();
+check('...and its Undo button brings the bill back', bills.filter((b) => !b.deleted).length === 1);
+hideUndoToast();
+
+// ---- Mark paid right in the bills banner, and the shorter button label ----
+bills.length = 0; reminderBannerDismissed = false; renderBudget();
+addBill({ name: 'Banner bill', amount: '10', dueDate: dk(1), frequency: 'one_time', category: '', autopay: false });
+const bannerPayButtons = () => [...$('reminder-banner-actions').querySelectorAll('button')];
+check('the banner offers a Mark paid button for a bill due soon', bannerPayButtons().length === 1 && /Mark Banner bill paid/.test(bannerPayButtons()[0].textContent), $('reminder-banner-actions').textContent);
+check('the bill card button just says Mark paid', document.querySelector('.mark-oldest-paid-btn').textContent === 'Mark paid');
+bannerPayButtons()[0].click();
+check('clicking it marks the bill paid and the banner goes away', bills[0].paidDates.includes(dk(1)) && $('reminder-banner').hidden === true);
+hideUndoToast();
+
+// ---- plain-words due dates on the bill cards ----
+bills.length = 0; renderBudget();
+addBill({ name: 'Soon bill', amount: '10', dueDate: dk(2), frequency: 'monthly', category: '', autopay: false });
+const dueLine = () => document.querySelector('.bill-card .bill-due').textContent;
+check('a card says when the bill is due in plain words', /^Due [A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(, \d{4})? \u00b7 in 2 days$/.test(dueLine()), dueLine());
+bills.length = 0; renderBudget();
+addBill({ name: 'Late bill', amount: '10', dueDate: dk(-3), frequency: 'one_time', category: '', autopay: false });
+check('a late bill says Overdue and how long ago', /^Overdue .* \u00b7 3 days ago$/.test(dueLine()) && document.querySelector('.bill-due').classList.contains('bill-due-late'), dueLine());
+bills.length = 0; renderBudget(); hideUndoToast();
+
+// ---- the Sync button and note in the top bar ----
+localStorage.removeItem('budgetApp.syncConfig.v1'); updateQuickSync();
+check('the top-bar Sync button is hidden until sync is set up', $('quick-sync-btn').hidden && $('quick-sync-note').hidden);
+localStorage.setItem('budgetApp.syncConfig.v1', JSON.stringify({ token: 'tok' })); updateQuickSync();
+check('it appears once sync is set up', !$('quick-sync-btn').hidden && !$('quick-sync-note').hidden && $('quick-sync-note').textContent.length > 0, $('quick-sync-note').textContent);
+
+// ---- the full-backup reminder leaves a syncing device alone until it has exported once ----
+addBill({ name: 'Backup bill', amount: '10', dueDate: dk(20), frequency: 'monthly', category: '', autopay: false });
+localStorage.removeItem(EXPORT_AT_KEY); backupNotesDismissed = false; renderBackupNotes();
+check('a device that syncs is not asked for a backup file it has never made', !/full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
+localStorage.removeItem('budgetApp.syncConfig.v1'); updateQuickSync(); renderBackupNotes();
+check('a device that does not sync still is', /full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
+localStorage.removeItem('budgetApp.lastSyncAt.v1');
+bills.length = 0; renderBudget();
+
+// ---- the Add bill shortcut ----
+check('there is a + button that jumps to the Add bill form', !!$('add-bill-fab') && $('add-bill-fab').getAttribute('aria-label') === 'Add a bill');
+
+// ---- a date already paid is not shown as the next due date ----
+bills.length = 0; renderBudget();
+addBill({ name: 'Paid ahead', amount: '10', dueDate: dk(1), frequency: 'monthly', category: '', autopay: false });
+toggleBillPaid(bills[0].id, dk(1), true);
+const paidAheadLine = document.querySelector('.bill-card .bill-due').textContent;
+check('a bill paid for its next date shows the date after it', !/tomorrow/.test(paidAheadLine) && /^Due /.test(paidAheadLine), paidAheadLine);
+bills.length = 0; renderBudget(); hideUndoToast();

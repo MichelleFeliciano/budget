@@ -361,6 +361,8 @@ function recordUndo(collectionName, id, before, after) {
   if (undoStack.length > MAX_UNDO_DEPTH) undoStack.shift();
   redoStack = [];
   updateUndoRedoButtons();
+  const toastMessage = undoToastMessage(collectionName, before, after);
+  if (toastMessage) showUndoToast(toastMessage);
 }
 
 // ---- Budget (Bills + rolling 5-week calendar) ----
@@ -1259,6 +1261,42 @@ function formatDateKeyLong(dateKey) {
   return `${MONTH_NAMES[m]} ${d}, ${y}`;
 }
 
+// Weekday names indexed like Date.getDay() (0 = Sunday).
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// "2026-10-12" becomes "Mon, Oct 12" (the year is added only when it is not this year).
+function formatDateKeyShort(dateKey) {
+  const { y, m, d } = parseDateKey(dateKey);
+  const weekday = WEEKDAY_SHORT[new Date(y, m, d).getDay()];
+  const year = y === new Date().getFullYear() ? '' : `, ${y}`;
+  return `${weekday}, ${MONTH_NAMES[m].slice(0, 3)} ${d}${year}`;
+}
+
+// The date a bill needs paying next: its oldest unpaid date up to today (so a late bill shows how late),
+// otherwise its next scheduled date within a year that is not already paid; null if there is none (a paid one-time bill).
+function nextDueDateKey(bill, todayK) {
+  if (unpaidAmountThrough(bill, todayK) > 0) {
+    const unpaid = oldestUnpaidOccurrence(bill, todayK);
+    if (unpaid) return unpaid;
+  }
+  for (let i = 1; i <= 366; i += 1) {
+    const dateKey = shiftDateKey(todayK, i);
+    if (occursOnDate(bill, dateKey) && !(bill.paidDates || []).includes(dateKey)) return dateKey;
+  }
+  return null;
+}
+
+// The line on a bill card, e.g. "Due Mon, Oct 12 · in 2 days" or "Overdue Mon, Oct 5 · 7 days ago".
+function billDueText(bill, todayK) {
+  const dateKey = nextDueDateKey(bill, todayK);
+  if (!dateKey) {
+    return bill.frequency === 'one_time' && (bill.paidDates || []).length ? 'Paid' : `Due ${formatDateKeyShort(bill.dueDate)}`;
+  }
+  const days = utcDayDiff(todayK, dateKey);
+  const late = days < 0 && !bill.autopay; // a bill that pays itself is never called overdue
+  return `${late ? 'Overdue' : 'Due'} ${formatDateKeyShort(dateKey)} \u00b7 ${whenLabel(days)}`;
+}
+
 // Draws the Current Pay Period panel: bills due before the next payday, plus income and net for that period.
 // Reads the live, non-deleted bills array directly (same convention as
 // renderBudgetStats/renderBillCategoryFilters) rather than taking it as a
@@ -1775,7 +1813,9 @@ function renderBudgetList(nonDeletedBills, openEdit) {
 
     node.querySelector('.bill-name').textContent = bill.name;
     node.querySelector('.bill-amount').textContent = `$${bill.amount.toFixed(2)}`;
-    node.querySelector('.bill-due').textContent = `Due: ${bill.dueDate}`;
+    const dueEl = node.querySelector('.bill-due');
+    dueEl.textContent = billDueText(bill, todayK);
+    dueEl.classList.toggle('bill-due-late', dueEl.textContent.startsWith('Overdue'));
     node.querySelector('.bill-frequency').textContent = BILL_FREQUENCY_LABELS[bill.frequency] || bill.frequency;
 
     const categoryEl = node.querySelector('.bill-category');
@@ -2155,9 +2195,10 @@ function renderBackupNotes() {
   const reminders = [];
   const hasAnyData = SYNC_COLLECTIONS.some((c) => c.get().some((r) => !r.deleted));
   const exportDays = daysSinceBackup(EXPORT_AT_KEY);
-  if (hasAnyData && (exportDays === null || exportDays >= EXPORT_DUE_DAYS)) {
+  // Never exported: only nag a device that does not sync (synced devices already hold copies of each other's data).
+  if (hasAnyData && (exportDays === null ? !loadSyncConfig() : exportDays >= EXPORT_DUE_DAYS)) {
     reminders.push({
-      text: `You haven't downloaded a full backup of your budget ${exportDays === null ? 'yet' : `in ${exportDays} days`}. Your synced data is also kept safe on the server.`,
+      text: `You haven't downloaded a full backup of your budget ${exportDays === null ? 'yet' : `in ${exportDays} days`}. It keeps your bills safe if this device is lost.`,
       label: 'Download full backup',
       action: exportData,
     });
@@ -2264,7 +2305,35 @@ function renderReminderBanner(overdueBills, soon) {
     parts.push(`${overdueBills.length} overdue ($${total.toFixed(2)})`);
   }
   document.getElementById('reminder-banner-text').textContent = `Bills: ${parts.join(' · ')}`;
+  renderBannerPayButtons(overdueBills, soon);
   banner.hidden = false;
+}
+
+// How many bills get a Mark paid button in the banner.
+const BANNER_PAY_BUTTONS = 4;
+
+// One Mark paid button per bill listed in the banner (the first few: due soon first, then overdue),
+// so a bill can be ticked off right there instead of finding it in the list below.
+function renderBannerPayButtons(overdueBills, soon) {
+  const box = document.getElementById('reminder-banner-actions');
+  if (!box) return;
+  box.innerHTML = '';
+  const targets = soon.slice(0, BANNER_PAY_BUTTONS).map(({ bill, dateKey }) => ({ bill, dateKey }));
+  const yesterdayK = shiftDateKey(todayKey(), -1);
+  for (const { bill } of overdueBills) {
+    if (targets.length >= BANNER_PAY_BUTTONS) break;
+    const dateKey = oldestUnpaidOccurrence(bill, yesterdayK);
+    if (dateKey) targets.push({ bill, dateKey });
+  }
+  targets.forEach(({ bill, dateKey }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'reminder-banner-btn';
+    btn.textContent = `Mark ${bill.name} paid`;
+    btn.setAttribute('aria-label', `Mark ${bill.name} paid for ${formatDateKeyShort(dateKey)}`);
+    btn.addEventListener('click', () => toggleBillPaid(bill.id, dateKey, true));
+    box.appendChild(btn);
+  });
 }
 
 // Recomputes what is due or overdue and updates the banner.
@@ -2384,6 +2453,7 @@ function undo() {
   redoStack.push(entry);
   if (redoStack.length > MAX_UNDO_DEPTH) redoStack.shift();
   updateUndoRedoButtons();
+  hideUndoToast();
 }
 
 // Re-applies the most recently undone change.
@@ -2399,6 +2469,7 @@ function redo() {
   undoStack.push(entry);
   if (undoStack.length > MAX_UNDO_DEPTH) undoStack.shift();
   updateUndoRedoButtons();
+  hideUndoToast();
 }
 
 // Which field names a record in each collection, for the Undo/Redo tooltips.
@@ -2435,6 +2506,48 @@ function updateUndoRedoButtons() {
 document.getElementById('undo-btn').addEventListener('click', undo);
 document.getElementById('redo-btn').addEventListener('click', redo);
 
+// ---- Undo toast ----
+// A short bar at the bottom of the screen after a delete or a Mark paid, with an Undo button, so a
+// mis-tap can be fixed without opening the Menu. Adds, edits and typing a day's income get no toast.
+
+// How long the toast stays before it hides itself.
+const UNDO_TOAST_MS = 6000;
+var undoToastTimer = null; // var, not let: recordUndo can run before this line during startup
+
+// What the toast should say about a change, or null when the change does not get one.
+function undoToastMessage(collectionName, before, after) {
+  if (!before || !after) return null;
+  const name = after.name || 'item';
+  if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
+  if (collectionName === 'bills') {
+    const paidBefore = (before.paidDates || []).length;
+    const paidNow = (after.paidDates || []).length;
+    if (paidNow > paidBefore) return `Marked ${name} paid`;
+    if (paidNow < paidBefore) return `Marked ${name} unpaid`;
+  }
+  return null;
+}
+
+// Hides the toast (and its timer).
+function hideUndoToast() {
+  clearTimeout(undoToastTimer);
+  const toast = document.getElementById('undo-toast');
+  if (toast) toast.hidden = true;
+}
+
+// Shows the toast with a message, for UNDO_TOAST_MS.
+function showUndoToast(message) {
+  const toast = document.getElementById('undo-toast');
+  if (!toast) return;
+  document.getElementById('undo-toast-text').textContent = message;
+  toast.hidden = false;
+  clearTimeout(undoToastTimer);
+  undoToastTimer = setTimeout(hideUndoToast, UNDO_TOAST_MS);
+}
+
+// The toast's Undo button undoes the latest change (undo() also hides the toast).
+document.getElementById('undo-toast-btn').addEventListener('click', undo);
+
 // Sync progress state: a sync is running, when the last one finished, and whether its message was ok/failed.
 let syncInFlight = false;
 let lastSyncedAt = null; // when the last sync finished (drives the "Synced Xm ago" label)
@@ -2446,11 +2559,42 @@ let lastSyncTone = null; // 'ok', 'failed' or null: the tone of the last status 
 // Shows a sync message in the sidebar; tone is 'ok', 'failed' or null (neutral).
 function setSyncStatus(text, tone) {
   lastSyncTone = tone;
+  updateQuickSync();
   const el = document.getElementById('sync-status-text');
   if (!el) return;
   el.textContent = text;
   el.classList.toggle('sync-ok', tone === 'ok');
   el.classList.toggle('sync-failed', tone === 'failed');
+}
+
+// Mirrors the sync state into the top bar's Sync button and note (phones only, where the Menu is collapsed;
+// the Menu keeps the full controls). Hidden until sync is set up on this device.
+function updateQuickSync() {
+  const btn = document.getElementById('quick-sync-btn');
+  const note = document.getElementById('quick-sync-note');
+  if (!btn || !note) return;
+  const on = !!loadSyncConfig();
+  btn.hidden = !on;
+  note.hidden = !on;
+  if (!on) return;
+  const unsynced = countUnsyncedChanges();
+  const needsSync = unsynced !== null && unsynced > 0;
+  const failed = lastSyncTone === 'failed' && !syncInFlight;
+  btn.disabled = syncInFlight;
+  btn.classList.toggle('sync-needed', needsSync);
+  let text = 'Not synced yet';
+  if (syncInFlight) {
+    text = 'Syncing…';
+  } else if (failed) {
+    text = 'Needs attention — see Menu';
+  } else if (needsSync) {
+    text = `${unsynced} change${unsynced === 1 ? '' : 's'} not synced`;
+  } else if (lastSyncedAt) {
+    const minutes = Math.floor((Date.now() - lastSyncedAt.getTime()) / 60000);
+    text = minutes <= 0 ? 'Synced just now' : `Synced ${minutes}m ago`;
+  }
+  note.textContent = text;
+  note.classList.toggle('sync-failed', failed);
 }
 
 // ---- Unsynced-changes indicator ----
@@ -2480,6 +2624,7 @@ function updateSyncPending() {
   el.hidden = !show;
   if (show) el.textContent = `${count} change${count === 1 ? '' : 's'} not synced. Tap Sync now.`;
   btn.classList.toggle('sync-needed', show);
+  updateQuickSync();
 }
 
 var syncPendingTimer = null; // var, not let: saveCollection runs before this line during startup
@@ -2861,6 +3006,7 @@ function initSyncUI() {
   // Sync is manual only: nothing runs in the background, on a timer, on
   // opening the app, or when the connection returns. Press Sync now.
   document.getElementById('sync-now-btn').addEventListener('click', runSync);
+  document.getElementById('quick-sync-btn').addEventListener('click', runSync);
   if (config) setSyncStatus('Not synced yet — tap Sync now', null);
   updateSyncPending();
 }
@@ -3189,7 +3335,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -3477,6 +3623,20 @@ if (sidebarToggleBtn) {
     const isOpen = sidebar.classList.toggle('sidebar-open');
     sidebarToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   });
+}
+
+// The floating + button: scrolls down to the Add bill form (a long way down the page) and puts the
+// cursor in its first box. It hides itself while that form is already on screen.
+const addBillFab = document.getElementById('add-bill-fab');
+const addBillForm = document.getElementById('budget-add-form');
+if (addBillFab && addBillForm) {
+  addBillFab.addEventListener('click', () => {
+    addBillForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('budget-name-input').focus({ preventScroll: true });
+  });
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((entries) => { addBillFab.hidden = entries[0].isIntersecting; }).observe(addBillForm);
+  }
 }
 
 safeRender(renderBudget);
