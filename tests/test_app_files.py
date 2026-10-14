@@ -150,6 +150,22 @@ class AppFiles(unittest.TestCase):
         # The saved config only ever holds what the user typed.
         self.assertIn("saveSyncConfig({ token })", APP)
 
+    def test_every_function_has_a_comment(self):
+        """The code is meant to be easy to read: every top-level function has a comment directly above it."""
+        lines = APP.split("\n")
+        missing = [
+            f"line {i + 1}: {line[:60]}"
+            for i, line in enumerate(lines)
+            if re.match(r"(async )?function \w+", line) and not (lines[i - 1].strip().startswith("//") or lines[i - 1].strip().endswith("*/"))
+        ]
+        self.assertEqual(missing, [])
+
+    def test_motion_overrides_come_after_the_rules_they_override(self):
+        """A reduced-motion rule only wins if it sits later in the file than the animation or transition it turns off."""
+        media = CSS.index("@media (prefers-reduced-motion: reduce)")
+        for rule in (".bill-card-new { animation:", ".fold-summary::before {"):
+            self.assertGreater(media, CSS.index(rule), rule)
+
     def test_theme_colours_are_readable(self):
         """Text, warnings and outlines keep their contrast (WCAG: 4.5:1 for text, 3:1 for outlines) in both themes."""
 

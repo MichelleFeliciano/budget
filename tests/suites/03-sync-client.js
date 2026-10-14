@@ -146,9 +146,11 @@ server.gate = null; wake();
 await slow; await sleep(60);
 check('and finishes normally when the server answers', /Synced just now/.test(status()), status());
 const realFetch = window.fetch;
-window.fetch = () => { const e = new Error('aborted'); e.name = 'AbortError'; return Promise.reject(e); };
+let abortedCalls = 0;
+window.fetch = () => { abortedCalls += 1; const e = new Error('aborted'); e.name = 'AbortError'; return Promise.reject(e); };
 await runSync(); await sleep(30);
 check('a request that times out says so', /timed out/i.test(status()), status());
+check('a timeout is not retried (that would double the wait)', abortedCalls === 1, String(abortedCalls));
 window.fetch = realFetch;
 SYNC_WAKE_NOTICE_MS = 5000;
 

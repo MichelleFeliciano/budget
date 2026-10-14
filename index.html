@@ -43,7 +43,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         </button>
       </div>
     </div>
-    <!-- Undo/redo for the last add, edit, delete or move; enabled and labelled by app.js. -->
+    <!-- Undo/redo for the last add, edit, delete or Mark paid; enabled and labelled by app.js. -->
     <div class="undo-redo-panel">
       <button type="button" id="undo-btn" disabled>Undo</button>
       <button type="button" id="redo-btn" disabled>Redo</button>
@@ -149,38 +149,38 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <p class="stats-line" id="budget-stats"></p>
 
       <details class="fold" id="fold-pay-period" open>
-      <summary class="fold-summary"><h2>Current Pay Period</h2></summary>
-      <form id="payday-settings-form" class="add-form">
-        <label class="date-field">A recent payday
-          <input type="date" id="payday-date-input" min="1990-01-01" max="2100-12-31" aria-label="A recent payday">
-        </label>
-        <select id="payday-frequency-input" aria-label="Pay frequency">
-          <option value="weekly">Weekly</option>
-          <option value="biweekly" selected>Biweekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-        <button type="submit">Save</button>
-      </form>
-      <!-- Says where the payday schedule came from when it was taken from Recurring Income; filled by renderPayPeriod. -->
-      <p class="stats-line" id="pay-period-source" hidden></p>
-      <p class="stats-line" id="pay-period-summary"></p>
-      <p class="stats-line" id="pay-period-income-total"></p>
-      <p class="stats-line" id="pay-period-net-total"></p>
-      <p class="stats-line" id="pay-period-next"></p>
-      <p class="stats-line" id="pay-period-left"></p>
-      <ul class="card-list flat-list" id="pay-period-bills-list"></ul>
-      <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
+        <summary class="fold-summary"><h2>Current Pay Period</h2></summary>
+        <form id="payday-settings-form" class="add-form">
+          <label class="date-field">A recent payday
+            <input type="date" id="payday-date-input" min="1990-01-01" max="2100-12-31" aria-label="A recent payday">
+          </label>
+          <select id="payday-frequency-input" aria-label="Pay frequency">
+            <option value="weekly">Weekly</option>
+            <option value="biweekly" selected>Biweekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <button type="submit">Save</button>
+        </form>
+        <!-- Says where the payday schedule came from when it was taken from Recurring Income; filled by renderPayPeriod. -->
+        <p class="stats-line" id="pay-period-source" hidden></p>
+        <p class="stats-line" id="pay-period-summary"></p>
+        <p class="stats-line" id="pay-period-income-total"></p>
+        <p class="stats-line" id="pay-period-net-total"></p>
+        <p class="stats-line" id="pay-period-next"></p>
+        <p class="stats-line" id="pay-period-left"></p>
+        <ul class="card-list flat-list" id="pay-period-bills-list"></ul>
+        <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
       </details>
 
       <details class="fold" id="fold-paid-history" open>
-      <summary class="fold-summary"><h2>Paid History</h2></summary>
-      <div class="collection-toolbar">
-        <button type="button" class="paid-history-nav" id="paid-history-prev" aria-label="Previous month">&lsaquo;</button>
-        <span class="paid-history-label" id="paid-history-label"></span>
-        <button type="button" class="paid-history-nav" id="paid-history-next" aria-label="Next month">&rsaquo;</button>
-      </div>
-      <ul class="card-list flat-list" id="paid-history-list"></ul>
-      <p class="empty-state" id="paid-history-empty" hidden>No bills marked paid this month.</p>
+        <summary class="fold-summary"><h2>Paid History</h2></summary>
+        <div class="collection-toolbar">
+          <button type="button" class="paid-history-nav" id="paid-history-prev" aria-label="Previous month">&lsaquo;</button>
+          <span class="paid-history-label" id="paid-history-label"></span>
+          <button type="button" class="paid-history-nav" id="paid-history-next" aria-label="Next month">&rsaquo;</button>
+        </div>
+        <ul class="card-list flat-list" id="paid-history-list"></ul>
+        <p class="empty-state" id="paid-history-empty" hidden>No bills marked paid this month.</p>
       </details>
 
       <div class="collection-toolbar" id="budget-bills">
@@ -232,25 +232,25 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <p class="empty-state" id="budget-filter-empty" hidden>No bills are overdue or due in the next two weeks.</p>
 
       <details class="fold" id="fold-recurring-income" open>
-      <summary class="fold-summary"><h2>Recurring Income</h2></summary>
-      <form id="recurring-income-add-form" class="add-form add-form-stacked">
-        <input type="text" id="recurring-income-name-input" placeholder="Source name (e.g. Paycheck)" required aria-label="Income source name">
-        <input type="number" inputmode="decimal" id="recurring-income-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Income amount">
-        <label class="date-field">First occurrence
-          <input type="date" id="recurring-income-startdate-input" min="1990-01-01" max="2100-12-31" required aria-label="First occurrence date">
-        </label>
-        <select id="recurring-income-frequency-input" aria-label="Frequency">
-          <option value="biweekly">Biweekly</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-          <option value="yearly">Yearly</option>
-        </select>
-        <input type="text" id="recurring-income-category-input" placeholder="Category (optional)" aria-label="Income category">
-        <p class="form-error" id="recurring-income-form-error" hidden></p>
-        <button type="submit">Add recurring income</button>
-      </form>
-      <ul class="card-list flat-list" id="recurring-income-list"></ul>
-      <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
+        <summary class="fold-summary"><h2>Recurring Income</h2></summary>
+        <form id="recurring-income-add-form" class="add-form add-form-stacked">
+          <input type="text" id="recurring-income-name-input" placeholder="Source name (e.g. Paycheck)" required aria-label="Income source name">
+          <input type="number" inputmode="decimal" id="recurring-income-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Income amount">
+          <label class="date-field">First occurrence
+            <input type="date" id="recurring-income-startdate-input" min="1990-01-01" max="2100-12-31" required aria-label="First occurrence date">
+          </label>
+          <select id="recurring-income-frequency-input" aria-label="Frequency">
+            <option value="biweekly">Biweekly</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+          <input type="text" id="recurring-income-category-input" placeholder="Category (optional)" aria-label="Income category">
+          <p class="form-error" id="recurring-income-form-error" hidden></p>
+          <button type="submit">Add recurring income</button>
+        </form>
+        <ul class="card-list flat-list" id="recurring-income-list"></ul>
+        <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
       </details>
     </section>
   </main>

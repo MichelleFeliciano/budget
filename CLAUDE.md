@@ -26,10 +26,12 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
   plan back without being asked, and never default `DATA_DIR` to a path that needs a disk. Pushing changes
   `render.yaml`, which Render applies automatically, so ask before pushing.
 - Comments must say what the rule is. Do not cite design notes that are not in this repo.
+- Every top-level function in app.js has a comment directly above it (a test checks), and every CSS rule has one too.
+  A reduced-motion rule must come after the rule it turns off (a test checks that as well).
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 339/339).
+  about 15 seconds. The title ends `OK n/n` (currently 350/350).
 - Python: `python -m unittest discover -s tests` (app file checks plus the sync server tests).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:

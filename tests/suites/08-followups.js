@@ -323,3 +323,40 @@ const templateFields = [...document.querySelectorAll('template')].flatMap((t) =>
   .filter((el) => !(el.getAttribute('aria-label') || el.closest('label')));
 check('every field in the bill and income cards has a name too', templateFields.length === 0, templateFields.map((e) => e.className).join(', '));
 check('there is one main area and a Menu navigation', document.querySelectorAll('main').length === 1 && !!document.querySelector('nav[aria-label="Menu"]'));
+
+// ---- fixes from the line-by-line review ----
+// A change that gets no toast hides an older toast, so that toast's Undo can never undo the wrong change.
+bills.length = 0; income.length = 0; recurringIncome.length = 0; renderBudget(); hideUndoToast();
+addBill({ name: 'Toast two', amount: '10', dueDate: dk(0), frequency: 'one_time', category: '', autopay: false });
+toggleBillPaid(bills[0].id, dk(0), true);
+check('a toast is showing after Mark paid', !$('undo-toast').hidden);
+setIncomeForDate(dk(1), '5'); await sleep(30);
+check('a later change with no toast hides it, so its Undo cannot undo the wrong change', $('undo-toast').hidden === true);
+income.length = 0; hideUndoToast(); bills.length = 0; renderBudget();
+
+// A skipped date reads as skipped on the calendar, not as "paid $0.00".
+addBill({ name: 'Skipper', amount: '30', dueDate: dk(0), frequency: 'monthly', category: '', autopay: false });
+toggleBillPaid(bills[0].id, dk(0), true, 0);
+const skippedRow = document.querySelector('.budget-occurrence.skipped');
+check('a skipped date is marked skipped on the calendar, with no dollar amount in its tooltip', !!skippedRow && /skipped/.test(skippedRow.querySelector('label').title) && !/\$/.test(skippedRow.querySelector('label').title), skippedRow && skippedRow.querySelector('label').title);
+check('...and in the day\'s spoken summary', /Skipper \(skipped\)/.test(document.querySelector(`.budget-day-cell[data-date-key="${dk(0)}"] .budget-day-open-btn`).getAttribute('aria-label')));
+
+// Every button on a card names its bill (and still contains its visible words) for screen readers.
+const skipperCard = document.querySelector('#budget-list .bill-card');
+check('a card\'s buttons name their bill', skipperCard.querySelector('.delete-btn').getAttribute('aria-label') === 'Delete Skipper' && skipperCard.querySelector('.edit-btn').getAttribute('aria-label') === 'Edit Skipper' && /^Mark paid: Skipper$/.test(skipperCard.querySelector('.mark-oldest-paid-btn').getAttribute('aria-label')));
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// The calendar file folds long lines by bytes and never splits an emoji or accented letter.
+const longLine = 'SUMMARY:' + '\u{1F600}'.repeat(40) + ' café '.repeat(20);
+const foldedLine = icsFold(longLine);
+const foldedParts = foldedLine.split('\r\n');
+check('folded calendar lines are at most 75 bytes', foldedParts.every((part) => new TextEncoder().encode(part).length <= 75));
+check('folding loses nothing and breaks no character', foldedLine.replace(/\r\n /g, '') === longLine);
+check('every continuation line starts with a space', foldedParts.slice(1).every((part) => part.startsWith(' ')));
+
+// The friendly dates shown on the Pay Period and Recurring Income cards.
+bills.length = 0; recurringIncome.length = 0;
+addRecurringIncome({ name: 'Paycheck', amount: '1000', dueDate: dk(-9), frequency: 'biweekly', category: '' });
+check('a recurring income card shows its start date in plain words', /^Starts: [A-Z][a-z]{2}, [A-Z][a-z]{2} \d+/.test(document.querySelector('.recurring-income-start').textContent), document.querySelector('.recurring-income-start').textContent);
+check('its buttons name it', document.querySelector('#recurring-income-list .delete-btn').getAttribute('aria-label') === 'Delete Paycheck');
+hideUndoToast(); recurringIncome.length = 0; renderBudget();

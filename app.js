@@ -8,9 +8,11 @@
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
 //   metadata, undo/redo, Budget (bills, income, recurring income, paid history, pay period,
-//   calendar), backup reminders, the due/overdue bills banner, Device Sync (server address,
-//   sync client, undo/redo application), data export/import, day rollover, theme and version,
-//   App lock, and Init (which also wires the phone Menu button and registers the service worker).
+//   calendar, the Add bill sheet), backup reminders, the due/overdue bills banner, Device Sync
+//   (server address, sync client, undo/redo application, the undo bar), data export/import (and
+//   the calendar reminders file), day rollover, theme, text size and version, App lock, and Init
+//   (which wires the phone Menu button, the calendar buttons, the folding parts, the jump links
+//   and the + button, and registers the service worker).
 //
 // Each list is an array of plain records kept in memory and saved whole to its own
 // localStorage key. A record looks like:
@@ -335,7 +337,6 @@ function migrateSyncFields(items, key, deviceId) {
   return items;
 }
 
-
 // ---- Undo/Redo ----
 // In-memory only, never persisted. One entry per changed record (never a
 // whole-array snapshot).
@@ -344,7 +345,8 @@ function migrateSyncFields(items, key, deviceId) {
 let undoStack = [];
 // Undone changes that can be re-applied (any new change clears this list).
 let redoStack = [];
-let isApplyingHistory = false; // guard: undo/redo replays never re-record themselves
+// True while undo/redo replays a change, so the replay is not recorded as a new change.
+let isApplyingHistory = false;
 // How many changes undo remembers; older ones are dropped.
 const MAX_UNDO_DEPTH = 50;
 
@@ -361,11 +363,14 @@ function recordUndo(collectionName, id, before, after) {
   if (undoStack.length > MAX_UNDO_DEPTH) undoStack.shift();
   redoStack = [];
   updateUndoRedoButtons();
+  // The toast's Undo button undoes the latest change, so a change that gets no toast must hide an older one
+  // (otherwise that Undo button would undo this newer change instead of the one the toast names).
   const toastMessage = undoToastMessage(collectionName, before, after);
   if (toastMessage) showUndoToast(toastMessage);
+  else hideUndoToast();
 }
 
-// ---- Budget (Bills + rolling 5-week calendar) ----
+// ---- Budget (Bills and the three-week calendar) ----
 // Storage key: budgetApp.bills.v1.
 
 // localStorage key for the bills list.
@@ -473,10 +478,9 @@ function occursOnDate(bill, dateKey) {
   return false;
 }
 
-// Closed-form occurrence count through a date, no day-by-day loop — needed
-// for the weekly-total carry-forward formula, which must ask "how many
-// occurrences has this bill had, on or before this date" for a bill whose
-// anchor could be arbitrarily far in the past.
+// Closed-form occurrence count through a date, no day-by-day loop: "how many times has this bill (or
+// income source) come due on or before this date", fast even when its first date is years in the past.
+// unpaidAmountThrough and the recurring income totals are built on it.
 function occurrenceCountThrough(bill, throughKey) {
   if (throughKey < bill.dueDate) return 0;
   if (bill.frequency === 'one_time') return 1;
@@ -544,13 +548,10 @@ function unpaidAmountThrough(bill, throughKey) {
   return Math.max(0, totalOccurrences - paidCount) * bill.amount;
 }
 
-// Walks forward from the bill's anchor dueDate to find the single earliest
-// occurrence date that is real (per occursOnDate) and not already paid, up
-// through and including throughKey. A plain day-by-day walk (not a
-// closed-form jump) is deliberately the simplest-correct approach here —
-// this only runs on an explicit user click (the "mark oldest unpaid as
-// paid" button's handler); render-time code uses the O(1)-ish
-// unpaidAmountThrough instead to avoid paying this walk's cost on every render.
+// Walks forward from the bill's first due date to find the earliest date that really is a due date
+// (per occursOnDate) and is not paid yet, up through and including throughKey; null if there is none.
+// A plain day-by-day walk is the simplest correct way, so callers only use it for a bill that
+// unpaidAmountThrough has already said has something unpaid (which keeps it off paid-up bills).
 function oldestUnpaidOccurrence(bill, throughKey) {
   const paidSet = new Set(bill.paidDates || []);
   let dateKey = bill.dueDate;
@@ -880,8 +881,8 @@ function catchUpBill(billId, throughKey) {
   renderBudget();
 }
 
-// Saves edits to a bill. Never touches paidDates except to carry existing payments over to a new
-// schedule; only toggleBillPaid (and the "mark oldest unpaid as paid" button, which calls it) marks payments.
+// Saves edits to a bill. Never marks anything paid or unpaid: it only carries existing payments over to a
+// new schedule. Payments are marked by toggleBillPaid, catchUpBill and addBill's "caught up" option.
 function updateBill(id, fields) {
   const bill = bills.find((b) => b.id === id);
   if (!bill) return { ok: false, error: 'Bill not found.' };
@@ -1092,11 +1093,8 @@ function restoreRecurringIncome(id) {
   renderBudget();
 }
 
-// Range-sum for a single recurring income source — the recurring-income
-// analog of incomeSumInRange, but built on occurrenceCountThrough's
-// closed-form counting (the count primitive), NOT unpaidAmountThrough (which
-// bakes in paid-filtering income has no equivalent of). A plain
-// range-difference, no day-by-day loop.
+// What one recurring income source adds up to between two dates (inclusive): the number of times it
+// comes due in that range, times its amount. Uses occurrenceCountThrough, so there is no day-by-day loop.
 function recurringIncomeSumInRange(startKey, endKey, source) {
   if (endKey < startKey) return 0;
   const throughEnd = occurrenceCountThrough(source, endKey);
@@ -1104,13 +1102,9 @@ function recurringIncomeSumInRange(startKey, endKey, source) {
   return Math.max(0, throughEnd - throughBeforeStart) * source.amount;
 }
 
-// The single source of truth for "how much income does the calendar show for
-// this period" from this point forward — every income-derived total (week,
-// month, and pay period) MUST call this, not the bare
-// incomeSumInRange, or the total will silently omit recurring occurrences the
-// calendar visibly displays. incomeSumInRange itself stays unchanged and
-// still exists as a standalone "manual entries only" helper — this is an
-// additive wrapper around it, not a rewrite.
+// The one place that answers "how much income does the calendar show for this period": manual `income`
+// entries plus the recurring projections. Every income total (week, month and pay period) must use this, not
+// the bare incomeSumInRange, or it would leave out recurring income the calendar visibly displays.
 function totalIncomeInRange(startKey, endKey, nonDeletedIncome, nonDeletedRecurringIncome) {
   const manual = incomeSumInRange(startKey, endKey, nonDeletedIncome);
   const recurring = nonDeletedRecurringIncome.reduce(
@@ -1143,8 +1137,7 @@ function computePaidByCategory(allBills, y, m) {
       counted.add(paymentKey);
       return true;
     });
-    const count = dates.length;
-    if (count === 0) return;
+    if (dates.length === 0) return;
     const raw = (bill.category || '').trim();
     const key = normalizeChipKey(raw);
     const entry = byKey.get(key) || { label: raw || 'Uncategorized', total: 0 };
@@ -1235,12 +1228,12 @@ function renderBillCategoryFilters(nonDeletedBills) {
   );
 }
 
-// 'due_date_asc' is the default/initial state, matching the add-form's sort
-// <select>'s first (and pre-selected) option.
+// The Bills sort choice; 'due_date_asc' is the default, matching the sort menu's first option.
 let selectedBillsSort = 'due_date_asc';
 
 // When on, the Bills list shows only bills that are overdue or due within DUE_SOON_LIST_DAYS days.
 let onlyDueSoon = false;
+// How many days ahead counts as "due soon" for that filter.
 const DUE_SOON_LIST_DAYS = 14;
 
 // The Bills sort orders, keyed by the values of the sort <select>'s options. The two due date orders
@@ -1374,15 +1367,17 @@ function nextDueDateKey(bill, todayK) {
   return null;
 }
 
-// The line on a bill card, e.g. "Due Mon, Oct 12 · in 2 days" or "Overdue Mon, Oct 5 · 7 days ago".
-function billDueText(bill, todayK) {
+// What a bill card says about when it needs paying: { text, late }, for example
+// { text: 'Due Mon, Oct 12 · in 2 days', late: false } or { text: 'Overdue Mon, Oct 5 · 7 days ago', late: true }.
+function billDueInfo(bill, todayK) {
   const dateKey = nextDueDateKey(bill, todayK);
   if (!dateKey) {
-    return bill.frequency === 'one_time' && (bill.paidDates || []).length ? 'Paid' : `Due ${formatDateKeyShort(bill.dueDate)}`;
+    const paidOff = bill.frequency === 'one_time' && (bill.paidDates || []).length;
+    return { text: paidOff ? 'Paid' : `Due ${formatDateKeyShort(bill.dueDate)}`, late: false };
   }
   const days = utcDayDiff(todayK, dateKey);
   const late = days < 0 && !bill.autopay; // a bill that pays itself is never called overdue
-  return `${late ? 'Overdue' : 'Due'} ${formatDateKeyShort(dateKey)} \u00b7 ${whenLabel(days)}`;
+  return { text: `${late ? 'Overdue' : 'Due'} ${formatDateKeyShort(dateKey)} \u00b7 ${whenLabel(days)}`, late };
 }
 
 // Draws the Current Pay Period panel: bills due before the next payday, plus income and net for that period.
@@ -1502,7 +1497,7 @@ function renderPayPeriod() {
 
     const due = document.createElement('span');
     due.className = 'bill-due';
-    due.textContent = `Due: ${occurrenceDates.join(', ')}`;
+    due.textContent = `Due: ${occurrenceDates.map((dateKey) => formatDateKeyShort(dateKey)).join(', ')}`;
     info.appendChild(due);
 
     if (bill.category) {
@@ -1668,7 +1663,6 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
     const weekEl = document.createElement('div');
     weekEl.className = 'budget-week';
-    weekEl.dataset.weekIndex = String(weekIndex);
     weekEl.classList.toggle('budget-week-current', weekDays.includes(todayK));
 
     const cellsEl = document.createElement('div');
@@ -1778,6 +1772,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           const itemEl = document.createElement('li');
           itemEl.className = 'budget-occurrence';
           const paid = (bill.paidDates || []).includes(dateKey);
+          const skipped = paid && paidAmountFor(bill, dateKey) === 0; // skipped: counted as paid, with nothing paid
           // A bill that pays itself is never flagged, matching the banner (see computeBillReminders).
           const needsPayment = !paid && !bill.autopay;
           const overdue = needsPayment && dateKey < todayK;
@@ -1787,6 +1782,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           const dueSoon = needsPayment && dateKey >= todayK && dateKey <= dueSoonEndK;
           itemEl.classList.toggle('overdue', overdue);
           itemEl.classList.toggle('due-soon', dueSoon);
+          itemEl.classList.toggle('skipped', skipped);
 
           const label = document.createElement('label');
           const checkbox = document.createElement('input');
@@ -1809,10 +1805,10 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = bill.name;
 
-          const amountText = `$${(paid ? paidAmountFor(bill, dateKey) : bill.amount).toFixed(2)}`;
+          const amountText = skipped ? 'skipped' : `$${(paid ? paidAmountFor(bill, dateKey) : bill.amount).toFixed(2)}`;
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
-          daySummary.push(`${bill.name}${paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
+          daySummary.push(`${bill.name}${skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
           peekNames.push(bill.name);
           label.appendChild(checkbox);
           if (dotSpan) label.appendChild(dotSpan);
@@ -1977,10 +1973,18 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const editForm = node.querySelector('.bill-edit-form');
 
     node.querySelector('.bill-name').textContent = bill.name;
+    // Every button names its bill so a screen reader can tell the cards apart; each name still contains the
+    // button's visible words.
+    node.querySelector('.mark-oldest-paid-btn').setAttribute('aria-label', `Mark paid: ${bill.name}`);
+    node.querySelector('.pay-other-btn').setAttribute('aria-label', `Other options: ${bill.name}`);
+    node.querySelector('.catch-up-btn').setAttribute('aria-label', `Mark earlier dates paid: ${bill.name}`);
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${bill.name}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${bill.name}`);
     node.querySelector('.bill-amount').textContent = `$${bill.amount.toFixed(2)}`;
+    const due = billDueInfo(bill, todayK);
     const dueEl = node.querySelector('.bill-due');
-    dueEl.textContent = billDueText(bill, todayK);
-    dueEl.classList.toggle('bill-due-late', dueEl.textContent.startsWith('Overdue'));
+    dueEl.textContent = due.text;
+    dueEl.classList.toggle('bill-due-late', due.late);
     node.querySelector('.bill-frequency').textContent = BILL_FREQUENCY_LABELS[bill.frequency] || bill.frequency;
 
     const categoryEl = node.querySelector('.bill-category');
@@ -2127,8 +2131,10 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     const editForm = node.querySelector('.recurring-income-edit-form');
 
     node.querySelector('.recurring-income-name').textContent = source.name;
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${source.name}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${source.name}`);
     node.querySelector('.recurring-income-amount').textContent = `$${source.amount.toFixed(2)}`;
-    node.querySelector('.recurring-income-start').textContent = `Starts: ${source.dueDate}`;
+    node.querySelector('.recurring-income-start').textContent = `Starts: ${formatDateKeyShort(source.dueDate)}`;
     node.querySelector('.recurring-income-frequency').textContent =
       RECURRING_INCOME_FREQUENCY_LABELS[source.frequency] || source.frequency;
 
@@ -2380,6 +2386,7 @@ function updateCaughtUpOption() {
   if (show && field.hidden) document.getElementById('budget-caughtup-input').checked = true;
   field.hidden = !show;
 }
+// Re-check whenever the due date or the repeat setting changes.
 ['budget-duedate-input', 'budget-frequency-input'].forEach((id) => {
   document.getElementById(id).addEventListener('input', updateCaughtUpOption);
   document.getElementById(id).addEventListener('change', updateCaughtUpOption);
@@ -2445,9 +2452,10 @@ document.getElementById('recurring-income-add-form').addEventListener('submit', 
 });
 
 // ---- Backup reminders ----
-// The server keeps daily restore points of everything that syncs. The one thing only this
-// device holds is a full download. Browsers can't write files in the background, so the app
-// tracks the last download and nags when it is overdue.
+// The sync server's copy is temporary (the free plan forgets it whenever the server sleeps or redeploys), so
+// the real copy of your data is on your devices, and a downloaded backup file is the safety net if all of
+// them are lost. Browsers can't write files in the background, so the app remembers when the last backup
+// was made and reminds you when it is overdue.
 
 // Where the time of the last full export is remembered, and how many days before a reminder.
 const EXPORT_AT_KEY = 'budgetApp.exportAt.v1';
@@ -2799,7 +2807,8 @@ document.getElementById('redo-btn').addEventListener('click', redo);
 
 // How long the toast stays before it hides itself.
 const UNDO_TOAST_MS = 6000;
-var undoToastTimer = null; // var, not let: recordUndo can run before this line during startup
+// var, not let: recordUndo (far above) can reach hideUndoToast before this line has run.
+var undoToastTimer = null;
 
 // What the toast should say about a change, or null when the change does not get one.
 function undoToastMessage(collectionName, before, after) {
@@ -2839,7 +2848,8 @@ function showUndoToast(message) {
 // The toast's Undo button undoes the latest change (undo() also hides the toast).
 document.getElementById('undo-toast-btn').addEventListener('click', undo);
 
-// Sync progress state: a sync is running, when the last one finished, and whether its message was ok/failed.
+// Sync progress state: whether a sync is running, when the last one finished, and whether its message was
+// ok/failed.
 let syncInFlight = false;
 let lastSyncedAt = null; // when the last sync finished (drives the "Synced Xm ago" label)
 // The last successful sync is also saved, so the backup notes can warn when it has been too long.
@@ -3002,13 +3012,15 @@ async function postSync(config, collections) {
 }
 
 // postSync, plus one automatic retry when the server did not answer properly (a sleeping free server often
-// fails the first request while it wakes up). A wrong passphrase or an out-of-date copy is never retried.
-// A second failure is thrown (or returned as 'error') for runSync to report.
+// fails the first request while it wakes up). A wrong passphrase, an out-of-date copy or a timeout is never
+// retried (a timeout has already waited the full SYNC_TIMEOUT_MS). A second failure is thrown (or returned
+// as 'error') for runSync to report.
 async function postSyncWithRetry(config, collections) {
   let first;
   try {
     first = await postSync(config, collections);
-  } catch {
+  } catch (err) {
+    if (err && err.name === 'AbortError') throw err;
     first = { kind: 'error' };
   }
   if (first.kind !== 'error') return first;
@@ -3158,7 +3170,8 @@ async function runSync() {
         return;
       }
       if (boot.kind === 'outdated') {
-        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed'); checkForNewVersion();
+        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed');
+        checkForNewVersion();
         return;
       }
       if (boot.kind !== 'ok') {
@@ -3191,7 +3204,8 @@ async function runSync() {
         return;
       }
       if (result.kind === 'outdated') {
-        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed'); checkForNewVersion();
+        setSyncStatus('This copy is out of date. Wait for the update bar at the top, tap Update now, then Sync again.', 'failed');
+        checkForNewVersion();
         return;
       }
       if (result.kind !== 'ok') {
@@ -3332,9 +3346,9 @@ function initSyncUI() {
 }
 
 // ---- Data export / import ----
-// Import's merge mirrors the sync server's merge_collection()/_content_matches() (as Second
-// Memory does), so a restore behaves like a sync conflict: a replay of the same data is a no-op,
-// a deleted record stays deleted, and a genuine conflict keeps both sides.
+// Import's merge mirrors the sync server's merge_collection()/_content_matches(), so a restore behaves
+// like a sync conflict: a replay of the same data is a no-op, a deleted record stays deleted, and a
+// genuine conflict keeps both sides.
 // It also accepts a Second Memory export (a one-time way to bring old data over): only bills,
 // income and recurringIncome are read.
 
@@ -3394,20 +3408,31 @@ function icsEscape(text) {
   return String(text).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 }
 
-// Folds a long line the way calendar files require (a continuation line starts with a space).
+// Folds a long line the way calendar files require: lines of at most 75 bytes, each continuation starting
+// with a space. It counts bytes (not characters) and never splits one character, so names with accents or
+// emoji survive.
 function icsFold(line) {
+  const encoder = new TextEncoder();
   const parts = [];
-  let rest = line;
-  while (rest.length > 60) {
-    parts.push(rest.slice(0, 60));
-    rest = ` ${rest.slice(60)}`;
+  let current = '';
+  let bytes = 0;
+  for (const character of line) { // iterates whole characters, not UTF-16 halves
+    const size = encoder.encode(character).length;
+    if (bytes + size > 70) {
+      parts.push(current);
+      current = ' ';
+      bytes = 1;
+    }
+    current += character;
+    bytes += size;
   }
-  parts.push(rest);
+  parts.push(current);
   return parts.join('\r\n');
 }
 
 // The repeat rule for a bill, or null for a one-time bill. A bill due on the 31st repeats on each month's last
-// day (like the calendar on screen); the 29th and 30th are skipped by calendars in months without them.
+// day (like the calendar on screen); the 29th and 30th are skipped by calendars in months without them, and
+// a yearly bill due on February 29 only repeats in leap years.
 function icsRepeatRule(bill) {
   const day = parseDateKey(bill.dueDate).d;
   if (bill.frequency === 'weekly') return 'FREQ=WEEKLY';
@@ -3707,7 +3732,8 @@ function importData(parsed) {
   setDataIoStatus(`Import complete — ${summaries.join('; ')}.${skippedNote}`, 'ok');
 }
 
-// Menu buttons: Export downloads a backup; Import opens the file picker.
+// Menu buttons: Export downloads a backup, Share backup shares it (where the phone can), Calendar reminders
+// downloads the calendar file, and Import opens the file picker.
 document.getElementById('export-data-btn').addEventListener('click', exportData);
 document.getElementById('share-data-btn').hidden = !CAN_SHARE_FILES;
 document.getElementById('share-data-btn').addEventListener('click', shareBackup);
@@ -3757,6 +3783,7 @@ function refreshForNewDay() {
   safeRender(renderBudget);
 }
 
+// Check once a minute, since the app can stay open past midnight.
 setInterval(refreshForNewDay, 60000);
 // Redraw when the app comes back to the foreground on a new day.
 document.addEventListener('visibilitychange', () => {
@@ -3767,7 +3794,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

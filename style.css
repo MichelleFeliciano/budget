@@ -2,16 +2,17 @@
 
    Table of contents, in file order (search for the heading text to jump to a section):
      1.  Theme and variables (light and dark colours)
-     2.  Base page, headings, focus ring
+     2.  Base page, headings, focus ring, text size
      3.  Decorative background (corner vines, sidebar sprig)
      4.  Menu (sidebar): undo/redo, sync, backup buttons, footer
      5.  Content area, toolbars, cards and shared pieces (buttons, chips, badges)
-     6.  Add forms, date fields and checkboxes
-     7.  Bill and recurring income cards (view and edit forms)
-     8.  Calendar: weeks, day cells, phone day sheet
-     9.  Banners: reminders and the "couldn't save" warning
+     6.  Add forms, the Add bill phone sheet, date fields and checkboxes
+     7.  Bill and recurring income cards (view, edit and "Other..." forms)
+     8.  Calendar: week buttons, weeks, day cells, phone day sheet
+     9.  Banners, the undo bar, the + button and the "couldn't save" warning
      10. Paid history
      11. App lock
+     11b. Folding parts and jump links
      12. Phone layout (max-width: 700px)
 
    Order matters: rules of equal strength are decided by source order, so a media query that
@@ -109,6 +110,14 @@ h1, h2, h3 {
   outline: 2px solid var(--accent-lavender);
   outline-offset: 2px;
 }
+
+/* The Text size button in the Menu scales everything: sizes are in rem, so changing the root size is enough. */
+
+html[data-text="large"] { font-size: 112.5%; }
+
+/* Largest. */
+
+html[data-text="xlarge"] { font-size: 125%; }
 
 /* ===== 3. Decorative background ===== */
 
@@ -266,7 +275,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   top: 6px;
 }
 
-/* Undo / redo buttons at the top of the sidebar, and the Export / Import / Theme / App lock
+/* Undo / redo buttons at the top of the sidebar, and the backup, Theme, Text size and App lock
    buttons further down: the same quiet outlined pill. */
 
 .undo-redo-panel {
@@ -274,7 +283,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   gap: 8px;
 }
 
-/* Outlined pill buttons in the Menu: Undo, Redo, Export, Import, Theme and App lock. */
+/* Outlined pill buttons in the Menu: Undo, Redo, Export, Import, Share, Calendar reminders, Theme, Text size and App lock. */
 
 .undo-redo-panel button,
 .data-io-btn {
@@ -419,7 +428,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 .sync-setup-form button:hover { opacity: 0.9; }
 
-/* Two boxes under the sync area: Export / Import, then Theme / App lock / version. */
+/* Two boxes under the sync area: the backup buttons, then the Theme, Text size and App lock buttons with the version. */
 
 .data-io {
   padding-top: 16px;
@@ -539,7 +548,18 @@ select[id$="-sort-input"] {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.055);
 }
 
-/* The quiet outlined buttons on a card: Edit, Cancel, Delete and "Mark oldest unpaid as paid".
+/* A just-added bill's card flashes once so you can see where it landed. */
+
+.bill-card-new { animation: bill-card-flash 1.6s ease-out; }
+
+/* The flash itself: an accent ring that fades out. */
+
+@keyframes bill-card-flash {
+  from { box-shadow: 0 0 0 3px var(--accent); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* The quiet outlined buttons on a card: Edit, Cancel, Delete, Other... and Mark paid.
    Delete's margin-left: auto pushes it to the right end of the button row. */
 
 .edit-btn,
@@ -804,6 +824,24 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.85rem;
 }
 
+/* The title and Cancel button of the Add bill form only exist while it is a phone sheet. */
+
+.add-form-title,
+.add-form-cancel { display: none; }
+
+/* The dimmed page behind the Add bill sheet. */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
+
+.sheet-backdrop[hidden] { display: none; }
+
 /* ===== 7. Bill and recurring income cards ===== */
 
 /* A card swaps between its view and its edit form; both are a vertical stack. */
@@ -918,6 +956,10 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--accent);
 }
 
+/* A bill that is past due says so in the warm accent colour. */
+
+.bill-due-late { color: var(--accent-2); }
+
 /* Row of card buttons, aligned to the right. */
 
 .bill-actions,
@@ -926,6 +968,71 @@ input[type="date"]::-webkit-date-and-time-value {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+
+/* The small form that opens under a bill's buttons: Other... (a different amount, or skip a date). */
+
+.pay-other-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  background: var(--bg);
+}
+
+/* display: flex above would otherwise beat the hidden attribute. */
+
+.pay-other-form[hidden] { display: none; }
+
+/* The line saying which date the form is for. */
+
+.pay-other-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* The amount box. */
+
+.pay-other-form input {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* Save amount, Skip this date and Cancel in a row that wraps. */
+
+.pay-other-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Finger-sized outlined buttons. */
+
+.pay-other-buttons button {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Save amount is the main action. */
+
+.pay-other-buttons button[type="submit"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
 }
 
 /* ===== 8. Calendar ===== */
@@ -980,7 +1087,7 @@ input[type="date"]::-webkit-date-and-time-value {
 /* Net totals color-code their <strong> child via
    signedAmountClass() — income totals stay plain/uncolored. Reuses the same
    amount-positive/amount-negative class pair the income-day dot below uses —
-   one shared semantic vocabulary across the tab. */
+   one shared semantic vocabulary across the app. */
 
 .amount-positive { color: var(--accent); }
 
@@ -1121,6 +1228,13 @@ input[type="date"]::-webkit-date-and-time-value {
   font-weight: 600;
 }
 
+/* A skipped date (counted as paid, with nothing paid) is muted and struck through. */
+
+.budget-occurrence.skipped .budget-occurrence-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 /* Bottom of a day cell: the manual income box and income dot. */
 
 .budget-day-footer {
@@ -1177,6 +1291,36 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* The Earlier / Today / Later buttons above the calendar. */
+
+.calendar-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/* Each one takes an equal share of the row and is finger-sized. */
+
+.calendar-nav-btn {
+  flex: 1;
+  min-height: 40px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Accent colour when hovered. */
+
+.calendar-nav-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+
+/* Today is dimmed while the calendar is already on this week. */
+
+.calendar-nav-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* The calendar's 7-column grid is already cramped at the app-wide 700px breakpoint (the fixed
    220px sidebar is not collapsed until then either, so even a moderately narrow desktop window
@@ -1456,7 +1600,7 @@ input[type="date"]::-webkit-date-and-time-value {
   }
 }
 
-/* ===== 9. Banners: reminders and the "couldn't save" warning ===== */
+/* ===== 9. Banners, the undo bar and the + button ===== */
 
 /* Bills-due banner and the backup / sync reminders (same look). */
 
@@ -1500,6 +1644,10 @@ input[type="date"]::-webkit-date-and-time-value {
 /* Accent colour when hovered. */
 
 .reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* The "new version is ready" bar stands out from the reminder banners with the accent colour. */
+
+.update-banner { border-color: var(--accent); }
 
 /* The Mark paid buttons under a banner's message: a row of their own, gone when there are none. */
 
@@ -1587,10 +1735,6 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .fab[hidden] { display: none; }
 
-/* A bill that is past due says so in the warm accent colour. */
-
-.bill-due-late { color: var(--accent-2); }
-
 /* Shown when the browser refuses to save (storage full or blocked). */
 
 .storage-warning {
@@ -1660,10 +1804,6 @@ input[type="date"]::-webkit-date-and-time-value {
 /* The total row is bold. */
 
 .paid-history-total { font-weight: 700; }
-
-/* Space under each folding part (Pay Period, Paid History, Recurring Income), so the next heading is not crowded. */
-
-.fold { margin-bottom: 28px; }
 
 /* ===== 11. App lock ===== */
 
@@ -1772,136 +1912,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 .lock-buttons button { flex: 1; }
 
-/* ===== 11b. Folding parts, jump links and calendar buttons ===== */
-
-/* People who ask their device for less motion get no flash on a new card and no turning arrow. */
-
-@media (prefers-reduced-motion: reduce) {
-  .bill-card-new { animation: none; }
-  .fold-summary::before { transition: none; }
-}
-
-/* The small form that opens under a bill's buttons: Other... (a different amount, or skip a date). */
-
-.pay-other-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 13px;
-  background: var(--bg);
-}
-
-/* display: flex above would otherwise beat the hidden attribute. */
-
-.pay-other-form[hidden] { display: none; }
-
-/* The line saying which date the form is for. */
-
-.pay-other-note {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-/* The amount box. */
-
-.pay-other-form input {
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--surface);
-  color: var(--text);
-  font-family: inherit;
-}
-
-/* Save amount, Skip this date and Cancel in a row that wraps. */
-
-.pay-other-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* Finger-sized outlined buttons. */
-
-.pay-other-buttons button {
-  min-height: 40px;
-  padding: 6px 14px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: transparent;
-  color: var(--text);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* Save amount is the main action. */
-
-.pay-other-buttons button[type="submit"] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 600;
-}
-
-/* The title and Cancel button of the Add bill form only exist while it is a phone sheet. */
-
-.add-form-title,
-.add-form-cancel { display: none; }
-
-/* The dimmed page behind the Add bill sheet. */
-
-.sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 65;
-  background: rgba(0, 0, 0, 0.5);
-}
-
-/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
-
-.sheet-backdrop[hidden] { display: none; }
-
-/* The Text size button in the Menu scales everything: sizes are in rem, so changing the root size is enough. */
-
-html[data-text="large"] { font-size: 112.5%; }
-html[data-text="xlarge"] { font-size: 125%; }
-
-/* The "new version is ready" bar stands out from the reminder banners with the accent colour. */
-
-.update-banner { border-color: var(--accent); }
-
-/* The Earlier / Today / Later buttons above the calendar. */
-
-.calendar-nav {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-/* Each one takes an equal share of the row and is finger-sized. */
-
-.calendar-nav-btn {
-  flex: 1;
-  min-height: 40px;
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: transparent;
-  color: var(--text);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* Accent colour when hovered. */
-
-.calendar-nav-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
-
-/* Today is dimmed while the calendar is already on this week. */
-
-.calendar-nav-btn:disabled { opacity: 0.5; cursor: default; }
+/* ===== 11b. Folding parts and jump links ===== */
 
 /* A row of small buttons that scroll to a part of the page; it scrolls sideways if it must. */
 
@@ -1922,6 +1933,10 @@ html[data-text="xlarge"] { font-size: 125%; }
   padding: 4px 14px;
   font-size: 0.85rem;
 }
+
+/* Space under each folding part (Pay Period, Paid History, Recurring Income), so the next heading is not crowded. */
+
+.fold { margin-bottom: 28px; }
 
 /* The heading row of a folding part: the title with an arrow, tapped to fold or unfold. */
 
@@ -1967,15 +1982,16 @@ html[data-text="xlarge"] { font-size: 125%; }
   outline-offset: 2px;
 }
 
-/* A just-added bill's card flashes once so you can see where it landed. */
+/* People who ask their device for less motion get no flash on a new card and no turning arrow. */
 
-.bill-card-new { animation: bill-card-flash 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  /* No flash on a just-added card. */
 
-/* The flash itself: an accent ring that fades out. */
+  .bill-card-new { animation: none; }
 
-@keyframes bill-card-flash {
-  from { box-shadow: 0 0 0 3px var(--accent); }
-  to { box-shadow: 0 0 0 0 transparent; }
+  /* The fold arrow turns instantly. */
+
+  .fold-summary::before { transition: none; }
 }
 
 /* ===== 12. Phone layout (max-width: 700px) ===== */
@@ -1983,19 +1999,41 @@ html[data-text="xlarge"] { font-size: 125%; }
 /* Last in the file on purpose: these override base rules of equal strength from above. */
 
 @media (max-width: 700px) {
+  /* ---- The top bar (title, Sync and Menu buttons) and the collapsed Menu ---- */
+
   /* The Menu stacks above the content and collapses behind the Menu button. */
 
   .app-shell { flex-direction: column; }
 
-  /* On phones the sidebar stacks above the content and sizes to its contents. */
+  /* The sidebar stacks above the content, sizes to its contents and is a slim bar while collapsed. */
 
   .sidebar {
     flex: 0 0 auto;
+    padding: 12px 16px;
+    gap: 16px;
     border-right: 0;
     border-bottom: 1px solid var(--border); /* stacked on top, so the divider goes underneath */
   }
 
-  /* On phones the Menu button is shown. */
+  /* The title and the buttons share one row. */
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  /* The title column may shrink so the buttons never get pushed off the screen. */
+
+  .header-title { min-width: 0; }
+
+  /* The tagline and the sprig only take room the phone does not have. */
+
+  .sidebar-header .tagline,
+  .sidebar-header::after { display: none; }
+
+  /* The Menu button is shown on phones. */
 
   .sidebar-toggle {
     display: flex;
@@ -2008,7 +2046,6 @@ html[data-text="xlarge"] { font-size: 125%; }
     color: var(--text);
     font-size: 0.9rem;
     cursor: pointer;
-    margin-top: 12px;
   }
 
   /* Accent colour when hovered. */
@@ -2025,26 +2062,6 @@ html[data-text="xlarge"] { font-size: 125%; }
   .sidebar:not(.sidebar-open) .data-io {
     display: none;
   }
-
-  /* A slimmer Menu bar when collapsed, so the Budget starts higher up the screen. */
-
-  .sidebar {
-    padding: 12px 16px;
-    gap: 16px;
-  }
-
-  /* The title and the Menu button share one row (the tagline and the corner sprig are dropped). */
-
-  .sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  /* The title column may shrink so the buttons never get pushed off the screen. */
-
-  .header-title { min-width: 0; }
 
   /* The sync state under the title, once sync is set up. */
 
@@ -2085,33 +2102,27 @@ html[data-text="xlarge"] { font-size: 125%; }
 
   .quick-sync-btn:disabled { opacity: 0.6; }
 
+  /* ---- Page spacing and banners ---- */
+
   /* Room under the last card so the + button never covers its buttons. */
 
   .content { padding-bottom: 84px; }
 
-  /* The Menu button no longer needs a gap above it once it sits beside the title. */
-
-  .sidebar-toggle { margin-top: 0; }
-
-  /* The tagline and the sprig only take room the phone does not have. */
-
-  .sidebar-header .tagline,
-  .sidebar-header::after { display: none; }
-
-  /* A reminder banner keeps its message wide enough to read; a short banner's cross stays beside
-     the text, and a banner with a button drops the buttons underneath together. */
+  /* A reminder banner is a little tighter on a phone. */
 
   .reminder-banner {
-    flex-wrap: wrap;
     row-gap: 8px;
     margin-bottom: 10px;
   }
 
-  /* The message wraps once it is about 14em wide, which leaves room for one cross beside it. */
+  /* The message wraps once it is about 14em wide, which leaves room for one cross beside it; a banner
+     with a button drops its buttons underneath together. */
 
   .reminder-banner-text {
     flex: 1 1 14em;
   }
+
+  /* ---- Calendar ---- */
 
   /* A week's four numbers sit in a tidy two-by-two block (total and income, then net and due)
      instead of four stacked lines. */
@@ -2128,6 +2139,8 @@ html[data-text="xlarge"] { font-size: 125%; }
     text-align: left;
     font-size: 0.8rem;
   }
+
+  /* ---- Bill and income cards ---- */
 
   /* A card's details run along a line (amount, due date, repeat, tags) under the name, rather than
      one per line, so each card is about half as tall. */
@@ -2165,7 +2178,9 @@ html[data-text="xlarge"] { font-size: 125%; }
     min-height: 40px;
   }
 
-  /* The Add bill form is hidden on phones until the + button opens it as a bottom sheet. */
+  /* ---- The Add bill form as a bottom sheet ---- */
+
+  /* The form is hidden on phones until the + button opens it. */
 
   #budget-add-form:not(.add-form-open) { display: none; }
 
@@ -2203,6 +2218,8 @@ html[data-text="xlarge"] { font-size: 125%; }
     background: transparent;
     color: var(--text);
   }
+
+  /* ---- Small things ---- */
 
   /* Finger-sized tap targets for the small buttons. */
 
