@@ -1694,14 +1694,18 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
     flex: 1 1 14em;
   }
 
-  /* A week's three totals sit in one line (wrapping only if they must) instead of three stacked lines. */
+  /* A week's four numbers sit in a tidy two-by-two block (total and income, then net and due)
+     instead of four stacked lines. */
 
   .budget-week-total,
   .budget-week-income-total,
   .budget-week-net-total,
-.budget-week-due-total {
+  .budget-week-due-total {
     display: inline-block;
-    margin: 8px 12px 0 0;
+    box-sizing: border-box;
+    width: 50%;
+    margin: 8px 0 0;
+    padding-right: 6px;
     text-align: left;
     font-size: 0.8rem;
   }
