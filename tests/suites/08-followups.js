@@ -36,3 +36,14 @@ bills.length = 0; renderBudget();
 // ---- a day cell's list of bills scrolls instead of spilling over the income box ----
 const dayList = document.querySelector('.budget-day-occurrences');
 check('the bills listed in a day cell scroll when there are many', !!dayList && getComputedStyle(dayList).overflowY === 'auto');
+
+// ---- marking a bill paid changes only the net, never the totals ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0;
+addBill({ name: 'Paid test', amount: '100', dueDate: dk(0), frequency: 'one_time', category: '', autopay: false });
+const totalsText = () => [...document.querySelectorAll('.budget-week-total'), $('budget-month-total')].map((e) => e.textContent).join('|');
+const netsText = () => [...document.querySelectorAll('.budget-week-net-total'), $('budget-month-net-total')].map((e) => e.textContent).join('|');
+const totalsBefore = totalsText(); const netsBefore = netsText();
+toggleBillPaid(bills[0].id, dk(0), true); renderBudget();
+check('marking a bill paid leaves the week and month totals unchanged', totalsText() === totalsBefore, totalsBefore + ' -> ' + totalsText());
+check('marking a bill paid raises the net', netsText() !== netsBefore && /\$0\.00/.test($('budget-month-net-total').textContent), netsBefore + ' -> ' + netsText());
+bills.length = 0; renderBudget();

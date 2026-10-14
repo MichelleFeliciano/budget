@@ -40,10 +40,11 @@ An `income` record's `id` is its own date key (one manual income entry per day),
 collection, which uses a fresh UUID. This gives "one entry per date" an identity-level guarantee across sync
 and import merges, and the server has a matching rule for it.
 
-## Calendar totals mix cumulative and period figures
-A week's or month's bill total includes every still-unpaid bill from earlier weeks, while income is summed
-only inside the period. This is deliberate, and the net tooltip explains it. Category filters never change
-these totals.
+## Marking a bill paid changes only the net
+A week's, month's or pay period's bill total is everything due in it, paid or not, so ticking a bill paid never
+moves it. The net is income in the period minus what is still unpaid; for a week or month that unpaid figure
+also includes unpaid bills from earlier weeks, while income is summed only inside the period. This is
+deliberate, and the net tooltip explains it. Category filters never change these totals.
 
 ## Autopay bills are never flagged
 A bill with autopay is not "overdue" or "due soon" anywhere: not in the banner and not on the calendar

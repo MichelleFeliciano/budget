@@ -594,6 +594,18 @@ function weekTotal(weekEndKey, allBills) {
     .reduce((sum, b) => sum + unpaidAmountThrough(b, weekEndKey), 0);
 }
 
+// Everything due from startKey to endKey inclusive, paid or not (a paid occurrence counts at the amount it
+// was paid at). This is what the week, month and pay-period "total" lines show, so marking a bill paid never
+// changes them; only the net (income minus what is still unpaid) moves.
+function amountDueInRange(startKey, endKey, allBills) {
+  const live = allBills.filter((b) => !b.deleted);
+  let sum = 0;
+  for (let dateKey = startKey; dateKey <= endKey; dateKey = shiftDateKey(dateKey, 1)) {
+    live.forEach((b) => { if (occursOnDate(b, dateKey)) sum += occurrenceAmount(b, dateKey); });
+  }
+  return sum;
+}
+
 // ---- Income (per-day manual number, a synced collection) ----
 // `id` is deliberately the record's own `dateKey`, not a fresh makeId() UUID like bills and
 // recurring income use: it gives "one income entry per date" a real identity-level guarantee
@@ -1322,13 +1334,17 @@ function renderPayPeriod() {
     uniqueIncomeByDate(income).filter((r) => !r.deleted),
     recurringIncome.filter((r) => !r.deleted)
   );
-  const periodNet = periodIncome - grandTotal;
+  // The total above counts every bill due in the period; the net only subtracts what is still unpaid.
+  const periodUnpaid = matches.reduce((sum, m) => sum + m.occurrenceDates
+    .filter((d) => !(m.bill.paidDates || []).includes(d))
+    .reduce((s, d) => s + occurrenceAmount(m.bill, d), 0), 0);
+  const periodNet = periodIncome - periodUnpaid;
   if (incomeEl) {
     incomeEl.innerHTML = `Income this pay period: <strong>${formatSignedCurrency(periodIncome)}</strong>`;
   }
   if (netEl) {
     netEl.innerHTML = `Net this pay period: <strong class="${signedAmountClass(periodNet)}">${formatSignedCurrency(periodNet)}</strong>`;
-    netEl.title = 'Income entered or expected in this pay period minus the bills due in it.';
+    netEl.title = 'Income entered or expected in this pay period minus the bills in it that are not yet paid.';
   }
 
   matches.forEach(({ bill, total, occurrenceDates }) => {
@@ -1467,9 +1483,12 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     today.getFullYear(), today.getMonth(), daysInMonth(today.getFullYear(), today.getMonth())
   );
   const monthTotal = nonDeletedBills.reduce((sum, b) => sum + unpaidAmountThrough(b, monthEndKey), 0);
+  // The displayed total is everything due this month, paid or not, so ticking a bill paid leaves it alone;
+  // only the net below (which uses the unpaid figure above) changes.
+  const monthDue = amountDueInRange(monthStartKey, monthEndKey, nonDeletedBills);
   const monthTotalEl = document.getElementById('budget-month-total');
   if (monthTotalEl) {
-    monthTotalEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} total: <strong>$${monthTotal.toFixed(2)}</strong>`;
+    monthTotalEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} total: <strong>$${monthDue.toFixed(2)}</strong>`;
   }
 
   // Plain range-sum, deliberately not cumulative — see incomeSumInRange's
@@ -1704,7 +1723,9 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     const totalEl = document.createElement('p');
     totalEl.className = 'budget-week-total';
     const weekOwed = weekTotal(weekEndKey, nonDeletedBills);
-    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekOwed.toFixed(2)}</strong>`;
+    // Shown: everything due this week, paid or not. weekOwed (still unpaid, with carry-over) feeds only the net.
+    const weekDue = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills);
+    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekDue.toFixed(2)}</strong>`;
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
@@ -3183,7 +3204,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
