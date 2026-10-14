@@ -584,24 +584,19 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 // Headings for the three calendar weeks, in order.
 const BUDGET_WEEK_LABELS = ['Last week', 'This week', 'Next week'];
 
-// Cumulative "total currently owed as of the end of this week" — the same
-// unpaid occurrence contributes to every week's total from the week it's due
-// through every subsequent week, for as long as it stays unpaid. Deliberate,
-// not a bug.
-function weekTotal(weekEndKey, allBills) {
-  return allBills
-    .filter((b) => !b.deleted)
-    .reduce((sum, b) => sum + unpaidAmountThrough(b, weekEndKey), 0);
-}
-
-// Everything due from startKey to endKey inclusive, paid or not (a paid occurrence counts at the amount it
-// was paid at). This is what the week, month and pay-period "total" lines show, so marking a bill paid never
-// changes them; only the net (income minus what is still unpaid) moves.
-function amountDueInRange(startKey, endKey, allBills) {
+// Everything due from startKey to endKey inclusive (a paid occurrence counts at the amount it was paid at).
+// With unpaidOnly, paid occurrences are skipped, which is the week's "Due" (what is left to pay). Without it
+// this is the week, month and pay-period "total", which marking a bill paid never changes; the net is
+// income minus that total, so it moves only when income does.
+function amountDueInRange(startKey, endKey, allBills, unpaidOnly = false) {
   const live = allBills.filter((b) => !b.deleted);
   let sum = 0;
   for (let dateKey = startKey; dateKey <= endKey; dateKey = shiftDateKey(dateKey, 1)) {
-    live.forEach((b) => { if (occursOnDate(b, dateKey)) sum += occurrenceAmount(b, dateKey); });
+    live.forEach((b) => {
+      if (!occursOnDate(b, dateKey)) return;
+      if (unpaidOnly && (b.paidDates || []).includes(dateKey)) return;
+      sum += occurrenceAmount(b, dateKey);
+    });
   }
   return sum;
 }
@@ -706,7 +701,7 @@ function uniqueIncomeByDate(records) {
   return [...latest.values()];
 }
 
-// Deliberately NOT cumulative-through-date, unlike weekTotal()/unpaidAmountThrough(). Each
+// Deliberately NOT cumulative-through-date, unlike unpaidAmountThrough(). Each
 // income record is summed into exactly the one week (or month) whose range its dateKey falls
 // in — never carried into subsequent periods.
 function incomeSumInRange(startKey, endKey, allIncome) {
@@ -1301,7 +1296,7 @@ function renderPayPeriod() {
   // Bounded loop — at most ~31 days (periodEnd is within 31 days of
   // periodStart, see computeCurrentPayPeriod) times every bill. A plain sum
   // of `amount` per matching occurrence, not cumulative unpaid-through-date
-  // math like weekTotal()/monthTotal — "what's due in this specific short
+  // math like unpaidAmountThrough() — "what's due in this specific short
   // window" is a simpler question than "everything ever owed as of a date".
   const matches = [];
   nonDeletedBills.forEach((bill) => {
@@ -1334,17 +1329,13 @@ function renderPayPeriod() {
     uniqueIncomeByDate(income).filter((r) => !r.deleted),
     recurringIncome.filter((r) => !r.deleted)
   );
-  // The total above counts every bill due in the period; the net only subtracts what is still unpaid.
-  const periodUnpaid = matches.reduce((sum, m) => sum + m.occurrenceDates
-    .filter((d) => !(m.bill.paidDates || []).includes(d))
-    .reduce((s, d) => s + occurrenceAmount(m.bill, d), 0), 0);
-  const periodNet = periodIncome - periodUnpaid;
+  const periodNet = periodIncome - grandTotal;
   if (incomeEl) {
     incomeEl.innerHTML = `Income this pay period: <strong>${formatSignedCurrency(periodIncome)}</strong>`;
   }
   if (netEl) {
     netEl.innerHTML = `Net this pay period: <strong class="${signedAmountClass(periodNet)}">${formatSignedCurrency(periodNet)}</strong>`;
-    netEl.title = 'Income entered or expected in this pay period minus the bills in it that are not yet paid.';
+    netEl.title = 'Income entered or expected in this pay period minus the bills due in it.';
   }
 
   matches.forEach(({ bill, total, occurrenceDates }) => {
@@ -1474,17 +1465,12 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   document.getElementById('budget-month-label').textContent =
     `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
-  // "This month" total: same cumulative unpaidAmountThrough semantics as the
-  // weekly totals below, just anchored at the current calendar month's last
-  // day instead of a week-end — deliberately unfiltered by category, same
-  // carve-out as weekTotal() (see matchesBillCategory filter further down).
+  // "This month" total: everything due this month, paid or not — deliberately unfiltered by
+  // category, same carve-out as the weekly totals (see matchesBillCategory filter further down).
   const monthStartKey = dateKeyFromParts(today.getFullYear(), today.getMonth(), 1);
   const monthEndKey = dateKeyFromParts(
     today.getFullYear(), today.getMonth(), daysInMonth(today.getFullYear(), today.getMonth())
   );
-  const monthTotal = nonDeletedBills.reduce((sum, b) => sum + unpaidAmountThrough(b, monthEndKey), 0);
-  // The displayed total is everything due this month, paid or not, so ticking a bill paid leaves it alone;
-  // only the net below (which uses the unpaid figure above) changes.
   const monthDue = amountDueInRange(monthStartKey, monthEndKey, nonDeletedBills);
   const monthTotalEl = document.getElementById('budget-month-total');
   if (monthTotalEl) {
@@ -1502,18 +1488,14 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       `${MONTH_NAMES[today.getMonth()]} income: <strong>${formatSignedCurrency(monthIncome)}</strong>`;
   }
 
-  // Mixes a cumulative expense figure (monthTotal, "everything unpaid as of
-  // month end") with a period-scoped income figure (monthIncome, "only what
-  // was entered this month") — a deliberate, reasoned tradeoff, not an
-  // oversight.
-  const monthNet = monthIncome - monthTotal;
+  // Income minus everything due this month, so ticking a bill paid does not move it.
+  const monthNet = monthIncome - monthDue;
   const monthNetTotalEl = document.getElementById('budget-month-net-total');
   if (monthNetTotalEl) {
     monthNetTotalEl.innerHTML =
       `${MONTH_NAMES[today.getMonth()]} net: <strong class="${signedAmountClass(monthNet)}">${formatSignedCurrency(monthNet)}</strong>`;
     monthNetTotalEl.title =
-      'Income entered or expected this month minus every bill unpaid as of the end of this month ' +
-      '(includes unpaid amounts carried over from past months)';
+      'Income entered or expected this month minus every bill due this month (paid or not)';
   }
 
   // Rebuild the three weeks from scratch: each week gets seven day cells plus its totals.
@@ -1626,7 +1608,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       nonDeletedBills
         .filter((bill) => occursOnDate(bill, dateKey))
         // Calendar-only category filter — the same chip selection filters the
-        // Bills list below. Deliberately does NOT touch weekTotal()/monthTotal
+        // Bills list below. Deliberately does NOT touch the week and month totals
         // above or renderBudgetStats(), which always sum the full
         // nonDeletedBills array regardless of the selected chip (totals must
         // never look smaller than the true unpaid amount just because a
@@ -1719,13 +1701,12 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
     weekEl.appendChild(cellsEl);
 
-    // Under each week: what's still owed, the income, and the net.
+    // Under each week: everything due, the income, the net (income minus everything due, so it moves
+    // only when income does), and Due (what is still left to pay this week).
     const totalEl = document.createElement('p');
     totalEl.className = 'budget-week-total';
-    const weekOwed = weekTotal(weekEndKey, nonDeletedBills);
-    // Shown: everything due this week, paid or not. weekOwed (still unpaid, with carry-over) feeds only the net.
-    const weekDue = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills);
-    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekDue.toFixed(2)}</strong>`;
+    const weekTotalDue = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills);
+    totalEl.innerHTML = `${BUDGET_WEEK_LABELS[weekIndex]}: <strong>$${weekTotalDue.toFixed(2)}</strong>`;
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
@@ -1737,16 +1718,20 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     incomeTotalEl.innerHTML = `Income: <strong>${formatSignedCurrency(weekIncome)}</strong>`;
     weekEl.appendChild(incomeTotalEl);
 
-    // This mixes a cumulative expense figure with a period-scoped income
-    // figure on purpose; the title tooltip below explains it to the user.
-    const weekNet = weekIncome - weekOwed;
+    const weekNet = weekIncome - weekTotalDue;
     const netTotalEl = document.createElement('p');
     netTotalEl.className = 'budget-week-net-total';
     netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`;
     netTotalEl.title =
-      'Income entered or expected this week minus every bill unpaid as of the end of this week ' +
-      '(includes unpaid amounts carried over from past weeks)';
+      'Income entered or expected this week minus every bill due this week (paid or not)';
     weekEl.appendChild(netTotalEl);
+
+    // What is left to pay this week: bills due in it that are not ticked paid yet.
+    const weekLeft = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills, true);
+    const leftEl = document.createElement('p');
+    leftEl.className = 'budget-week-due-total';
+    leftEl.innerHTML = `Due: <strong>$${weekLeft.toFixed(2)}</strong>`;
+    weekEl.appendChild(leftEl);
 
     calendarEl.appendChild(weekEl);
   }
@@ -3204,7 +3189,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

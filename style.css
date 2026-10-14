@@ -1141,7 +1141,8 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .budget-week-total,
 .budget-week-income-total,
-.budget-week-net-total {
+.budget-week-net-total,
+.budget-week-due-total {
   margin: 10px 0 0;
   text-align: right;
   color: var(--muted);
@@ -1697,7 +1698,8 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
 
   .budget-week-total,
   .budget-week-income-total,
-  .budget-week-net-total {
+  .budget-week-net-total,
+.budget-week-due-total {
     display: inline-block;
     margin: 8px 12px 0 0;
     text-align: left;

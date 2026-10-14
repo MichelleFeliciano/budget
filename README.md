@@ -6,7 +6,7 @@ Optional manual sync goes to its own small server (`server/`).
 
 It has one screen:
 
-- a three-week calendar (last week, this week, next week) with weekly and monthly totals (bills, income and net), where each day has a box for extra income
+- a three-week calendar (last week, this week, next week) with weekly and monthly totals (bills, income and net) and a weekly Due line (what is left to pay), where each day has a box for extra income
 - the **Current Pay Period** (enter a recent payday and how often you are paid)
 - **Paid History** by month and category
 - **Bills** (add, edit, delete, mark paid, autopay, category filter, search, sort)

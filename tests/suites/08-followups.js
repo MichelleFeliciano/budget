@@ -37,13 +37,17 @@ bills.length = 0; renderBudget();
 const dayList = document.querySelector('.budget-day-occurrences');
 check('the bills listed in a day cell scroll when there are many', !!dayList && getComputedStyle(dayList).overflowY === 'auto');
 
-// ---- marking a bill paid changes only the net, never the totals ----
+// ---- marking a bill paid moves only "Due"; the net moves only when income does ----
 bills.length = 0; income.length = 0; recurringIncome.length = 0;
 addBill({ name: 'Paid test', amount: '100', dueDate: dk(0), frequency: 'one_time', category: '', autopay: false });
-const totalsText = () => [...document.querySelectorAll('.budget-week-total'), $('budget-month-total')].map((e) => e.textContent).join('|');
-const netsText = () => [...document.querySelectorAll('.budget-week-net-total'), $('budget-month-net-total')].map((e) => e.textContent).join('|');
-const totalsBefore = totalsText(); const netsBefore = netsText();
+const textOf = (sel) => [...document.querySelectorAll(sel)].map((e) => e.textContent).join('|');
+const weekLines = () => textOf('.budget-week-total') + '#' + textOf('.budget-week-income-total') + '#' + textOf('.budget-week-net-total') + '#' + $('budget-month-total').textContent + '#' + $('budget-month-net-total').textContent;
+const dueBefore = textOf('.budget-week-due-total'); const linesBefore = weekLines();
+check('every week shows a Due line', document.querySelectorAll('.budget-week-due-total').length === document.querySelectorAll('.budget-week').length);
+check('Due holds the unpaid amount for the week', /Due: \$100\.00/.test(dueBefore), dueBefore);
 toggleBillPaid(bills[0].id, dk(0), true); renderBudget();
-check('marking a bill paid leaves the week and month totals unchanged', totalsText() === totalsBefore, totalsBefore + ' -> ' + totalsText());
-check('marking a bill paid raises the net', netsText() !== netsBefore && /\$0\.00/.test($('budget-month-net-total').textContent), netsBefore + ' -> ' + netsText());
-bills.length = 0; renderBudget();
+check('marking a bill paid empties Due', /^(Due: \$0\.00\|?)+$/.test(textOf('.budget-week-due-total')), textOf('.budget-week-due-total'));
+check('marking a bill paid leaves every total and net unchanged', weekLines() === linesBefore, linesBefore + ' -> ' + weekLines());
+setIncomeForDate(dk(0), '60'); renderBudget();
+check('entering income changes the net', /-\$40\.00/.test(textOf('.budget-week-net-total')) && /-\$40\.00/.test($('budget-month-net-total').textContent), textOf('.budget-week-net-total'));
+bills.length = 0; income.length = 0; renderBudget();
