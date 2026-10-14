@@ -561,28 +561,28 @@ function oldestUnpaidOccurrence(bill, throughKey) {
 
 // ---- Calendar window ----
 
-// The 35 days the budget calendar shows: five Monday-start weeks, from two weeks back to two ahead.
+// The 21 days the budget calendar shows: three Monday-start weeks (last week, this week, next week).
 function getCalendarWindowDays(today = new Date()) {
   const dow = (today.getDay() + 6) % 7; // days since Monday (getDay() is 0 = Sunday)
   const startOfThisWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
   const windowStart = new Date(
     startOfThisWeek.getFullYear(),
     startOfThisWeek.getMonth(),
-    startOfThisWeek.getDate() - 14
+    startOfThisWeek.getDate() - 7
   );
   const days = [];
-  for (let i = 0; i < 35; i++) {
+  for (let i = 0; i < 21; i++) {
     days.push(new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate() + i));
   }
-  return days.map(dateKeyFromLocalDate); // 35 date-key strings, Monday-start
+  return days.map(dateKeyFromLocalDate); // 21 date-key strings, Monday-start
 }
 
 // Month names indexed by 0-based month number.
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
   'August', 'September', 'October', 'November', 'December'];
 
-// Headings for the five calendar weeks, in order.
-const BUDGET_WEEK_LABELS = ['2 weeks ago', 'Last week', 'This week', 'Next week', '2 weeks from now'];
+// Headings for the three calendar weeks, in order.
+const BUDGET_WEEK_LABELS = ['Last week', 'This week', 'Next week'];
 
 // Cumulative "total currently owed as of the end of this week" — the same
 // unpaid occurrence contributes to every week's total from the week it's due
@@ -1445,7 +1445,7 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-// Renders the 35-day rolling calendar into #budget-calendar (everything
+// Renders the 21-day rolling calendar into #budget-calendar (everything
 // after the static .budget-weekday-row) and the month/year header. Always
 // runs against the full live `bills` array, and unaffected by the Bills
 // list's search filter below — but the category chip filter DOES apply here
@@ -1497,19 +1497,19 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       '(includes unpaid amounts carried over from past months)';
   }
 
-  // Rebuild the five weeks from scratch: each week gets seven day cells plus its totals.
+  // Rebuild the three weeks from scratch: each week gets seven day cells plus its totals.
   const windowDays = getCalendarWindowDays(today);
   const calendarEl = document.getElementById('budget-calendar');
   calendarEl.querySelectorAll('.budget-week').forEach((el) => el.remove());
 
-  for (let weekIndex = 0; weekIndex < 5; weekIndex++) {
+  for (let weekIndex = 0; weekIndex < 3; weekIndex++) {
     const weekDays = windowDays.slice(weekIndex * 7, weekIndex * 7 + 7);
     const weekEndKey = weekDays[6];
 
     const weekEl = document.createElement('div');
     weekEl.className = 'budget-week';
     weekEl.dataset.weekIndex = String(weekIndex);
-    weekEl.classList.toggle('budget-week-current', weekIndex === 2);
+    weekEl.classList.toggle('budget-week-current', weekIndex === 1);
 
     const cellsEl = document.createElement('div');
     cellsEl.className = 'budget-week-cells';
@@ -1958,7 +1958,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
 
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
-// (one of each can be open at once) and a focused day income box (any paid tick redraws all 35 days).
+// (one of each can be open at once) and a focused day income box (any paid tick redraws all 21 days).
 function renderBudget() {
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
@@ -3183,7 +3183,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

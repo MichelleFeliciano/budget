@@ -1654,18 +1654,82 @@ html[data-locked] .app-shell, html[data-locked] .storage-warning, html[data-lock
     display: none;
   }
 
-  /* A reminder banner gets the full width for its message, with its buttons underneath,
-     instead of the text being squeezed into a thin column beside them. */
+  /* A slimmer Menu bar when collapsed, so the Budget starts higher up the screen. */
+
+  .sidebar {
+    padding: 12px 16px;
+    gap: 16px;
+  }
+
+  /* The title and the Menu button share one row (the tagline and the corner sprig are dropped). */
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* The Menu button no longer needs a gap above it once it sits beside the title. */
+
+  .sidebar-toggle { margin-top: 0; }
+
+  /* The tagline and the sprig only take room the phone does not have. */
+
+  .sidebar-header .tagline,
+  .sidebar-header::after { display: none; }
+
+  /* A reminder banner keeps its message wide enough to read; a short banner's cross stays beside
+     the text, and a banner with a button drops the buttons underneath together. */
 
   .reminder-banner {
     flex-wrap: wrap;
     row-gap: 8px;
+    margin-bottom: 10px;
   }
 
-  /* On phones the message takes the full width, with the buttons underneath. */
+  /* The message wraps once it is about 14em wide, which leaves room for one cross beside it. */
 
   .reminder-banner-text {
-    flex: 1 1 100%;
+    flex: 1 1 14em;
+  }
+
+  /* A week's three totals sit in one line (wrapping only if they must) instead of three stacked lines. */
+
+  .budget-week-total,
+  .budget-week-income-total,
+  .budget-week-net-total {
+    display: inline-block;
+    margin: 8px 12px 0 0;
+    text-align: left;
+    font-size: 0.8rem;
+  }
+
+  /* A card's details run along a line (amount, due date, repeat, tags) under the name, rather than
+     one per line, so each card is about half as tall. */
+
+  .bill-info,
+  .recurring-income-info {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 10px;
+  }
+
+  /* The name keeps a line to itself. */
+
+  .bill-name,
+  .recurring-income-name { flex: 1 1 100%; }
+
+  /* Mark as paid gets a full-width row on top. */
+
+  .bill-actions .mark-oldest-paid-btn { flex: 1 1 100%; }
+
+  /* The other card buttons (Edit, Delete) share the row below it and are finger-sized. */
+
+  .bill-actions button,
+  .recurring-income-actions button {
+    flex: 1;
+    min-height: 40px;
   }
 
   /* Finger-sized tap targets for the small buttons. */
