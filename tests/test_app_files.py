@@ -150,6 +150,40 @@ class AppFiles(unittest.TestCase):
         # The saved config only ever holds what the user typed.
         self.assertIn("saveSyncConfig({ token })", APP)
 
+    def test_theme_colours_are_readable(self):
+        """Text, warnings and outlines keep their contrast (WCAG: 4.5:1 for text, 3:1 for outlines) in both themes."""
+
+        def palette(start):
+            i = CSS.index(start)
+            block = CSS[i:CSS.index("}", i)]
+            return dict(re.findall(r"(--[a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})", block))
+
+        def luminance(hex_colour):
+            def channel(c):
+                c /= 255
+                return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+            r, g, b = (channel(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        def ratio(a, b):
+            high, low = sorted((luminance(a), luminance(b)), reverse=True)
+            return (high + 0.05) / (low + 0.05)
+
+        pairs = [
+            ("--text", "--bg", 4.5), ("--text", "--surface", 4.5),
+            ("--muted", "--bg", 4.5), ("--muted", "--surface", 4.5),
+            ("--accent", "--bg", 4.5), ("--accent", "--surface", 4.5),
+            ("--accent-contrast", "--accent", 4.5),
+            ("--accent-2", "--bg", 4.5), ("--accent-2", "--surface", 4.5),
+            ("--accent-rose", "--bg", 4.5), ("--accent-rose", "--surface", 4.5),
+            ("--border", "--bg", 3.0), ("--border", "--surface", 3.0),
+        ]
+        for theme, start in (("light", ":root {"), ('dark', ':root[data-theme="dark"] {')):
+            colours = palette(start)
+            for foreground, background, needed in pairs:
+                with self.subTest(theme=theme, pair=f"{foreground} on {background}"):
+                    self.assertGreaterEqual(ratio(colours[foreground], colours[background]), needed)
+
 
 if __name__ == "__main__":
     unittest.main()

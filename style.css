@@ -545,6 +545,7 @@ select[id$="-sort-input"] {
 .edit-btn,
 .cancel-btn,
 .delete-btn,
+.pay-other-btn,
 .mark-oldest-paid-btn {
   padding: 5px 12px;
   border: 1px solid var(--border);
@@ -565,6 +566,7 @@ select[id$="-sort-input"] {
 
 .edit-btn:hover,
 .cancel-btn:hover,
+.pay-other-btn:hover:not(:disabled),
 .mark-oldest-paid-btn:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
@@ -579,6 +581,7 @@ select[id$="-sort-input"] {
 
 /* Dimmed when nothing is owed. */
 
+.pay-other-btn:disabled,
 .mark-oldest-paid-btn:disabled {
   opacity: 0.45;
   cursor: default;
@@ -1771,6 +1774,96 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 /* ===== 11b. Folding parts, jump links and calendar buttons ===== */
 
+/* People who ask their device for less motion get no flash on a new card and no turning arrow. */
+
+@media (prefers-reduced-motion: reduce) {
+  .bill-card-new { animation: none; }
+  .fold-summary::before { transition: none; }
+}
+
+/* The small form that opens under a bill's buttons: Other... (a different amount, or skip a date). */
+
+.pay-other-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  background: var(--bg);
+}
+
+/* display: flex above would otherwise beat the hidden attribute. */
+
+.pay-other-form[hidden] { display: none; }
+
+/* The line saying which date the form is for. */
+
+.pay-other-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* The amount box. */
+
+.pay-other-form input {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* Save amount, Skip this date and Cancel in a row that wraps. */
+
+.pay-other-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Finger-sized outlined buttons. */
+
+.pay-other-buttons button {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Save amount is the main action. */
+
+.pay-other-buttons button[type="submit"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+/* The title and Cancel button of the Add bill form only exist while it is a phone sheet. */
+
+.add-form-title,
+.add-form-cancel { display: none; }
+
+/* The dimmed page behind the Add bill sheet. */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
+
+.sheet-backdrop[hidden] { display: none; }
+
 /* The Text size button in the Menu scales everything: sizes are in rem, so changing the root size is enough. */
 
 html[data-text="large"] { font-size: 112.5%; }
@@ -2052,17 +2145,63 @@ html[data-text="xlarge"] { font-size: 125%; }
   .bill-name,
   .recurring-income-name { flex: 1 1 100%; }
 
-  /* Mark as paid gets a full-width row on top. */
+  /* Mark paid takes most of the top row, with Other... beside it. */
 
-  .bill-actions .mark-oldest-paid-btn,
+  .bill-actions .mark-oldest-paid-btn { flex: 2 1 55%; }
+
+  /* The narrower Other... button. */
+
+  .bill-actions .pay-other-btn { flex: 1 1 30%; }
+
+  /* Catching up several dates at once gets a row of its own. */
+
   .bill-actions .catch-up-btn { flex: 1 1 100%; }
 
-  /* The other card buttons (Edit, Delete) share the row below it and are finger-sized. */
+  /* The other card buttons (Edit, Delete) share the row below and are finger-sized. */
 
   .bill-actions button,
   .recurring-income-actions button {
-    flex: 1;
+    flex: 1 1 40%;
     min-height: 40px;
+  }
+
+  /* The Add bill form is hidden on phones until the + button opens it as a bottom sheet. */
+
+  #budget-add-form:not(.add-form-open) { display: none; }
+
+  /* Open: a sheet over the dimmed page, like the day sheet. */
+
+  #budget-add-form.add-form-open {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 70;
+    max-height: 85vh;
+    margin: 0;
+    padding: 16px;
+    overflow-y: auto;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--bg);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  /* The sheet's title. */
+
+  .add-form-open .add-form-title {
+    display: block;
+    margin: 0;
+    font-size: 1.05rem;
+  }
+
+  /* The sheet's Cancel button: outlined, so Add bill stays the main action. */
+
+  .add-form .add-form-cancel {
+    display: block;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
   }
 
   /* Finger-sized tap targets for the small buttons. */

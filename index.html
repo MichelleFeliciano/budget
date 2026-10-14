@@ -75,7 +75,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <button type="button" id="share-data-btn" class="data-io-btn" hidden>Share backup</button>
         <button type="button" id="calendar-export-btn" class="data-io-btn" title="Download a calendar file with your bills, to add reminders to your phone's calendar">Calendar reminders</button>
       </div>
-      <input type="file" id="import-file-input" accept="application/json,.json" hidden>
+      <input type="file" id="import-file-input" accept="application/json,.json" aria-label="Choose a backup file to import" hidden>
       <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
     </div>
 
@@ -198,6 +198,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </div>
 
       <form id="budget-add-form" class="add-form add-form-stacked">
+        <!-- A title and a Cancel button that only show when the form is open as a phone sheet. -->
+        <h3 class="add-form-title">Add a bill</h3>
         <input type="text" id="budget-name-input" placeholder="Bill name" required aria-label="Bill name">
         <input type="number" inputmode="decimal" id="budget-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Bill amount">
         <label class="date-field">Due date
@@ -210,13 +212,17 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <option value="yearly">Yearly</option>
           <option value="one_time">One-time (no recurrence)</option>
         </select>
-        <input type="text" id="budget-category-input" placeholder="Category (optional)" aria-label="Bill category">
+        <input type="text" id="budget-category-input" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Bill category">
         <label class="check-field"><input type="checkbox" id="budget-autopay-input"> Pays automatically (autopay)</label>
         <!-- Offered only for a repeating bill with a due date in the past (see updateCaughtUpOption). -->
         <label class="check-field" id="budget-caughtup-field" hidden><input type="checkbox" id="budget-caughtup-input" checked> I'm caught up: mark the dates before today as paid</label>
         <p class="form-error" id="budget-form-error" hidden></p>
         <button type="submit">Add bill</button>
+        <button type="button" class="add-form-cancel">Cancel</button>
       </form>
+
+      <!-- The categories already in use, offered as the person types in a category box (filled by renderCategoryOptions). -->
+      <datalist id="category-options"></datalist>
 
       <div class="chip-row" id="budget-category-filters"></div>
 
@@ -264,11 +270,23 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </div>
       <div class="bill-actions">
         <button type="button" class="mark-oldest-paid-btn" title="Mark the oldest unpaid date as paid">Mark paid</button>
+        <button type="button" class="pay-other-btn" title="Paid a different amount, or skip this date">Other&hellip;</button>
         <!-- Shown only when two or more earlier dates are unpaid. -->
         <button type="button" class="catch-up-btn" title="Mark every unpaid date before today as paid" hidden>Mark earlier dates paid</button>
         <button type="button" class="edit-btn">Edit</button>
         <button type="button" class="delete-btn" aria-label="Delete bill">Delete</button>
       </div>
+      <!-- Opened by Other...: pay the oldest unpaid date with a different amount, or skip that date. -->
+      <form class="pay-other-form" hidden>
+        <p class="pay-other-note"></p>
+        <input type="number" inputmode="decimal" class="pay-other-amount" placeholder="Amount paid" min="0.01" step="0.01" aria-label="Amount paid">
+        <p class="form-error pay-other-error" hidden></p>
+        <div class="pay-other-buttons">
+          <button type="submit">Save amount</button>
+          <button type="button" class="pay-skip-btn" title="Count this date as not owed, with nothing paid">Skip this date</button>
+          <button type="button" class="pay-other-cancel">Cancel</button>
+        </div>
+      </form>
     </div>
     <form class="bill-edit-form" hidden>
       <input type="text" class="bill-edit-name" placeholder="Bill name" required aria-label="Edit bill name">
@@ -284,7 +302,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <option value="yearly">Yearly</option>
         <option value="one_time">One-time (no recurrence)</option>
       </select>
-      <input type="text" class="bill-edit-category" placeholder="Category (optional)" aria-label="Edit bill category">
+      <input type="text" class="bill-edit-category" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Edit bill category">
       <label class="check-field"><input type="checkbox" class="bill-edit-autopay"> Pays automatically (autopay)</label>
       <p class="form-error bill-edit-error" hidden></p>
       <div class="bill-actions">
@@ -332,6 +350,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     </form>
   </li>
 </template>
+
+<!-- Dims the page behind the Add bill sheet on phones; tapping it closes the sheet. -->
+<div class="sheet-backdrop" id="add-sheet-backdrop" hidden></div>
 
 <!-- Bar at the bottom after a delete or Mark paid, so a mis-tap can be undone without opening the Menu (showUndoToast). -->
 <div class="undo-toast" id="undo-toast" role="status" hidden>

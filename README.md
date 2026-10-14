@@ -21,6 +21,11 @@ earlier dates paid in one tap. The pay period shows the next payday and what is 
 has Text size (Normal, Large, Largest), Share backup (where the phone can share files) and Calendar reminders (a
 calendar file with each bill as a repeating event). When a newer version of the app has installed itself, a bar at the
 top offers Update now. `DEVICE-CHECKLIST.md` lists what to try on real phones.
+A bill card's **Other…** button pays its oldest unpaid date with a different amount (for a bill that varies, like
+power) or skips that date. The category box suggests the categories already in use and keeps one spelling for each.
+On a phone the Add bill form is a bottom sheet opened by the + button, so the Bills list sits right under its filters.
+Colours meet WCAG contrast in both themes (a test checks it), fields and buttons have names for screen readers, and
+animations and smooth scrolling are turned off when the device asks for less motion.
 On a phone the top bar also has a Sync button and a one-line sync note, so syncing does not need the Menu.
 The Menu has Undo/Redo, Sync, Export/Import, Theme (Auto, Light, Dark), App lock and the version.
 

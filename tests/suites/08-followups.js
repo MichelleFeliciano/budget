@@ -258,3 +258,68 @@ check('a one-time bill that is long past is left out', !ics.includes('Old one-of
 check('the file holds no passphrase or device id', !/tok|deviceId/.test(ics));
 check('events start on a date, with no time', /DTSTART;VALUE=DATE:\d{8}\r\n/.test(ics));
 hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- paying a different amount, or skipping a date ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; renderBudget(); hideUndoToast();
+addBill({ name: 'Power', amount: '80', dueDate: dk(0), frequency: 'monthly', category: 'Utilities', autopay: false });
+const cardOf = (name) => [...document.querySelectorAll('#budget-list .bill-card')].find((c) => c.querySelector('.bill-name').textContent === name);
+cardOf('Power').querySelector('.pay-other-btn').click();
+const otherFormOf = (name) => cardOf(name).querySelector('.pay-other-form');
+check('Other opens a small form with the usual amount filled in', !otherFormOf('Power').hidden && otherFormOf('Power').querySelector('.pay-other-amount').value === '80');
+otherFormOf('Power').querySelector('.pay-other-amount').value = '0';
+check('the browser refuses a zero amount before anything is saved', otherFormOf('Power').querySelector('.pay-other-amount').validity.valid === false && !(bills[0].paidDates || []).length);
+otherFormOf('Power').querySelector('.pay-other-amount').value = '2000000000';
+otherFormOf('Power').requestSubmit();
+check('an absurdly large amount is refused with a message, and nothing is paid', !otherFormOf('Power').querySelector('.pay-other-error').hidden && !(bills[0].paidDates || []).length);
+otherFormOf('Power').querySelector('.pay-other-amount').value = '92.4';
+otherFormOf('Power').requestSubmit();
+check('a different amount is recorded for that date', bills[0].paidDates.includes(dk(0)) && bills[0].paidAmounts[dk(0)] === 92.4, JSON.stringify(bills[0].paidAmounts));
+check('the week total uses what was really paid', /This week: \$92\.40/.test(document.querySelector('.budget-week-current .budget-week-total').textContent), document.querySelector('.budget-week-current .budget-week-total').textContent);
+hideUndoToast();
+addBill({ name: 'Gym', amount: '30', dueDate: dk(0), frequency: 'monthly', category: '', autopay: false });
+cardOf('Gym').querySelector('.pay-other-btn').click();
+cardOf('Gym').querySelector('.pay-skip-btn').click();
+const gym = bills.find((b) => b.name === 'Gym');
+check('Skip counts the date as paid with nothing paid', gym.paidDates.includes(dk(0)) && gym.paidAmounts[dk(0)] === 0);
+check('a skipped date is not overdue or unpaid', unpaidAmountThrough(gym, dk(0)) === 0);
+check('the toast says Skipped', /Skipped Gym/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+const { y: histY, m: histM } = parseDateKey(todayKey());
+check('a skipped date is not listed as money paid', !computePaidByCategory(bills, histY, histM).some((r) => r.label === 'Uncategorized') && computePaidByCategory(bills, histY, histM).some((r) => r.label === 'Utilities' && r.total === 92.4));
+$('undo-toast-btn').click();
+check('Undo brings the skipped date back', unpaidAmountThrough(bills.find((b) => b.name === 'Gym'), dk(0)) === 30);
+check('Other is off for a bill with nothing unpaid', cardOf('Power').querySelector('.pay-other-btn').disabled === true);
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- category suggestions and one spelling per category ----
+addBill({ name: 'A', amount: '1', dueDate: dk(5), frequency: 'monthly', category: 'Utilities', autopay: false });
+addBill({ name: 'B', amount: '1', dueDate: dk(6), frequency: 'monthly', category: '  utilities ', autopay: false });
+check('a category typed in another case takes the spelling already used', bills.find((b) => b.name === 'B').category === 'Utilities');
+check('the category box suggests the categories in use', [...$('category-options').options].map((o) => o.value).join('|') === 'Utilities' && $('budget-category-input').getAttribute('list') === 'category-options');
+hideUndoToast(); bills.length = 0; renderBudget();
+
+// ---- the Add bill form as a sheet on phones ----
+openAddBillSheet();
+check('the Add bill form can open as a sheet', $('budget-add-form').classList.contains('add-form-open') && $('budget-add-form').getAttribute('role') === 'dialog' && $('budget-add-form').getAttribute('aria-modal') === 'true' && !$('add-sheet-backdrop').hidden);
+$('add-sheet-backdrop').click();
+check('a tap on the dimmed page closes it', !$('budget-add-form').classList.contains('add-form-open') && $('add-sheet-backdrop').hidden && !$('budget-add-form').hasAttribute('role'));
+openAddBillSheet(); $('budget-add-form').querySelector('.add-form-cancel').click();
+check('Cancel closes it', !$('budget-add-form').classList.contains('add-form-open'));
+openAddBillSheet(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('Escape closes it', !$('budget-add-form').classList.contains('add-form-open'));
+openAddBillSheet();
+$('budget-name-input').value = 'Sheet bill'; $('budget-amount-input').value = '9';
+$('budget-add-form').requestSubmit();
+check('adding a bill closes it', !$('budget-add-form').classList.contains('add-form-open') && bills.some((b) => b.name === 'Sheet bill'));
+hideUndoToast(); bills.length = 0; renderBudget();
+check('the page can tell a phone layout from a wide one, and asks for smooth or no scrolling', typeof isPhoneLayout() === 'boolean' && ['smooth', 'auto'].includes(scrollBehavior()));
+
+// ---- screen-reader basics: every field and button has a name ----
+const nameless = [...document.querySelectorAll('input:not([type="hidden"]), select, textarea')]
+  .filter((el) => !(el.getAttribute('aria-label') || el.closest('label') || (el.id && document.querySelector(`label[for="${el.id}"]`))));
+check('every field has a name for screen readers', nameless.length === 0, nameless.map((e) => e.id || e.className).join(', '));
+const unnamedButtons = [...document.querySelectorAll('button')].filter((b) => !(b.textContent.trim() || b.getAttribute('aria-label')));
+check('every button has a name', unnamedButtons.length === 0, unnamedButtons.map((b) => b.id || b.className).join(', '));
+const templateFields = [...document.querySelectorAll('template')].flatMap((t) => [...t.content.querySelectorAll('input:not([type="hidden"]), select, textarea')])
+  .filter((el) => !(el.getAttribute('aria-label') || el.closest('label')));
+check('every field in the bill and income cards has a name too', templateFields.length === 0, templateFields.map((e) => e.className).join(', '));
+check('there is one main area and a Menu navigation', document.querySelectorAll('main').length === 1 && !!document.querySelector('nav[aria-label="Menu"]'));

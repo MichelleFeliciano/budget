@@ -773,7 +773,28 @@ function validateBillFields(fields) {
   if (!dueDate) return { ok: false, error: 'Due date is required.' };
   if (!isReasonableDateKey(dueDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
   const frequency = BILL_FREQUENCIES.includes(fields.frequency) ? fields.frequency : 'monthly';
-  return { ok: true, name: trimmedName, amount, dueDate, frequency, category: fields.category.trim(), autopay: !!fields.autopay };
+  return { ok: true, name: trimmedName, amount, dueDate, frequency, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
+}
+
+// A category typed in another case ("utilities") takes the spelling already in use ("Utilities"), so the
+// filter chips and Paid History never split one category in two.
+function canonicalCategory(raw) {
+  const key = normalizeChipKey(raw);
+  if (!key) return '';
+  const existing = bills.find((b) => !b.deleted && b.category && normalizeChipKey(b.category) === key);
+  return existing ? existing.category.trim() : raw;
+}
+
+// Fills the list of suggestions under the category boxes with the categories already used by bills.
+function renderCategoryOptions(nonDeletedBills) {
+  const list = document.getElementById('category-options');
+  if (!list) return;
+  list.innerHTML = '';
+  deriveChipOptions(nonDeletedBills, (b) => b.category).forEach(({ label }) => {
+    const option = document.createElement('option');
+    option.value = label;
+    list.appendChild(option);
+  });
 }
 
 // Adds a bill. Returns { ok } or { ok: false, error } if the fields don't validate.
@@ -938,7 +959,7 @@ function restoreBill(id) {
 // Marks one occurrence of a bill paid or unpaid (and remembers the amount paid). Snapshot before,
 // mutate, stampSync, save, recordUndo, re-render. paidDates is otherwise only moved by
 // updateBill when the schedule changes.
-function toggleBillPaid(billId, dateKey, paid) {
+function toggleBillPaid(billId, dateKey, paid, paidAmount) {
   const bill = bills.find((b) => b.id === billId);
   if (!bill) return;
   const before = structuredClone(bill);
@@ -946,8 +967,10 @@ function toggleBillPaid(billId, dateKey, paid) {
   const amounts = { ...(bill.paidAmounts || {}) };
   if (paid) {
     paidSet.add(dateKey);
-    // Remember what this payment was worth (keep an amount already recorded for this date).
-    if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = bill.amount;
+    // Remember what this payment was worth: the amount given (0 means the date was skipped), otherwise the
+    // bill's amount (keeping one already recorded for this date).
+    if (typeof paidAmount === 'number') amounts[dateKey] = paidAmount;
+    else if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = bill.amount;
   } else {
     paidSet.delete(dateKey);
     delete amounts[dateKey];
@@ -1114,6 +1137,7 @@ function computePaidByCategory(allBills, y, m) {
     // (for example after the schedule was edited): money that was paid should not vanish from history.
     const dates = (bill.paidDates || []).filter((d) => {
       if (typeof d !== 'string' || !d.startsWith(prefix)) return false;
+      if (paidAmountFor(bill, d) === 0) return false; // a skipped date is not money paid
       const paymentKey = paymentIdentity(bill, d);
       if (counted.has(paymentKey)) return false;
       counted.add(paymentKey);
@@ -1537,7 +1561,11 @@ function startBillOnDate(dateKey) {
   closeCalendarDay();
   document.getElementById('budget-duedate-input').value = dateKey;
   updateCaughtUpOption();
-  document.getElementById('budget-add-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (isPhoneLayout()) {
+    openAddBillSheet();
+    return;
+  }
+  document.getElementById('budget-add-form').scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
   document.getElementById('budget-name-input').focus({ preventScroll: true });
 }
 
@@ -1977,6 +2005,37 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     catchUpBtn.hidden = Math.round(unpaidAmountThrough(bill, yesterdayK) / bill.amount) < 2;
     catchUpBtn.addEventListener('click', () => catchUpBill(bill.id, yesterdayK));
 
+    // "Other...": pay the oldest unpaid date with a different amount, or skip that date (recorded as a payment of 0).
+    const otherBtn = node.querySelector('.pay-other-btn');
+    const otherForm = node.querySelector('.pay-other-form');
+    const otherAmount = node.querySelector('.pay-other-amount');
+    const otherError = node.querySelector('.pay-other-error');
+    const otherNote = node.querySelector('.pay-other-note');
+    otherBtn.disabled = !hasUnpaid;
+    otherBtn.addEventListener('click', () => {
+      const target = oldestUnpaidOccurrence(bill, todayKey());
+      if (!target) return;
+      otherForm.dataset.dateKey = target;
+      otherNote.textContent = `For ${formatDateKeyShort(target)}: enter what you actually paid, or skip this date.`;
+      otherAmount.value = String(bill.amount);
+      otherError.hidden = true;
+      otherForm.hidden = false;
+      otherAmount.focus();
+    });
+    otherForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const amount = Math.round(Number(otherAmount.value) * 100) / 100;
+      if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_MONEY) {
+        otherError.textContent = 'Amount must be between $0.01 and $1,000,000,000.';
+        otherError.hidden = false;
+        return;
+      }
+      toggleBillPaid(bill.id, otherForm.dataset.dateKey, true, amount);
+    });
+    node.querySelector('.pay-skip-btn').addEventListener('click', () => toggleBillPaid(bill.id, otherForm.dataset.dateKey, true, 0));
+    node.querySelector('.pay-other-cancel').addEventListener('click', () => { otherForm.hidden = true; });
+    // (everything above is looked up now: by the time a button is pressed, this fragment has moved into the page)
+
     const editNameInput = node.querySelector('.bill-edit-name');
     const editAmountInput = node.querySelector('.bill-edit-amount');
     const editDueDateInput = node.querySelector('.bill-edit-duedate');
@@ -2189,6 +2248,7 @@ function renderBudget() {
 
   renderBudgetStats(nonDeleted);
   renderBillCategoryFilters(nonDeleted);
+  renderCategoryOptions(nonDeleted);
   renderBudgetCalendar(nonDeleted, nonDeletedIncome, nonDeletedRecurringIncome, focusedManualInput);
   renderPayPeriod();
   renderPaidHistory();
@@ -2261,8 +2321,52 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   frequencyInput.value = 'monthly';
   categoryInput.value = '';
   updateCaughtUpOption();
+  closeAddBillSheet();
   showNewBillCard(result.id);
 });
+
+// ---- The Add bill form as a bottom sheet (phones) ----
+// On a phone the form is hidden until the + button (or a day's "Add a bill on this day") opens it as a sheet over
+// the page, so the Bills list sits right under its filters. On wider screens it stays in the page.
+
+// True on the narrow layout (the same width the phone styles use).
+function isPhoneLayout() {
+  return window.matchMedia('(max-width: 700px)').matches;
+}
+
+// Smooth scrolling, unless the device is set to reduce motion.
+function scrollBehavior() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+// Opens the form as a sheet (CSS only turns that into a sheet on the phone layout) and moves into its first box.
+function openAddBillSheet() {
+  const form = document.getElementById('budget-add-form');
+  form.classList.add('add-form-open');
+  form.setAttribute('role', 'dialog');
+  form.setAttribute('aria-modal', 'true');
+  form.setAttribute('aria-label', 'Add a bill');
+  document.getElementById('add-sheet-backdrop').hidden = false;
+  document.getElementById('budget-name-input').focus();
+}
+
+// Closes the sheet (a no-op when it is not open).
+function closeAddBillSheet() {
+  const form = document.getElementById('budget-add-form');
+  form.classList.remove('add-form-open');
+  form.removeAttribute('role');
+  form.removeAttribute('aria-modal');
+  form.removeAttribute('aria-label');
+  document.getElementById('add-sheet-backdrop').hidden = true;
+}
+
+// Cancel, a tap on the dimmed page, Escape, or the screen turning wide all close it.
+document.querySelector('#budget-add-form .add-form-cancel').addEventListener('click', closeAddBillSheet);
+document.getElementById('add-sheet-backdrop').addEventListener('click', closeAddBillSheet);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('budget-add-form').classList.contains('add-form-open')) closeAddBillSheet();
+});
+window.matchMedia('(max-width: 700px)').addEventListener('change', closeAddBillSheet);
 
 // The due date starts on today (a day's "Add a bill on this day" button changes it).
 document.getElementById('budget-duedate-input').value = todayKey();
@@ -2285,7 +2389,7 @@ function updateCaughtUpOption() {
 function showNewBillCard(billId) {
   const card = document.querySelector(`#budget-list [data-bill-id="${billId}"]`);
   if (!card) return;
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
   card.classList.add('bill-card-new');
   setTimeout(() => card.classList.remove('bill-card-new'), 1800);
 }
@@ -2706,7 +2810,10 @@ function undoToastMessage(collectionName, before, after) {
   if (collectionName === 'bills') {
     const paidBefore = (before.paidDates || []).length;
     const paidNow = (after.paidDates || []).length;
-    if (paidNow > paidBefore) return `Marked ${name} paid`;
+    if (paidNow > paidBefore) {
+      const added = (after.paidDates || []).find((dateKey) => !(before.paidDates || []).includes(dateKey));
+      return after.paidAmounts && after.paidAmounts[added] === 0 ? `Skipped ${name}` : `Marked ${name} paid`;
+    }
     if (paidNow < paidBefore) return `Marked ${name} unpaid`;
   }
   return null;
@@ -3660,7 +3767,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -4021,7 +4128,7 @@ document.querySelectorAll('[data-jump]').forEach((button) => {
     const target = document.getElementById(button.dataset.jump);
     if (!target) return;
     if (target.tagName === 'DETAILS') target.open = true;
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
   });
 });
 
@@ -4031,7 +4138,11 @@ const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
 if (addBillFab && addBillForm) {
   addBillFab.addEventListener('click', () => {
-    addBillForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (isPhoneLayout()) {
+      openAddBillSheet();
+      return;
+    }
+    addBillForm.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
     document.getElementById('budget-name-input').focus({ preventScroll: true });
   });
   if ('IntersectionObserver' in window) {

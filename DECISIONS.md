@@ -85,6 +85,17 @@ A monthly bill first due months ago would show every month since as unpaid and o
 the bill's first save, so one Undo still removes the whole bill. One-time bills are never offered it, because an old
 one-time bill really is overdue. A card with two or more unpaid earlier dates can do the same in one tap.
 
+## A skipped date is a payment of nothing
+Skipping a date (a paused subscription, a waived bill) records it as paid with an amount of 0 rather than adding a
+new kind of record. Every existing rule then just works: it is not owed, not overdue, not counted in totals, it syncs
+and merges like any payment, and Undo or unticking it brings it back. Paid History leaves a date paid at 0 out, since
+no money was paid. Paying a different amount stores that amount for the date the same way.
+
+## The Add bill form is a sheet only on phones
+On the narrow layout the form is hidden until the + button opens it as a bottom sheet (Cancel, Escape, a tap on the
+dimmed page or adding the bill closes it), which keeps the Bills list close to the top. On wide screens it stays in
+the page, so nothing changes there.
+
 ## Calendar reminders are a file, not notifications
 The app cannot push alerts (there is no server that knows when you are away), so the Menu can export the bills as an
 .ics file for the phone's own calendar, which does send reminders. Each bill starts at its next unpaid date, because
