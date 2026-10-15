@@ -196,10 +196,16 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   align-items: stretch;
 }
 
-/* The Menu column: a fixed-width panel with its sections stacked. */
+/* The Menu column: a fixed-width panel with its sections stacked. On a wide screen it stays in view as the page
+   scrolls (as tall as the window, scrolling inside itself if it is taller), so Sync and Backup are always reachable. */
 
 .sidebar {
   flex: 0 0 220px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 24px 16px;
@@ -2104,6 +2110,10 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   .sidebar {
     flex: 0 0 auto;
+    position: static;
+    align-self: stretch;
+    height: auto;
+    overflow-y: visible;
     padding: 12px 16px;
     gap: 16px;
     border-right: 0;
