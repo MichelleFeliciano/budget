@@ -92,7 +92,6 @@ importData({ collections: { income: [{ ...incomeRec(dk(0), dk(0), 999, '2026-10-
 check('an older conflicting income entry in a backup is ignored', income.length === 1 && income[0].amount === 250);
 
 // ---- the day boxes are explained as extra income ----
-check('the Budget tab says day amounts are for extra income and paychecks go in Recurring Income', /extra income only/.test($('budget-income-note').textContent) && /Recurring Income/.test($('budget-income-note').textContent));
 
 // ---- the bills banner (inside the Budget; autopay bills are never overdue) ----
 bills.length = 0; income.length = 0; recurringIncome.length = 0;

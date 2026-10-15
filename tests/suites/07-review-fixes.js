@@ -69,12 +69,12 @@ setIncomeForDate('2026-10-05', '10.999');
 check('a day amount is rounded to whole cents', income.find((r) => r.dateKey === '2026-10-05').amount === 11);
 income.length = 0;
 renderBudget();
-const box = document.querySelector('.budget-day-manual-input');
-setIncomeForDate(box.dataset.dateKey, '50');
+const boxDate = todayKey();
+setIncomeForDate(boxDate, '50');
 await sleep(30);
-setIncomeForDate(box.dataset.dateKey, '9999999999');
+setIncomeForDate(boxDate, '9999999999');
 await sleep(30);
-check('an out-of-range amount is refused and the saved one stays', income.find((r) => r.dateKey === box.dataset.dateKey).amount === 50);
+check('an out-of-range amount is refused and the saved one stays', income.find((r) => r.dateKey === boxDate).amount === 50);
 income.length = 0;
 // pay period message
 savePaydaySettings({ payDateKey: null, frequency: 'biweekly' }); renderPayPeriod();

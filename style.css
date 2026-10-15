@@ -1282,103 +1282,6 @@ input[type="date"]::-webkit-date-and-time-value {
   text-decoration: line-through;
 }
 
-/* Bottom of a day cell: the manual income box and income dot. */
-
-.budget-day-footer {
-  margin-top: auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-/* One labelled box in the footer (Income, Projected): the small label above the box. */
-
-.budget-day-field {
-  flex: 1 1 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-/* The small muted label over a day box. */
-
-.budget-day-field-label {
-  font-size: 0.65rem;
-  color: var(--muted);
-}
-
-/* The boxes for income received and income expected on a day. */
-
-.budget-day-manual-input,
-.budget-day-projected-input,
-.budget-day-source-input {
-  width: 100%;
-  min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 0.78rem;
-  text-align: right;
-}
-
-/* A Spending Plan category's notes keep their line breaks and wrap like text. */
-
-.plan-notes { white-space: pre-wrap; }
-
-/* One income or projected entry on a day: its Source box beside its Amount box. */
-
-.budget-day-entry {
-  display: flex;
-  gap: 4px;
-}
-
-/* The two boxes share the row. */
-
-.budget-day-entry > input {
-  flex: 1 1 0;
-  width: auto;
-}
-
-/* A source is a word, not a number, so it reads from the left. */
-
-.budget-day-source-input { text-align: left; }
-
-/* Indicates a manual `income` entry exists for this day — sign-aware, reuses
-   the amount-positive/amount-negative pair above (never --accent-2, reserved
-   for error/overdue/destructive semantics). Reflects only the manual entry's
-   sign, not the day's combined manual + recurring total. */
-
-.budget-income-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-/* A positive income entry shows a green dot. */
-
-.budget-income-dot.amount-positive { background: var(--accent); }
-
-/* A negative one shows a rose dot. */
-
-.budget-income-dot.amount-negative { background: var(--accent-rose); }
-
-/* A hollow dot marks a day with projected income. */
-
-.budget-projected-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-}
-
 /* Weekly totals under each week's day cells. */
 
 .budget-week-total,
@@ -1518,14 +1421,10 @@ input[type="date"]::-webkit-date-and-time-value {
     font-size: 0;
   }
 
-  /* Names, checkboxes, the income box and Close are hidden in the compact grid (shown again in the open sheet). */
+  /* Names, checkboxes and Close are hidden in the compact grid (shown again in the open sheet). */
 
   .budget-occurrence-name,
   .budget-occurrence-checkbox,
-  .budget-day-field,
-  .budget-day-manual-input,
-  .budget-day-projected-input,
-  .budget-day-source-input,
   .budget-day-close {
     display: none;
   }
@@ -1552,13 +1451,6 @@ input[type="date"]::-webkit-date-and-time-value {
   .budget-occurrence.due-soon .budget-occurrence-dot,
   .budget-occurrence.due-soon:not(:has(.budget-occurrence-dot)) label::before {
     outline: 2px solid var(--accent-rose);
-  }
-
-  /* The income dot is centred in the compact cell. */
-
-  .budget-day-footer {
-    justify-content: center;
-    min-height: 8px;
   }
 
   /* The opened day is outlined in the accent colour. */
@@ -1649,26 +1541,6 @@ input[type="date"]::-webkit-date-and-time-value {
   .budget-day-open .budget-occurrence-name {
     display: block;
     white-space: normal;
-  }
-
-  /* The labelled boxes (Income, Projected) show again in the open sheet. */
-
-  .budget-day-open .budget-day-field { display: flex; }
-
-  /* A readable label over each box. */
-
-  .budget-day-open .budget-day-field-label {
-    font-size: 0.8rem;
-  }
-
-  /* Finger-sized boxes. */
-
-  .budget-day-open .budget-day-manual-input,
-  .budget-day-open .budget-day-projected-input,
-  .budget-day-open .budget-day-source-input {
-    display: block;
-    padding: 8px 10px;
-    font-size: 1rem;
   }
 
   /* A closed day shows its first bill's name, cut short to fit, then "+2" when there are more. */

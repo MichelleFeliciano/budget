@@ -682,16 +682,7 @@ function setIncomeForDate(dateKey, rawValue, source) {
     recordUndo('income', record.id, null, structuredClone(record));
   }
 
-  // Deferred, not called synchronously: this fires from the income input's
-  // `change` handler, which the browser dispatches as part of a Tab key's
-  // default action — moving focus to the next cell is a later step of that
-  // same synchronous algorithm. Rebuilding the calendar (which destroys and
-  // recreates every cell, including the one about to be focused) inside that
-  // window pulls the rug out from under the browser's own focus-move, and it
-  // lands on nothing (document.body) instead of the next cell. Deferring to
-  // a macrotask lets Tab's native focus-move finish first, so the existing
-  // focusedManualInput capture (in renderBudget) correctly sees the *new*
-  // cell as focused and restores focus onto its freshly-rebuilt replacement.
+  // Deferred so the redraw runs after the current event has finished.
   setTimeout(renderBudget, 0);
 }
 
@@ -1761,7 +1752,7 @@ document.addEventListener('click', (e) => {
 // list's search filter below — but the category chip filter DOES apply here
 // too (occurrence rendering only; every total stays unfiltered, see the
 // matchesBillCategory comment inside the render loop below).
-function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, focusedManualInput) {
+function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap) {
   const today = new Date();
   const todayK = todayKey();
   const dueSoonEndK = shiftDateKey(todayK, REMINDER_BANNER_DAYS); // same window as the banner
@@ -1990,90 +1981,6 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         bodyEl.insertBefore(peekEl, occurrencesEl);
       }
 
-      // Day footer: the rows for typing income received and income expected for this day. A row is one source
-      // (Source box, then Amount). The last, empty row adds an entry: the same source updates its row, a
-      // different source makes another one.
-      const footerEl = document.createElement('div');
-      footerEl.className = 'budget-day-footer';
-      const dayIncome = nonDeletedIncome.filter((r) => r.dateKey === dateKey)
-        .sort((a, b) => (a.source || '').localeCompare(b.source || ''));
-      const dayProjected = projectedMap.get(dateKey) || [];
-      const dayIncomeTotal = dayIncome.reduce((sum, r) => sum + r.amount, 0);
-      const dayProjectedTotal = dayProjected.reduce((sum, r) => sum + r.projected, 0);
-      const dayLabel = `${MONTH_NAMES[m]} ${d}`;
-      const entryRows = (kind, records, labelText) => {
-        const section = document.createElement('div');
-        section.className = 'budget-day-field';
-        const heading = document.createElement('span');
-        heading.className = 'budget-day-field-label';
-        heading.textContent = labelText;
-        section.appendChild(heading);
-        [...records, null].forEach((record) => {
-          const rowKey = `${kind}-${record ? record.id : 'new'}`;
-          const row = document.createElement('div');
-          row.className = 'budget-day-entry';
-
-          const sourceBox = document.createElement('input');
-          sourceBox.type = 'text';
-          sourceBox.className = 'budget-day-source-input';
-          sourceBox.maxLength = MAX_SOURCE_LENGTH;
-          sourceBox.placeholder = 'Source';
-          sourceBox.autocomplete = 'off';
-          sourceBox.setAttribute('list', 'income-source-options');
-          sourceBox.dataset.focusKey = `${rowKey}-source`;
-          sourceBox.setAttribute('aria-label', `${labelText} source for ${dayLabel}${record ? '' : ' (new entry)'}`);
-          sourceBox.value = record && record.source ? record.source : '';
-          if (record) {
-            // Changing a row's source; refused (and put back) if the day already has that source.
-            sourceBox.addEventListener('change', (e) => {
-              if (!setIncomeSource(record.id, e.target.value)) setTimeout(renderBudget, 0);
-            });
-          }
-
-          const amountBox = document.createElement('input');
-          amountBox.type = 'number';
-          amountBox.step = 'any';
-          amountBox.className = kind === 'income' ? 'budget-day-manual-input' : 'budget-day-projected-input';
-          amountBox.dataset.dateKey = dateKey;
-          amountBox.dataset.focusKey = `${rowKey}-amount`;
-          amountBox.placeholder = 'Amount';
-          amountBox.setAttribute('aria-label',
-            `${labelText} amount for ${dayLabel}${record && record.source ? ` from ${record.source}` : ''}${record ? '' : ' (new entry)'}`);
-          amountBox.value = record ? String(kind === 'income' ? record.amount : record.projected) : '';
-          amountBox.addEventListener('change', (e) => {
-            // A half-typed number ("1e", "-") reads as empty: put the saved amount back rather than clearing the day.
-            if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
-            const source = record ? record.source : sourceBox.value;
-            if (kind === 'income') setIncomeForDate(dateKey, e.target.value, source);
-            else setProjectedForDate(dateKey, e.target.value, source);
-          });
-
-          row.append(sourceBox, amountBox);
-          section.appendChild(row);
-        });
-        return section;
-      };
-      // Sign-aware, not flat "always green" — a negative manually-entered
-      // income amount (income's amount is unconstrained) must not be shown
-      // with a color that implies "good news." Never
-      // --accent-2, reserved for error/overdue/destructive semantics. This
-      // reflects only the day's manual `income` entries — it is NOT a summary
-      // of the day's combined manual + recurring total.
-      if (dayIncome.length) {
-        const dotSpan = document.createElement('span');
-        dotSpan.className = `budget-income-dot ${signedAmountClass(dayIncomeTotal)}`;
-        footerEl.appendChild(dotSpan);
-      }
-      // A hollow dot marks a projection (the closed compact day shows only the dots).
-      if (dayProjected.length) {
-        const projectedDot = document.createElement('span');
-        projectedDot.className = 'budget-projected-dot';
-        footerEl.appendChild(projectedDot);
-      }
-      footerEl.appendChild(entryRows('income', dayIncome, 'Income'));
-      footerEl.appendChild(entryRows('projected', dayProjected, 'Projected'));
-      bodyEl.appendChild(footerEl);
-
       // In the day sheet: start a bill on this day (the Add bill form gets the date).
       const addOnDayBtn = document.createElement('button');
       addOnDayBtn.type = 'button';
@@ -2082,8 +1989,6 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       addOnDayBtn.addEventListener('click', (e) => { e.stopPropagation(); startBillOnDate(dateKey); });
       bodyEl.appendChild(addOnDayBtn);
 
-      if (dayIncome.length) daySummary.push(`income entered $${dayIncomeTotal.toFixed(2)}`);
-      if (dayProjected.length) daySummary.push(`projected income $${dayProjectedTotal.toFixed(2)}`);
       openBtn.setAttribute('aria-label',
         `${MONTH_NAMES[m]} ${d}${dateKey === todayK ? ', today' : ''}: ` +
         `${daySummary.length ? daySummary.join(', ') : 'nothing scheduled'}. Open day.`);
@@ -2149,27 +2054,6 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     calendarEl.appendChild(weekEl);
   }
 
-  // If an income box was being typed in when the redraw started, put its text and focus back.
-  if (focusedManualInput) {
-    const restored = calendarEl.querySelector(`[data-focus-key="${focusedManualInput.focusKey}"]`);
-    if (restored) {
-      // An empty new-entry row stays empty: a number just saved has become its own row.
-      if (!/-new-amount$/.test(focusedManualInput.focusKey)) restored.value = focusedManualInput.value;
-      restored.focus();
-    }
-  }
-}
-
-// A small labelled number box for a day ("Income" or "Projected"): the label shows in the day sheet and on the
-// wide calendar, and the box keeps its own spoken name.
-function dayField(labelText, input) {
-  const field = document.createElement('label');
-  field.className = 'budget-day-field';
-  const text = document.createElement('span');
-  text.className = 'budget-day-field-label';
-  text.textContent = labelText;
-  field.append(text, input);
-  return field;
 }
 
 // Draws the Bills list (cards with edit form, delete and "mark oldest unpaid as paid");
@@ -2738,17 +2622,12 @@ document.getElementById('plan-add-form').addEventListener('submit', (e) => {
 
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
-// (one of each can be open at once) and a focused day income box (any paid tick redraws all 21 days).
+// (one of each can be open at once).
 function renderBudget() {
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
   const nonDeletedIncome = uniqueIncomeEntries(income).filter((r) => !r.deleted);
   const nonDeletedRecurringIncome = recurringIncome.filter((r) => !r.deleted);
-
-  const activeEl = document.activeElement;
-  const focusedManualInput = activeEl && activeEl.dataset && activeEl.dataset.focusKey && activeEl.closest('.budget-day-footer')
-    ? { focusKey: activeEl.dataset.focusKey, value: activeEl.value }
-    : null;
 
   const list = document.getElementById('budget-list');
   const openForm = list.querySelector('.bill-edit-form:not([hidden])');
@@ -2780,7 +2659,7 @@ function renderBudget() {
   renderBudgetStats(nonDeleted);
   renderBillCategoryFilters(nonDeleted);
   renderCategoryOptions(nonDeleted);
-  renderBudgetCalendar(nonDeleted, nonDeletedIncome, nonDeletedRecurringIncome, projectedByDate(income), focusedManualInput);
+  renderBudgetCalendar(nonDeleted, nonDeletedIncome, nonDeletedRecurringIncome, projectedByDate(income));
   renderPayPeriod();
   renderPaidHistory();
   renderBudgetList(nonDeleted, openEdit);
@@ -4362,7 +4241,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

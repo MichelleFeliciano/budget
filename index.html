@@ -144,8 +144,6 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </div>
         </div>
 
-        <!-- Reminder about how the day boxes work: they are extra income, added on top of recurring income. -->
-        <p class="stats-line budget-income-note" id="budget-income-note"><strong>Income</strong> in a day is for extra income only (a refund, a side payment); regular paychecks go in Recurring Income (the Income tab). <strong>Projected</strong> is what you expect to receive that day.</p>
       </div>
 
       <!-- Income: the current pay period and the recurring income sources. -->
@@ -176,7 +174,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
         <details class="fold" id="fold-projected-income" open>
           <summary class="fold-summary"><h2>Projected Income</h2></summary>
-          <p class="stats-line">Money you expect to receive on a day, for today or later (you can also type it in a day on the calendar). It shows in that week's Projected lines until you enter real income for the day.</p>
+          <p class="stats-line">Money you expect to receive on a day, for today or later. It shows in that week's Projected lines until you enter real income for the day.</p>
           <form id="projected-income-add-form" class="add-form add-form-stacked">
             <label class="date-field">Date
               <input type="date" id="projected-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the projected income">
