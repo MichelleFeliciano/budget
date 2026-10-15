@@ -93,7 +93,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
   <!-- Main content: the Budget, which starts with the bills banner and the backup reminders. -->
   <main class="content">
-    <!-- The three tabs. On a phone this is a bar along the bottom of the screen; on wide screens, pills above the page. -->
+    <!-- The tabs. On a phone this is a bar along the bottom of the screen; on wide screens, pills above the page. -->
     <nav class="tabbar" id="tabbar" aria-label="Sections">
       <button type="button" class="tabbar-btn" data-tab="home" aria-current="page">Home</button>
       <button type="button" class="tabbar-btn" data-tab="income">Income</button>
@@ -122,7 +122,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <!-- Reminders to download a full backup or to sync; filled by renderBackupNotes. -->
       <div id="backup-notes" hidden></div>
 
-      <!-- The three tabs. Home: the calendar and its week totals. -->
+      <!-- The tabs. Home: the calendar and its week totals. -->
       <div class="tab-panel" id="tab-home">
         <div class="collection-toolbar">
           <h2 id="budget-month-label">This month</h2>

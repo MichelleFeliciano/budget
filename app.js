@@ -7,8 +7,8 @@
 //
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
-//   metadata, undo/redo, Budget (bills, income, recurring income, paid history, pay period,
-//   calendar, the Add bill sheet), backup reminders, the due/overdue bills banner, Device Sync
+//   metadata, undo/redo, Budget (bills, income, projected income, recurring income, paid history,
+//   pay period, calendar, the Add bill sheet), the Spending Plan and Expenses tabs, backup reminders, the due/overdue bills banner, Device Sync
 //   (server address, sync client, undo/redo application, the undo bar), data export/import (and
 //   the calendar reminders file), day rollover, theme, text size and version, App lock, and Init
 //   (which wires the phone Menu button, the tabs, the calendar buttons, the folding parts and the
@@ -342,7 +342,7 @@ function migrateSyncFields(items, key, deviceId) {
 // In-memory only, never persisted. One entry per changed record (never a
 // whole-array snapshot).
 
-// Each entry is { collection, id, before, after, timestamp }; before is null for a brand-new record.
+// Each entry is { collection, id, before, after }; before is null for a brand-new record.
 let undoStack = [];
 // Undone changes that can be re-applied (any new change clears this list).
 let redoStack = [];
@@ -359,7 +359,6 @@ function recordUndo(collectionName, id, before, after) {
     id,
     before: before === null ? null : structuredClone(before),
     after: structuredClone(after),
-    timestamp: new Date().toISOString(),
   });
   if (undoStack.length > MAX_UNDO_DEPTH) undoStack.shift();
   redoStack = [];
@@ -618,9 +617,9 @@ function amountDueInRange(startKey, endKey, allBills, unpaidOnly = false) {
 }
 
 // ---- Income received (typed by hand, a synced collection) ----
-// The first income entry for a date uses the date itself as its `id`, not a fresh makeId() UUID like bills and
-// recurring income use: two devices that each enter that date's first entry then merge into one record across
-// the normal sync paths. A later entry for the same date (a different source) gets a fresh id.
+// An income entry's `id` is built from its date (and source), not a fresh makeId() UUID like bills and recurring
+// income use: two devices that each enter the same date and source then merge into one record across the normal
+// sync paths (see newEntryId).
 // The same list also holds projected income, Spending Plan categories and expenses (each told apart by its own
 // field, none with a `dateKey`), so they sync, undo and export with the server's three lists unchanged.
 
@@ -638,6 +637,16 @@ function entryKey(dateKey, source) {
 // The day a real or projected income record belongs to.
 function recordDay(record) {
   return record.dateKey || record.projectedFor;
+}
+
+// The id for a new income or projected entry: the date itself ("2026-10-15", "projected-2026-10-15") plus
+// "#<source>" when it has a source, so two devices adding the same day and source meet in one record and different
+// sources never share an id (which would drop one amount in a sync). A fresh unique id when that one is already
+// taken, as when an entry's source was changed later.
+function newEntryId(prefix, dateKey, source) {
+  const name = cleanSource(source).toLowerCase();
+  const base = `${prefix}${dateKey}${name ? `#${name}` : ''}`;
+  return income.some((r) => r.id === base) ? `${prefix}${makeId()}` : base;
 }
 
 // Sets (or clears, when the value is '') the manual income number for one calendar day and source ('' or
@@ -672,9 +681,8 @@ function setIncomeForDate(dateKey, rawValue, source) {
     recordUndo('income', existing.id, before, structuredClone(existing));
   } else {
     const now = new Date().toISOString();
-    // The first entry of a day keeps the date as its id; later ones (another source) get a fresh id.
     const record = {
-      id: income.some((r) => r.id === dateKey) ? makeId() : dateKey, dateKey, amount,
+      id: newEntryId('', dateKey, source), dateKey, amount,
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
@@ -830,9 +838,8 @@ function setProjectedForDate(dateKey, rawValue, source) {
     recordUndo('income', existing.id, before, structuredClone(existing));
   } else {
     const now = new Date().toISOString();
-    const primaryId = `projected-${dateKey}`; // the first entry of a day; later ones (another source) get a fresh id
     const record = {
-      id: income.some((r) => r.id === primaryId) ? `${primaryId}-${makeId()}` : primaryId,
+      id: newEntryId('projected-', dateKey, source),
       projectedFor: dateKey, projected: amount,
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
@@ -1251,8 +1258,8 @@ function totalIncomeInRange(startKey, endKey, nonDeletedIncome, nonDeletedRecurr
 
 // ---- Paid history ----
 // Per-category totals of bill occurrences marked paid in one calendar month.
-// Reads ALL bills including deleted ones (deleting a bill doesn't un-spend
-// money already paid), filtered through occursOnDate.
+// Reads ALL bills including deleted ones (deleting a bill doesn't un-spend money already paid). It counts every
+// recorded payment in the month, even one that no longer matches the bill's schedule.
 
 // The month the Paid history panel is showing (m is 0-based); starts on the current month.
 let paidHistoryMonth = (() => { const { y, m } = parseDateKey(todayKey()); return { y, m }; })();
@@ -1306,7 +1313,7 @@ function renderPaidHistory() {
     const name = document.createElement('span');
     name.textContent = label;
     const amount = document.createElement('span');
-    amount.textContent = `${formatMoney(total)}`;
+    amount.textContent = formatMoney(total);
     li.append(name, amount);
     if (detail) {
       const note = document.createElement('span');
@@ -1405,12 +1412,8 @@ function renderBudgetStats(nonDeletedBills) {
 }
 
 // ---- Current Pay Period ----
-// Storage key: budgetApp.paydaySettings.v1. Deliberately a flat, device-local settings object,
-// NOT a synced collection: it is a display preference (which pay-cycle window to show), not
-// transaction data. It is read and written with plain localStorage + JSON rather than
-// loadCollection/saveCollection, which assume an array of sync-tracked records. If it ever needs
-// to follow the user across devices it would have to become a real synced collection
-// (id/updatedAt/deviceId/deleted/version, listed in SYNC_COLLECTIONS).
+// Storage key: budgetApp.paydaySettings.v1. A flat, device-local settings object, NOT a synced collection (it is
+// not in SYNC_COLLECTIONS): read and written with plain localStorage + JSON.
 
 // localStorage key for the payday date and pay frequency.
 const PAYDAY_SETTINGS_KEY = 'budgetApp.paydaySettings.v1';
@@ -1462,12 +1465,7 @@ function effectivePaydaySettings() {
 // Finds the current pay period: { periodStart, periodEnd } where periodStart is the latest payday
 // on or before today and periodEnd the next one. Returns null if there is no payday yet (the
 // saved payday is still in the future).
-// Bounded backward/forward scan (at most 31 days each way — long enough to
-// cover every supported frequency) using the existing, already-verified
-// occursOnDate() to find the current pay period's boundaries. This is safe
-// as a bounded loop (unlike an unbounded day-by-day scan across arbitrary
-// history, which this app avoids elsewhere) because the scan range here is
-// small and constant, anchored at today.
+// Scans at most 31 days back and forward (longer than any supported pay frequency) with occursOnDate().
 function computeCurrentPayPeriod(payDateKey, frequency) {
   const todayK = todayKey();
   const payBill = { dueDate: payDateKey, frequency };
@@ -1531,9 +1529,7 @@ function billDueInfo(bill, todayK) {
 }
 
 // Draws the Current Pay Period panel: bills due before the next payday, plus income and net for that period.
-// Reads the live, non-deleted bills array directly (same convention as
-// renderBudgetStats/renderBillCategoryFilters) rather than taking it as a
-// parameter, since it's called from renderBudget() alongside those.
+// Reads the live bills array itself (not a parameter), skipping deleted ones.
 function renderPayPeriod() {
   const summaryEl = document.getElementById('pay-period-summary');
   const listEl = document.getElementById('pay-period-bills-list');
@@ -1642,7 +1638,7 @@ function renderPayPeriod() {
     amount.className = 'bill-amount';
     amount.textContent = occurrenceDates.length > 1
       ? `${formatMoney(total)} (${occurrenceDates.length} occurrences)`
-      : `${formatMoney(total)}`;
+      : formatMoney(total);
     info.appendChild(amount);
 
     const due = document.createElement('span');
@@ -1773,7 +1769,7 @@ function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecur
     ...nonDeletedRecurringIncome.map((r) => r.dueDate),
   ].filter(Boolean).sort();
   if (!firstDates.length) return { net: 0, projectedNet: 0 };
-  const earliestStart = shiftDateKey(thisWeekKey, -7 * MAX_ROLLOVER_WEEKS);
+  const earliestStart = shiftDateKey(weekStartKey(todayKey()), -7 * MAX_ROLLOVER_WEEKS); // fixed to today, so sliding the calendar never changes a week's figure
   let start = weekStartKey(firstDates[0]);
   if (start < earliestStart) start = earliestStart;
 
@@ -2002,7 +1998,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = bill.name;
 
-          const amountText = skipped ? 'skipped' : `${formatMoney((paid ? paidAmountFor(bill, dateKey) : bill.amount))}`;
+          const amountText = skipped ? 'skipped' : formatMoney(paid ? paidAmountFor(bill, dateKey) : bill.amount);
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
           daySummary.push(`${bill.name}${skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
@@ -2161,7 +2157,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     node.querySelector('.catch-up-btn').setAttribute('aria-label', `Mark earlier dates paid: ${bill.name}`);
     node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${bill.name}`);
     node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${bill.name}`);
-    node.querySelector('.bill-amount').textContent = `${formatMoney(bill.amount)}`;
+    node.querySelector('.bill-amount').textContent = formatMoney(bill.amount);
     const due = billDueInfo(bill, todayK);
     const dueEl = node.querySelector('.bill-due');
     dueEl.textContent = due.text;
@@ -2314,7 +2310,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     node.querySelector('.recurring-income-name').textContent = source.name;
     node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${source.name}`);
     node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${source.name}`);
-    node.querySelector('.recurring-income-amount').textContent = `${formatMoney(source.amount)}`;
+    node.querySelector('.recurring-income-amount').textContent = formatMoney(source.amount);
     node.querySelector('.recurring-income-start').textContent = `Starts: ${formatDateKeyShort(source.dueDate)}`;
     node.querySelector('.recurring-income-frequency').textContent =
       RECURRING_INCOME_FREQUENCY_LABELS[source.frequency] || source.frequency;
@@ -2414,6 +2410,7 @@ function renderProjectedIncomeList() {
     if (!received) stillExpected += record.projected;
 
     const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
     const editForm = node.querySelector('.recurring-income-edit-form');
     const editAmount = node.querySelector('.projected-income-edit-amount');
@@ -2454,7 +2451,8 @@ function renderProjectedIncomeList() {
         editError.hidden = false;
         return;
       }
-      setProjectedForDate(dateKey, editAmount.value, editSource.value);
+      if (Math.round(value * 100) / 100 !== record.projected) setProjectedForDate(dateKey, editAmount.value, editSource.value);
+      renderBudget();
     });
     node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, '', record.source));
 
@@ -2580,6 +2578,7 @@ function renderPlan() {
     if (typeof record.altAmount === 'number') anyWhatIf = true;
 
     const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
     const editForm = node.querySelector('.recurring-income-edit-form');
     const editError = node.querySelector('.plan-edit-error');
@@ -2677,10 +2676,43 @@ document.getElementById('plan-add-form').addEventListener('submit', (e) => {
   document.getElementById('plan-name-input').focus();
 });
 
+// The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
+// open form has to be captured first and put back after.
+const EDIT_CARD_LIST_IDS = ['plan-list', 'expense-list', 'received-income-list', 'projected-income-list'];
+
+// Notes every open card edit form: which record, what is typed in each box, and which box had focus.
+function captureOpenCardForms() {
+  const open = [];
+  EDIT_CARD_LIST_IDS.forEach((listId) => {
+    document.querySelectorAll(`#${listId} li[data-record-id]`).forEach((card) => {
+      const form = card.querySelector('.recurring-income-edit-form');
+      if (!form || form.hidden) return;
+      const fields = [...form.querySelectorAll('input, select')];
+      open.push({ listId, recordId: card.dataset.recordId, values: fields.map((f) => f.value), focused: fields.indexOf(document.activeElement) });
+    });
+  });
+  return open;
+}
+
+// Reopens the forms captured by captureOpenCardForms on the freshly drawn cards, with what was typed. A record
+// that is gone (deleted or synced away) just stays closed.
+function restoreOpenCardForms(open) {
+  open.forEach(({ listId, recordId, values, focused }) => {
+    const card = [...document.querySelectorAll(`#${listId} li[data-record-id]`)].find((c) => c.dataset.recordId === recordId);
+    const editBtn = card && card.querySelector('.edit-btn');
+    if (!editBtn) return;
+    editBtn.click(); // opens the form and fills the choices a box needs, from the saved record
+    const fields = [...card.querySelectorAll('.recurring-income-edit-form input, .recurring-income-edit-form select')];
+    fields.forEach((field, i) => { if (values[i] !== undefined) field.value = values[i]; });
+    if (focused >= 0 && fields[focused]) fields[focused].focus();
+  });
+}
+
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
-// (one of each can be open at once).
+// (one of each can be open at once) and the open edit forms of the Plan, Expenses and Income cards.
 function renderBudget() {
+  const openCardForms = captureOpenCardForms();
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
   const nonDeletedIncome = uniqueIncomeEntries(income).filter((r) => !r.deleted);
@@ -2726,6 +2758,7 @@ function renderBudget() {
   renderProjectedIncomeList();
   renderPlan();
   renderExpenses();
+  restoreOpenCardForms(openCardForms);
 
   renderBackupNotes();
   renderBillReminders(); // the due/overdue bills banner at the top
@@ -2958,6 +2991,7 @@ function renderReceivedIncomeList() {
 
   entries.forEach((record) => {
     const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
     const editForm = node.querySelector('.recurring-income-edit-form');
     const editAmount = node.querySelector('.received-income-edit-amount');
@@ -2999,7 +3033,9 @@ function renderReceivedIncomeList() {
         editError.hidden = false;
         return;
       }
-      setIncomeForDate(record.dateKey, editAmount.value, editSource.value);
+      // Only a changed amount is a second change; an unchanged one would add an empty Undo step.
+      if (Math.round(value * 100) / 100 !== record.amount) setIncomeForDate(record.dateKey, editAmount.value, editSource.value);
+      renderBudget();
     });
     deleteBtn.addEventListener('click', () => setIncomeForDate(record.dateKey, '', record.source));
 
@@ -3209,10 +3245,12 @@ function renderExpenses() {
       row.plannedMonth === null ? `This month: ${money(spentMonth)}` : `This month: ${money(spentMonth)} of ${money(row.plannedMonth)} planned`,
     ];
     if (row.records.length) {
-      const first = row.records.reduce((min, r) => (r.spentOn < min ? r.spentOn : min), row.records[0].spentOn);
+      // Only expenses up to today count: a future-dated one has not happened yet and would inflate the average.
+      const sofar = row.records.filter((r) => r.spentOn <= todayK);
+      const first = sofar.reduce((min, r) => (r.spentOn < min ? r.spentOn : min), todayK);
       const days = utcDayDiff(first, todayK) + 1;
-      const total = row.records.reduce((sum, r) => sum + r.amount, 0);
-      lines.push(days >= MIN_AVERAGE_DAYS
+      const total = sofar.reduce((sum, r) => sum + r.amount, 0);
+      lines.push(sofar.length && days >= MIN_AVERAGE_DAYS
         ? `Average so far: ${money((total / days) * 7)} per week (${money((total / days) * 52 / 12 * 7)} per month)`
         : 'Average per week: needs two weeks of entries');
     }
@@ -3239,6 +3277,7 @@ function renderExpenses() {
   list.innerHTML = '';
   expenses.slice(0, MAX_EXPENSES_SHOWN).forEach((record) => {
     const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
     const editForm = node.querySelector('.recurring-income-edit-form');
     const dateBox = node.querySelector('.expense-edit-date');
@@ -3639,7 +3678,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -3665,8 +3704,8 @@ document.getElementById('undo-btn').addEventListener('click', undo);
 document.getElementById('redo-btn').addEventListener('click', redo);
 
 // ---- Undo toast ----
-// A short bar at the bottom of the screen after a delete or a Mark paid, with an Undo button, so a
-// mis-tap can be fixed without opening the Menu. Edits get no toast; adding an expense does, since a quick-add is one tap.
+// A short bar at the bottom of the screen after a delete, a Mark paid, a new bill or recurring income, or a logged
+// expense, with an Undo button, so a mis-tap (or a one-tap Quick Add) can be fixed without opening the Menu. Edits get no toast.
 
 // How long the toast stays before it hides itself.
 const UNDO_TOAST_MS = 6000;
@@ -3940,7 +3979,7 @@ function bootstrapSyncSnapshot(serverData) {
 
     c.set(merged);
     saveCollection(c.key, merged);
-    c.render();
+    safeRender(c.render);
     snapshot[c.name] = known;
   });
   saveSyncSnapshot(snapshot);
@@ -3957,7 +3996,7 @@ function bootstrapSyncSnapshot(serverData) {
 //  - missing from the reply (created in flight, or the server lost it): keep it
 //    and leave it out of the snapshot so it is sent again;
 //  - the server's copy has a LOWER version than ours (server rolled back):
-//    keep ours and re-send it.
+//    keep ours and re-send it, unless the server's copy is a newer delete (then take the delete).
 function reconcileServerReply(c, incoming, preFlightMap) {
   const incomingById = new Map(incoming.map((item) => [item.id, item]));
   const result = [];
@@ -3977,6 +4016,14 @@ function reconcileServerReply(c, incoming, preFlightMap) {
       // (otherwise it would never count as confirmed). Different content means the server really is
       // behind, so keep ours and send it again.
       if (contentMatchesIgnoringVersion(local, server, c.name) && JSON.stringify(local) === preFlightMap[local.id]) {
+        result.push(server);
+        known[server.id] = JSON.stringify(server);
+        return;
+      }
+      // The server holds a delete that is newer than this device's last edit of the record: take the delete, or
+      // sending our live copy again would bring a deleted record back.
+      if (server.deleted && !local.deleted && JSON.stringify(local) === preFlightMap[local.id]
+          && (local.updatedAt || '') <= (server.updatedAt || '')) {
         result.push(server);
         known[server.id] = JSON.stringify(server);
         return;
@@ -4275,7 +4322,7 @@ async function shareBackup() {
 
 // Escapes text for an .ics field.
 function icsEscape(text) {
-  return String(text).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  return String(text).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
 }
 
 // Folds a long line the way calendar files require: lines of at most 75 bytes, each continuation starting
@@ -4517,15 +4564,15 @@ function setDataIoStatus(text, tone) {
   el.classList.toggle('sync-failed', tone === 'failed');
 }
 
-// Rejects records whose types would crash rendering later (e.g. a bill whose amount is the
-// string "1200" throws in toFixed on every page load).
+// Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
+// string "1200" instead of a number, or a date outside the forms' year range).
 function isValidImportRecord(collectionName, rec) {
   if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !rec.id) return false;
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
   // Bills and recurring income need what their forms need (a cent up to MAX_MONEY); a day's
   // income may be negative but is held to the same size limit.
   const isPositiveMoney = (v) => isNum(v) && v >= 0.01 && v <= MAX_MONEY;
-  const isDate = (v) => isRealDateKey(v);
+  const isDate = (v) => isRealDateKey(v) && isReasonableDateKey(v); // the forms' year range, so a hand-edited year 0500 cannot make every redraw crawl
   const isText = (v) => typeof v === 'string';
   const textOrMissing = (v) => v === undefined || v === null || typeof v === 'string';
   const listOrMissing = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
@@ -4676,7 +4723,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 27;
+const APP_VERSION = 28;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -4706,7 +4753,8 @@ function applyTheme(theme) {
 
 // The Theme button cycles Auto -> Light -> Dark.
 document.getElementById('theme-btn').addEventListener('click', () => {
-  applyTheme(THEMES[(THEMES.indexOf(loadTheme()) + 1) % THEMES.length]);
+  // The current theme is read from the page, not storage, so cycling works when storage is blocked.
+  applyTheme(THEMES[(THEMES.indexOf(document.documentElement.getAttribute('data-theme') || 'auto') + 1) % THEMES.length]);
 });
 applyTheme(loadTheme());
 
@@ -4739,7 +4787,7 @@ function applyTextSize(size) {
 
 // The Text size button cycles Normal -> Large -> Largest.
 document.getElementById('text-size-btn').addEventListener('click', () => {
-  applyTextSize(TEXT_SIZES[(TEXT_SIZES.indexOf(loadTextSize()) + 1) % TEXT_SIZES.length]);
+  applyTextSize(TEXT_SIZES[(TEXT_SIZES.indexOf(document.documentElement.getAttribute('data-text') || 'normal') + 1) % TEXT_SIZES.length]);
 });
 applyTextSize(loadTextSize());
 // Show the version number in the Menu.
@@ -5032,8 +5080,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 });
 
 // ---- Tabs ----
-// Home (the calendar), Income (pay period and recurring income) and Bills (the list, the Add bill form and
-// Paid History). Every part is always drawn; the tabs only show one at a time, and the last one used is
+// Home (the calendar), Income, Bills (the list, the Add bill form and Paid History), Plan and Expenses. Every part is always drawn; the tabs only show one at a time, and the last one used is
 // remembered on this device.
 
 // localStorage key for the last tab used, and the tabs in order.
@@ -5132,9 +5179,9 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadServiceWorker) showUpdateBanner(); });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then((registration) => {
-      registration.update();
+      registration.update().catch(() => {});
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') registration.update();
+        if (document.visibilityState === 'visible') registration.update().catch(() => {});
       });
     }).catch(() => {
       // Offline install is optional (e.g. private browsing); the app still works without it.

@@ -14,6 +14,7 @@
      11. App lock
      11b. Folding parts
      12. Phone layout (max-width: 700px)
+     13. Wide screens only (min-width: 901px), just before the reduced-motion rule
 
    Order matters: rules of equal strength are decided by source order, so a media query that
    overrides a base rule sits after it (the calendar's 900px block ends section 8; the 700px
@@ -1144,7 +1145,7 @@ input[type="date"]::-webkit-date-and-time-value {
 
 /* Net totals color-code their <strong> child via
    signedAmountClass() — income totals stay plain/uncolored. Reuses the same
-   amount-positive/amount-negative class pair the income-day dot below uses —
+   amount-positive/amount-negative class pair the plan and net figures use —
    one shared semantic vocabulary across the app. */
 
 .amount-positive { color: var(--accent); }
@@ -1371,7 +1372,7 @@ input[type="date"]::-webkit-date-and-time-value {
   /* Compact phone/tablet calendar: all 7 columns always fit the screen (no
      sideways scrolling). Each day shows only its date plus one dot per bill/
      income item; tapping a day lifts that live cell into a bottom sheet
-     (.budget-day-open) showing names, paid checkboxes and the income input. */
+     (.budget-day-open) showing names and paid checkboxes. */
 
   .budget-week-cells,
   .budget-weekday-row {
@@ -1464,7 +1465,7 @@ input[type="date"]::-webkit-date-and-time-value {
     display: none;
   }
 
-  /* A recurring income row has no dot of its own, so it gets a neutral one. */
+  /* A row with no dot of its own (a bill with no category colour) gets a neutral one. */
 
   .budget-occurrence:not(:has(.budget-occurrence-dot)) label::before {
     content: '';
@@ -1564,14 +1565,13 @@ input[type="date"]::-webkit-date-and-time-value {
     margin-bottom: 8px;
   }
 
-  /* Show names and checkboxes again. */
+  /* Show checkboxes again. */
 
-  .budget-day-open .budget-occurrence-name,
   .budget-day-open .budget-occurrence-checkbox {
     display: inline-block;
   }
 
-  /* Names wrap instead of being cut off. */
+  /* Names show again and wrap instead of being cut off. */
 
   .budget-day-open .budget-occurrence-name {
     display: block;
@@ -1990,8 +1990,6 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   outline-offset: 2px;
 }
 
-/* People who ask their device for less motion get no flash on a new card and no turning arrow. */
-
 /* ===== Wide screens only: a tidier desktop layout. Phones and tablets keep the layouts above. ===== */
 
 @media (min-width: 901px) {
@@ -2036,7 +2034,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   .add-form-stacked .form-error,
   .add-form-stacked .check-field,
-  .add-form-stacked button {
+  .add-form-stacked button:not(.today-btn) {
     grid-column: 1 / -1;
     justify-self: start;
   }
@@ -2060,6 +2058,8 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   .stats-line { margin-bottom: 8px; }
 }
+
+/* People who ask their device for less motion get no flash on a new card and no turning arrow. */
 
 @media (prefers-reduced-motion: reduce) {
   /* No flash on a just-added card. */
@@ -2197,6 +2197,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
     right: 0;
     bottom: 0;
     z-index: 40;
+    gap: 4px;
     margin: 0;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
     background: var(--surface);
@@ -2338,8 +2339,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .chip, .sync-change-btn, .reminder-banner-btn { min-height: 36px; }
 
   /* iOS Safari zooms the page when a text control under 16px gets focus. Many more specific
-     rules set their own smaller sizes (add and edit forms, the day amount box, the sync
-     passphrase box), so this one needs !important to win everywhere. */
+     rules set their own smaller sizes (add and edit forms, the sync passphrase box), so this one needs !important to win everywhere. */
 
   input:not([type="checkbox"]):not([type="radio"]),
   select,

@@ -110,6 +110,25 @@ class MergeRules(unittest.TestCase):
         self.assertEqual(items[0]["projected"], 650)
         self.assertEqual(items[0]["projectedFor"], "2026-10-15")
 
+    def test_a_deleted_expense_is_not_brought_back_by_a_newer_edit(self):
+        """Only date-id income entries let a newer edit beat a tombstone; an expense or plan category never resurrects."""
+        server = [rec("expense-1", 3, spentOn="2026-10-15", amount=40, deleted=True, updatedAt="2026-10-15T10:00:00Z")]
+        items, c = self.merge(server, [rec("expense-1", 2, spentOn="2026-10-15", amount=45, updatedAt="2026-10-15T10:05:00Z")], "income")
+        self.assertEqual((len(items), items[0]["deleted"], c), (1, True, []))
+
+    def test_a_stale_delete_of_a_plan_category_still_deletes_it(self):
+        """A delete is not dropped just because another device edited the category later (only date-id income works that way)."""
+        server = [rec("plan-1", 3, planName="Gas", amount=90, updatedAt="2026-10-15T10:05:00Z")]
+        items, c = self.merge(server, [rec("plan-1", 2, planName="Gas", amount=90, deleted=True, updatedAt="2026-10-15T10:00:00Z")], "income")
+        self.assertEqual((len(items), items[0]["deleted"], c), (1, True, []))
+
+    def test_date_id_rule_covers_dates_projected_dates_and_per_source_ids(self):
+        for good in ("2026-10-15", "projected-2026-10-15", "2026-10-15#job", "projected-2026-10-15#side gig"):
+            self.assertTrue(s._is_date_id("income", good), good)
+        for bad in ("expense-1", "plan-1", "0b1f0f3e-aaaa-bbbb-cccc-000000000000", "projected-x"):
+            self.assertFalse(s._is_date_id("income", bad), bad)
+        self.assertFalse(s._is_date_id("bills", "2026-10-15"))
+
     def test_income_conflict_never_makes_a_second_entry_for_the_date(self):
         server = [rec("2026-09-22", 6, amount=100, updatedAt="2026-10-01T10:00:00Z")]
         items, c = self.merge(server, [rec("2026-09-22", 5, amount=250, updatedAt="2026-10-02T10:00:00Z")], "income")

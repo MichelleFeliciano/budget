@@ -458,13 +458,13 @@ setProjectedForDate(dk(3), '300', 'Side gig'); await sleep(30);
 setIncomeForDate(dk(1), '120'); await sleep(30);
 setIncomeSource(dk(1), '  Tips  '); await sleep(30);
 check('a source is saved trimmed on a real income day', income.find((r) => r.id === dk(1)).source === 'Tips');
-check('a source is saved on a projected day', income.find((r) => r.id === `projected-${dk(3)}`).source === 'Side gig');
+check('a source is saved on a projected day', income.find((r) => r.projectedFor === dk(3)).source === 'Side gig');
 check('suggestions are the recurring income names plus sources used before', JSON.stringify(incomeSourceNames()) === JSON.stringify(['Paycheck', 'Side gig', 'Tips']) && document.querySelectorAll('#income-source-options option').length === 3, JSON.stringify(incomeSourceNames()));
 check('the projected list shows the source', /Side gig/.test(document.querySelector('#projected-income-list .recurring-income-start').textContent));
 showTab('home'); renderBudget();
 check('the source choices still list recurring income names and used sources on the Income tab form', document.querySelectorAll('#income-source-options option').length === 3);
 setProjectedForDate(dk(3), '350', 'Side gig'); await sleep(30);
-check('changing only the amount keeps the source', income.find((r) => r.id === `projected-${dk(3)}`).source === 'Side gig');
+check('changing only the amount keeps the source', income.find((r) => r.projectedFor === dk(3)).source === 'Side gig');
 setIncomeSource(dk(1), ''); await sleep(30);
 check('an empty source clears it', income.find((r) => r.id === dk(1)).source === undefined);
 check('a source is cut to 60 characters', (setIncomeSource(dk(1), 'x'.repeat(80)), income.find((r) => r.id === dk(1)).source.length === 60));
@@ -654,4 +654,50 @@ check('the Today button fills the Projected Income date', $('projected-income-da
 $('expense-date-input').value = '2026-01-01'; document.querySelector('[data-date-input="expense-date-input"]').click();
 check('the Today button fills the Expenses date', $('expense-date-input').value === todayKey());
 check('every Today button has a visible name and a target', [...document.querySelectorAll('.today-btn')].length === 3 && [...document.querySelectorAll('.today-btn')].every((b) => b.textContent === 'Today' && document.getElementById(b.dataset.dateInput)));
+hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- fixes from the line-by-line review ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('plan'); renderBudget(); hideUndoToast();
+// an open edit form survives a redraw, with what was typed
+savePlanCategory({ name: 'Keep', amountRaw: '10', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const keepCard = () => [...document.querySelectorAll('#plan-list li')].find((c) => /Keep/.test(c.textContent));
+keepCard().querySelector('.edit-btn').click();
+keepCard().querySelector('.plan-edit-amount').value = '77';
+renderBudget();
+check('an open edit form is still open after a redraw, with the typed text', !keepCard().querySelector('.recurring-income-edit-form').hidden && keepCard().querySelector('.plan-edit-amount').value === '77' && keepCard().querySelector('.recurring-income-view').hidden === true);
+check('a closed card stays closed after a redraw', (keepCard().querySelector('.cancel-btn').click(), renderBudget(), keepCard().querySelector('.recurring-income-edit-form').hidden === true));
+// ids are built from day and source, so different sources never share an id
+setIncomeForDate(dk(1), '100', 'Job'); setIncomeForDate(dk(1), '40', 'Gift'); setIncomeForDate(dk(1), '5');
+check('each source gets its own id built from the day and source', income.some((r) => r.id === `${dk(1)}#job`) && income.some((r) => r.id === `${dk(1)}#gift`) && income.some((r) => r.id === dk(1) && !r.source));
+setProjectedForDate(dk(2), '60', 'Job'); setProjectedForDate(dk(2), '9');
+check('projected entries do the same', income.some((r) => r.id === `projected-${dk(2)}#job`) && income.some((r) => r.id === `projected-${dk(2)}`));
+// editing the source and amount of an income-received entry makes one undo step, not two
+income.length = 0; undoStack.length = 0; redoStack.length = 0;
+setIncomeForDate(dk(1), '100', 'Pay'); undoStack.length = 0; renderBudget(); showTab('income'); renderBudget();
+const receivedCard = () => document.querySelector('#received-income-list li');
+receivedCard().querySelector('.edit-btn').click();
+receivedCard().querySelector('.received-income-edit-source').value = 'Bonus';
+receivedCard().querySelector('.recurring-income-edit-form').requestSubmit(); await sleep(30);
+check('changing only the source records one undo step', undoStack.length === 1 && income[0].source === 'Bonus' && income[0].amount === 100, String(undoStack.length));
+// the average ignores future-dated expenses
+income.length = 0; showTab('expenses'); renderBudget();
+savePlanCategory({ name: 'Avg', amountRaw: '10', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' });
+const avgId = income.find((r) => r.planName === 'Avg').id;
+saveExpense({ dateKey: dk(-20), amountRaw: '70', planId: avgId, notes: '' }); saveExpense({ dateKey: dk(7), amountRaw: '1000', planId: avgId, notes: '' });
+renderBudget();
+check('a future-dated expense does not inflate the average per week', /Average so far: \$23\.33 per week/.test(document.querySelector('#expense-summary-list li').textContent), document.querySelector('#expense-summary-list li').textContent);
+check('the Undo tooltip names an expense by its category', (() => { saveExpense({ dateKey: todayKey(), amountRaw: '3', planId: avgId, notes: '' }); return /Avg/.test($('undo-btn').title); })(), $('undo-btn').title);
+// import refuses a year outside the forms' range, and the calendar file keeps a lone carriage return out
+check('an import with a year outside 1990-2100 is refused', isValidImportRecord('bills', { id: 'b', name: 'x', amount: 5, dueDate: '0500-01-01', frequency: 'weekly' }) === false && isValidImportRecord('bills', { id: 'b', name: 'x', amount: 5, dueDate: '2026-01-01', frequency: 'weekly' }) === true);
+check('a lone carriage return is escaped in the calendar file', icsEscape('a\rb') === 'a\\nb');
+// a server delete that is newer than this device's copy is taken, not undone
+const livePlan = { id: 'plan-z', planName: 'Z', amount: 5, frequency: 'weekly', deleted: false, version: 3, updatedAt: '2026-10-01T10:00:00.000Z' };
+const tomb = { ...livePlan, deleted: true, version: 1, updatedAt: '2026-10-02T10:00:00.000Z' };
+const collection = { name: 'income', get: () => [livePlan] };
+const reply = reconcileServerReply(collection, [tomb], { 'plan-z': JSON.stringify(livePlan) });
+check('a newer delete on the server is adopted instead of sending the live copy again', reply.result[0].deleted === true && !!reply.known['plan-z']);
+const editedLater = { ...livePlan, updatedAt: '2026-10-03T10:00:00.000Z' };
+const keepEdit = reconcileServerReply({ name: 'income', get: () => [editedLater] }, [tomb], { 'plan-z': JSON.stringify(editedLater) });
+check('a copy edited after the server delete is kept and sent again', keepEdit.result[0].deleted === false && !keepEdit.known['plan-z']);
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();

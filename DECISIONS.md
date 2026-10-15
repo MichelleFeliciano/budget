@@ -86,11 +86,10 @@ A monthly bill first due months ago would show every month since as unpaid and o
 the bill's first save, so one Undo still removes the whole bill. One-time bills are never offered it, because an old
 one-time bill really is overdue. A card with two or more unpaid earlier dates can do the same in one tap.
 
-## Three tabs, everything always drawn
-Home (the calendar), Income (Pay Period and Recurring Income) and Bills (the list, the Add bill form and Paid
-History) only show one part of the page at a time, which replaced the long scroll and the jump links. Every part
+## Five tabs, everything always drawn
+Home (the calendar), Income, Bills (the list, the Add bill form and Paid History), Plan and Expenses only show one part of the page at a time, which replaced the long scroll and the jump links. Every part
 is still redrawn on every change, so switching tabs is instant and no code has to know which tab is showing. The
-banners and reminders stay above all three, and the + button opens the Add bill form from any tab but Income.
+banners and reminders stay above all of them, and the + button opens the Add bill form from any tab but Income, Plan and Expenses.
 
 ## Projected income is a record in the income list
 A day's projected income (what you expect to receive) is saved as `{ id: 'projected-<date>', projectedFor, projected }`
@@ -125,7 +124,7 @@ the file cannot know what is paid. A bill due on the 29th or 30th is skipped by 
 ## Reminders stay out of the way
 The "download a full backup" reminder is only shown to a device that has never exported and does not sync (a
 syncing device's data also lives on its other devices), and again once an export is older than 30 days. The
-undo bar appears only after a delete or a Mark paid, never for adds, edits or typing a day's income.
+undo bar appears after a delete, a Mark paid, a new bill or recurring income, or a logged expense (so a Quick Add is undoable), never for edits or other additions.
 
 ## A day can hold several income entries, one per source
 A day's real income and its projected income each hold one entry per source (case does not matter; no source counts as
@@ -170,3 +169,12 @@ projected income and expenses have a Today button. Money is shown as $1,234.50 t
 Only above 900px: the content is centred beside the Menu, a week's totals run across in one row under its days (the stacked
 right-aligned column left most of the box empty), add forms use two columns, and a card's details run along a line under its
 name as they already do on a phone. Phone and tablet layouts are untouched.
+
+## Income ids are built from the day and the source, and only date ids get the "newer edit wins" rules
+A day's first income entry has the date as its id, and an entry with a source has `<date>#<source>` (projected ones have
+`projected-` in front), so two devices that add different sources on the same day never share an id (which used to drop one
+amount in a sync) and the same day and source still merge. The server's special income rules (a newer edit beats an
+older delete, a stale delete is ignored, a conflict never forks) apply only to those date ids; plan categories (`plan-`),
+expenses (`expense-`) and the fallback unique ids merge like bills: a delete always wins, and a real conflict keeps both
+sides. The client does the matching thing on a server reset: a delete on the server that is newer than this device's last
+edit is taken, so a stale device cannot bring a deleted record back.

@@ -211,6 +211,21 @@ def _content_matches(a, b, collection_name):
     return all(a.get(k) == b.get(k) for k in keys)
 
 
+# The largest sync request accepted. A personal budget is a few hundred KB; this keeps a bad request from using the
+# free plan's memory.
+MAX_SYNC_BODY_BYTES = 10 * 1024 * 1024
+
+# An income id that is built from a date: "2026-10-15", "projected-2026-10-15", or either with "#<source>" after it.
+# Only these have the "one entry per day" rules below; plan categories ("plan-<id>"), expenses ("expense-<id>") and
+# the extra same-day entries (a plain UUID) are ordinary records and merge like bills do.
+_DATE_ID_RE = re.compile(r"^(projected-)?\d{4}-\d{2}-\d{2}(#.*)?$")
+
+
+def _is_date_id(collection_name, record_id):
+    """True for an income record whose id is its date (see _DATE_ID_RE)."""
+    return collection_name == "income" and isinstance(record_id, str) and bool(_DATE_ID_RE.match(record_id))
+
+
 def _reject_constant(name):
     """json.loads hook: Python accepts NaN/Infinity, but they are not valid JSON, so storing one
     would make every later reply unparseable in the browser for all devices."""
@@ -283,9 +298,10 @@ def merge_collection(server_items, client_items, collection_name):
             # bring it back as a fork, and a delete made on a stale device
             # must not be undone by someone's newer edit to a record the user
             # chose to remove. This is what made deleted items "come back".
-            # The one exception is income, whose id IS its date: if the date was cleared earlier and a
+            # The one exception is an income entry whose id IS its date: if the date was cleared earlier and a
             # device has since entered a newer value for it, that newer entry wins over the tombstone.
-            if (collection_name == "income" and existing.get("deleted") and not incoming.get("deleted")
+            date_id = _is_date_id(collection_name, record_id)
+            if (date_id and existing.get("deleted") and not incoming.get("deleted")
                     and str(incoming.get("updatedAt", "")) > str(existing.get("updatedAt", ""))):
                 replacement = dict(incoming)
                 replacement["version"] = server_version + 1
@@ -294,7 +310,7 @@ def merge_collection(server_items, client_items, collection_name):
             if existing.get("deleted"):
                 continue
             # Income: a stale device's "cleared" must not wipe a newer amount entered for that date elsewhere.
-            if (collection_name == "income" and incoming.get("deleted") and not existing.get("deleted")
+            if (date_id and incoming.get("deleted") and not existing.get("deleted")
                     and str(incoming.get("updatedAt", "")) < str(existing.get("updatedAt", ""))):
                 continue
             if incoming.get("deleted") and not existing.get("deleted"):
@@ -306,10 +322,10 @@ def merge_collection(server_items, client_items, collection_name):
                 _replace_record(server_items, by_id, record_id, tombstone)
                 continue
 
-            # Income is one entry per date (its id IS the date), so a conflict must never
+            # A date-id income entry is one entry per date (its id IS the date), so a conflict must never
             # create a second entry for the same date: that would count the money twice.
             # The most recently edited version simply wins.
-            if collection_name == "income":
+            if date_id:
                 if str(incoming.get("updatedAt", "")) > str(existing.get("updatedAt", "")):
                     replacement = dict(incoming)
                     replacement["version"] = server_version + 1
@@ -502,7 +518,8 @@ class SyncHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._send_json(400, {"error": "invalid Content-Length"})
             return
-        if length < 0 or length > 50 * 1024 * 1024:
+        if length < 0 or length > MAX_SYNC_BODY_BYTES:
+            self._discard_body()
             self._send_json(413, {"error": "payload too large"})
             return
         try:
