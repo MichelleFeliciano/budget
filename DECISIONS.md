@@ -44,7 +44,8 @@ and import merges, and the server has a matching rule for it.
 A week's, month's or pay period's bill total is everything due in it, paid or not, and the net is the income in
 that period minus that total. So ticking a bill paid changes neither; only entering or editing income moves the
 net. Each calendar week also has a fourth number, Due: the bills due in that week that are not ticked paid yet,
-so it falls as you pay. Unpaid bills from earlier weeks are not carried into this week's figures. Category
+so it falls as you pay. Unpaid bills from earlier weeks are not carried into this week's figures, but a week's Net and Projected net roll forward
+into the next week (see "The weekly Net rolls forward"). Category
 filters never change these totals.
 
 ## Autopay bills are never flagged
@@ -151,3 +152,10 @@ copy of the app from before this change ignores it. The category is a plan categ
 expenses), not a separate list, so spent and planned line up one to one. If a category is deleted, its expenses keep the name
 saved with them and are totalled under "Other (no plan category)". A category's average per week waits for 14 days of entries
 (counted from its first expense to today) because a shorter stretch is too noisy to replace an estimate with.
+
+## The weekly Net rolls forward
+A calendar week's Net (and Projected net) is what the weeks before it left over plus its own income minus its own bills,
+so a surplus or a shortfall carries into the next week. The running total starts at the Monday of the earliest income there
+is (a typed entry or a recurring source's first date), looks back at most 104 weeks, and is worked out once for the first
+week shown and then carried through the three weeks, so sliding the calendar stays consistent. Bills due before that start
+are left out, and the month and pay-period nets do not roll. Each rolled week says how much came from earlier weeks.

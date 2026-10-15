@@ -605,3 +605,23 @@ check('expense records pass the import check and bad ones do not', isValidImport
 check('the + button is hidden on the Expenses tab', $('add-bill-fab').hidden === true);
 check('every button and box on the Expenses tab has a name for screen readers', [...$('tab-expenses').querySelectorAll('button, input, select')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- Net and Projected net roll forward ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; showTab('home'); calendarWeekOffset = 0; renderBudget(); hideUndoToast();
+const ws0 = weekStartKey(shiftDateKey(todayKey(), -7)); // the Monday of the first week the calendar shows
+setIncomeForDate(shiftDateKey(ws0, 1), '500'); addBill({ name: 'Roll rent', amount: '120', dueDate: shiftDateKey(ws0, 2), frequency: 'one_time', category: '', autopay: false });
+renderBudget();
+const weekNets = () => [...document.querySelectorAll('.budget-week-net-total')].map((el) => el.textContent.replace(/\s+/g, ' ').trim());
+check('the first week shows its own net with nothing carried in', /^Net: \$380\.00$/.test(weekNets()[0]), weekNets()[0]);
+check('the next weeks carry the net forward and say so', /^Net: \$380\.00 \(includes \$380\.00 from earlier weeks\)$/.test(weekNets()[1]) && /^Net: \$380\.00 \(includes \$380\.00 from earlier weeks\)$/.test(weekNets()[2]), weekNets().join(' | '));
+setIncomeForDate(shiftDateKey(ws0, -7), '300'); renderBudget();
+check('income from before the calendar window is carried into its first week', /^Net: \$680\.00 \(includes \$300\.00 from earlier weeks\)$/.test(weekNets()[0]) && /\$680\.00 \(includes \$680\.00/.test(weekNets()[2]), weekNets().join(' | '));
+check('a shortfall rolls forward too (negative, in the sign colour)', (addBill({ name: 'Roll big', amount: '1000', dueDate: shiftDateKey(ws0, 9), frequency: 'one_time', category: '', autopay: false }), renderBudget(), /^Net: -\$320\.00/.test(weekNets()[1]) && /^Net: -\$320\.00/.test(weekNets()[2])), weekNets().join(' | '));
+bills.pop(); renderBudget();
+setProjectedForDate(shiftDateKey(ws0, 15), '50'); await sleep(30);
+const projectedNets = () => [...document.querySelectorAll('.budget-week-projected-net-total')].map((el) => el.textContent.replace(/\s+/g, ' ').trim());
+check('Projected net rolls forward as well', projectedNets().length === 1 && /^Projected net: \$730\.00 \(includes \$680\.00 from earlier weeks\)$/.test(projectedNets()[0]), projectedNets().join(' | '));
+check('the month totals are not rolled over', !/from earlier/.test(document.querySelector('#budget-month-net, .budget-month-net') ? document.querySelector('#budget-month-net, .budget-month-net').textContent : ''));
+income.length = 0; bills.length = 0; recurringIncome.length = 0; renderBudget();
+check('with no income at all nothing is carried', weekNets().every((t) => !/from earlier/.test(t)));
+hideUndoToast(); showTab('home'); renderBudget();

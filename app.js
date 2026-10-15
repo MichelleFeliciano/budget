@@ -1746,6 +1746,48 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
+// The small "(includes $X from earlier weeks)" note after a rolled-forward net ('' when nothing was carried).
+function carryNote(carried) {
+  if (Math.abs(carried) < 0.005) return '';
+  return ` <span class="budget-week-carry">(includes ${formatSignedCurrency(carried)} from earlier weeks)</span>`;
+}
+
+// How many weeks back the running net is added up (older weeks are left out, so a very old income entry cannot
+// make every redraw slow).
+const MAX_ROLLOVER_WEEKS = 104;
+
+// The Net and Projected net carried into the week that starts on thisWeekKey: every earlier week's income minus
+// its bills, added up from the Monday of the earliest income there is (a typed entry or a recurring source) so
+// money left over, or a shortfall, rolls forward. Projected net also counts the projected income of earlier days
+// that have no real income. Both are 0 when there is no earlier income to start from.
+function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates) {
+  const firstDates = [
+    ...nonDeletedIncome.map((r) => r.dateKey),
+    ...nonDeletedRecurringIncome.map((r) => r.dueDate),
+  ].filter(Boolean).sort();
+  if (!firstDates.length) return { net: 0, projectedNet: 0 };
+  const earliestStart = shiftDateKey(thisWeekKey, -7 * MAX_ROLLOVER_WEEKS);
+  let start = weekStartKey(firstDates[0]);
+  if (start < earliestStart) start = earliestStart;
+
+  let net = 0;
+  let projectedNet = 0;
+  for (let ws = start; ws < thisWeekKey; ws = shiftDateKey(ws, 7)) {
+    const we = shiftDateKey(ws, 6);
+    const weekIncome = totalIncomeInRange(ws, we, nonDeletedIncome, nonDeletedRecurringIncome);
+    const due = amountDueInRange(ws, we, allBills);
+    let projected = 0;
+    for (let dateKey = ws; dateKey <= we; dateKey = shiftDateKey(dateKey, 1)) {
+      if (projectedMap.has(dateKey) && !incomeDates.has(dateKey)) {
+        projected += projectedMap.get(dateKey).reduce((sum, r) => sum + r.projected, 0);
+      }
+    }
+    net += weekIncome - due;
+    projectedNet += weekIncome + projected - due;
+  }
+  return { net, projectedNet };
+}
+
 // Renders the 21-day rolling calendar into #budget-calendar (everything
 // after the static .budget-weekday-row) and the month/year header. Always
 // runs against the full live `bills` array, and unaffected by the Bills
@@ -1801,6 +1843,10 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   const calendarEl = document.getElementById('budget-calendar');
   calendarEl.querySelectorAll('.budget-week').forEach((el) => el.remove());
 
+  // The Net and Projected net roll forward: each week starts from what the weeks before it left over.
+  const carry = netCarriedInto(windowDays[0], nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates);
+  let rolledNet = carry.net;
+  let rolledProjectedNet = carry.projectedNet;
   for (let weekIndex = 0; weekIndex < 3; weekIndex++) {
     const weekDays = windowDays.slice(weekIndex * 7, weekIndex * 7 + 7);
     const weekEndKey = weekDays[6];
@@ -2015,12 +2061,15 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     incomeTotalEl.innerHTML = `Income: <strong>${formatSignedCurrency(weekIncome)}</strong>`;
     weekEl.appendChild(incomeTotalEl);
 
-    const weekNet = weekIncome - weekTotalDue;
+    const carriedNet = rolledNet;
+    const weekNet = carriedNet + weekIncome - weekTotalDue;
+    rolledNet = weekNet;
     const netTotalEl = document.createElement('p');
     netTotalEl.className = 'budget-week-net-total';
-    netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`;
+    netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`
+      + carryNote(carriedNet);
     netTotalEl.title =
-      'Income entered or expected this week minus every bill due this week (paid or not)';
+      'Income entered or expected this week minus every bill due this week (paid or not), plus what the weeks before it left over';
     weekEl.appendChild(netTotalEl);
 
     // What is left to pay this week: bills due in it that are not ticked paid yet.
@@ -2032,22 +2081,25 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
     // Projected income, shown once any day of the week has one. A day's projection stops counting as soon as
     // real income is entered for that day, so typing the real figure replaces the guess instead of adding to it.
+    const weekProjected = weekDays.reduce((sum, dateKey) => (
+      projectedMap.has(dateKey) && !incomeDates.has(dateKey)
+        ? sum + projectedMap.get(dateKey).reduce((daySum, r) => daySum + r.projected, 0) : sum
+    ), 0);
+    const carriedProjectedNet = rolledProjectedNet;
+    const weekProjectedNet = carriedProjectedNet + weekIncome + weekProjected - weekTotalDue;
+    rolledProjectedNet = weekProjectedNet;
     if (weekDays.some((dateKey) => projectedMap.has(dateKey))) {
-      const weekProjected = weekDays.reduce((sum, dateKey) => (
-        projectedMap.has(dateKey) && !incomeDates.has(dateKey)
-          ? sum + projectedMap.get(dateKey).reduce((daySum, r) => daySum + r.projected, 0) : sum
-      ), 0);
       const projectedEl = document.createElement('p');
       projectedEl.className = 'budget-week-projected-total';
       projectedEl.innerHTML = `Projected: <strong>${formatSignedCurrency(weekProjected)}</strong>`;
       projectedEl.title = 'Income you expect this week and have not entered yet';
       weekEl.appendChild(projectedEl);
 
-      const weekProjectedNet = weekIncome + weekProjected - weekTotalDue;
       const projectedNetEl = document.createElement('p');
       projectedNetEl.className = 'budget-week-projected-net-total';
-      projectedNetEl.innerHTML = `Projected net: <strong class="${signedAmountClass(weekProjectedNet)}">${formatSignedCurrency(weekProjectedNet)}</strong>`;
-      projectedNetEl.title = 'Net, plus the projected income above';
+      projectedNetEl.innerHTML = `Projected net: <strong class="${signedAmountClass(weekProjectedNet)}">${formatSignedCurrency(weekProjectedNet)}</strong>`
+        + carryNote(carriedProjectedNet);
+      projectedNetEl.title = 'Net, plus the projected income above, plus what the weeks before it left over';
       weekEl.appendChild(projectedNetEl);
     }
 
@@ -4582,7 +4634,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
