@@ -45,9 +45,9 @@ renderBudget();
 check('pay period lists only the bills inside it', /\$100\.00 due across 1 bill/.test($('pay-period-summary').textContent), $('pay-period-summary').textContent);
 check('pay period starts with zero income and a negative net', /\$0\.00/.test($('pay-period-income-total').textContent) && /-\$100\.00/.test($('pay-period-net-total').textContent));
 setIncomeForDate(todayKey(), '1000'); await sleep(60);
-check('income entered in the period shows up', /\$1000\.00/.test($('pay-period-income-total').textContent) && /\$900\.00/.test($('pay-period-net-total').textContent), $('pay-period-net-total').textContent);
+check('income entered in the period shows up', /\$1,000\.00/.test($('pay-period-income-total').textContent) && /\$900\.00/.test($('pay-period-net-total').textContent), $('pay-period-net-total').textContent);
 check('the net is coloured by sign', $('pay-period-net-total').querySelector('strong').className === 'amount-positive');
-check('the same income appears in the month total', /\$1000\.00/.test($('budget-month-income-total').textContent));
+check('the same income appears in the month total', /\$1,000\.00/.test($('budget-month-income-total').textContent));
 
 // ---- paid history (monthly, by category) ----
 const nowKey = todayKey();

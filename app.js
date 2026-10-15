@@ -22,7 +22,8 @@
 //   can tell "deleted here" apart from "never existed here". Screens skip deleted records.
 // - version is the server's counter for the record; 0 means the server hasn't confirmed it yet.
 //
-// There are three lists: bills, income (one entry per day) and recurringIncome. Syncing is
+// There are three lists: bills, income (income received, which also holds projected income, Spending Plan
+// categories and expenses) and recurringIncome. Syncing is
 // manual only (the user presses "Sync now"); nothing runs in the background.
 //
 // Every localStorage key starts with "budgetApp." so that, if another app is ever hosted at the same
@@ -616,15 +617,16 @@ function amountDueInRange(startKey, endKey, allBills, unpaidOnly = false) {
   return sum;
 }
 
-// ---- Income (per-day manual number, a synced collection) ----
-// `id` is deliberately the record's own `dateKey`, not a fresh makeId() UUID like bills and
-// recurring income use: it gives "one income entry per date" a real identity-level guarantee
-// across the normal sync-merge paths, at the cost of setIncomeForDate needing to find-or-create
-// by dateKey instead of blindly pushing.
+// ---- Income received (typed by hand, a synced collection) ----
+// The first income entry for a date uses the date itself as its `id`, not a fresh makeId() UUID like bills and
+// recurring income use: two devices that each enter that date's first entry then merge into one record across
+// the normal sync paths. A later entry for the same date (a different source) gets a fresh id.
+// The same list also holds projected income, Spending Plan categories and expenses (each told apart by its own
+// field, none with a `dateKey`), so they sync, undo and export with the server's three lists unchanged.
 
-// localStorage key for the per-day income entries.
+// localStorage key for the income list.
 const INCOME_KEY = 'budgetApp.income.v1';
-// Every per-day income record, loaded and upgraded at startup.
+// Every record in the income list, loaded and upgraded at startup.
 let income = migrateSyncFields(loadCollection(INCOME_KEY), INCOME_KEY, getDeviceId());
 
 // The key that makes an entry unique: its day plus its source (case does not matter), so a day holds one income
@@ -853,12 +855,18 @@ function incomeSumInRange(startKey, endKey, allIncome) {
     .reduce((sum, r) => sum + r.amount, 0);
 }
 
+// A money amount as "$1,234.50": two decimals and a comma between thousands. Bill, plan and expense amounts are
+// never negative, so this has no sign; amounts that can be negative use formatSignedCurrency.
+function formatMoney(amount) {
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 // Formats money with a sign ("-$5.00"). Bill figures are non-negative by construction
 // (unpaidAmountThrough clamps at 0; a bill's amount is validated > 0), so they use the plain
-// `$${x.toFixed(2)}`. Income (a manual amount may be negative) and net totals (can go negative)
+// formatMoney. Income (a manual amount may be negative) and net totals (can go negative)
 // must use this instead.
 function formatSignedCurrency(amount) {
-  const abs = Math.abs(amount).toFixed(2);
+  const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Check the sign of the *rounded* magnitude, not the raw value — a tiny
   // negative amount (a near-cancelling net total, a stray floating-point
   // epsilon) that rounds to 0.00 should never display as "-$0.00".
@@ -866,7 +874,7 @@ function formatSignedCurrency(amount) {
 }
 
 // The CSS class for a net/income figure: red when negative, normal otherwise. Separate from
-// formatSignedCurrency because only net totals and the day income dot are colored, not income totals.
+// formatSignedCurrency because only net totals are colored, not income totals.
 function signedAmountClass(amount) {
   // Compare in whole cents so float noise (e.g. -5.5e-17) never paints $0.00 red.
   return Math.round(amount * 100) / 100 < 0 ? 'amount-negative' : 'amount-positive';
@@ -1298,7 +1306,7 @@ function renderPaidHistory() {
     const name = document.createElement('span');
     name.textContent = label;
     const amount = document.createElement('span');
-    amount.textContent = `$${total.toFixed(2)}`;
+    amount.textContent = `${formatMoney(total)}`;
     li.append(name, amount);
     if (detail) {
       const note = document.createElement('span');
@@ -1393,7 +1401,7 @@ function renderBudgetStats(nonDeletedBills) {
   const today = todayKey();
   const overallUnpaid = nonDeletedBills.reduce((sum, b) => sum + unpaidAmountThrough(b, today), 0);
   const count = nonDeletedBills.length;
-  el.textContent = `$${overallUnpaid.toFixed(2)} unpaid across ${count} bill${count === 1 ? '' : 's'}.`;
+  el.textContent = `${formatMoney(overallUnpaid)} unpaid across ${count} bill${count === 1 ? '' : 's'}.`;
 }
 
 // ---- Current Pay Period ----
@@ -1588,7 +1596,7 @@ function renderPayPeriod() {
 
   summaryEl.textContent =
     `Payday ${formatDateKeyLong(periodStart)} to ${formatDateKeyLong(periodEnd)}: ` +
-    `$${grandTotal.toFixed(2)} due across ${matches.length} bill${matches.length === 1 ? '' : 's'}`;
+    `${formatMoney(grandTotal)} due across ${matches.length} bill${matches.length === 1 ? '' : 's'}`;
   emptyEl.hidden = matches.length !== 0;
 
   // Income and net for exactly this pay period (payday up to, not including,
@@ -1633,8 +1641,8 @@ function renderPayPeriod() {
     const amount = document.createElement('span');
     amount.className = 'bill-amount';
     amount.textContent = occurrenceDates.length > 1
-      ? `$${total.toFixed(2)} (${occurrenceDates.length} occurrences)`
-      : `$${total.toFixed(2)}`;
+      ? `${formatMoney(total)} (${occurrenceDates.length} occurrences)`
+      : `${formatMoney(total)}`;
     info.appendChild(amount);
 
     const due = document.createElement('span');
@@ -1814,7 +1822,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   const monthDue = amountDueInRange(monthStartKey, monthEndKey, nonDeletedBills);
   const monthTotalEl = document.getElementById('budget-month-total');
   if (monthTotalEl) {
-    monthTotalEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} total: <strong>$${monthDue.toFixed(2)}</strong>`;
+    monthTotalEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} total: <strong>${formatMoney(monthDue)}</strong>`;
   }
 
   // Plain range-sum, deliberately not cumulative — see incomeSumInRange's
@@ -1941,7 +1949,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = `+ ${source.name}`;
 
-          itemEl.title = `${source.name} — $${source.amount.toFixed(2)}`;
+          itemEl.title = `${source.name} — ${formatMoney(source.amount)}`;
           daySummary.push(`income ${source.name}`);
           itemEl.appendChild(dotSpan);
           itemEl.appendChild(nameSpan);
@@ -1995,7 +2003,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = bill.name;
 
-          const amountText = skipped ? 'skipped' : `$${(paid ? paidAmountFor(bill, dateKey) : bill.amount).toFixed(2)}`;
+          const amountText = skipped ? 'skipped' : `${formatMoney((paid ? paidAmountFor(bill, dateKey) : bill.amount))}`;
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
           daySummary.push(`${bill.name}${skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
@@ -2049,7 +2057,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     const totalEl = document.createElement('p');
     totalEl.className = 'budget-week-total';
     const weekTotalDue = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills);
-    totalEl.innerHTML = `${calendarWeekLabel(weekIndex - 1 + calendarWeekOffset, weekDays[0])}: <strong>$${weekTotalDue.toFixed(2)}</strong>`;
+    totalEl.innerHTML = `${calendarWeekLabel(weekIndex - 1 + calendarWeekOffset, weekDays[0])}: <strong>${formatMoney(weekTotalDue)}</strong>`;
     weekEl.appendChild(totalEl);
 
     // totalIncomeInRange (manual `income` entries plus recurring
@@ -2076,7 +2084,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     const weekLeft = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills, true);
     const leftEl = document.createElement('p');
     leftEl.className = 'budget-week-due-total';
-    leftEl.innerHTML = `Due: <strong>$${weekLeft.toFixed(2)}</strong>`;
+    leftEl.innerHTML = `Due: <strong>${formatMoney(weekLeft)}</strong>`;
     weekEl.appendChild(leftEl);
 
     // Projected income, shown once any day of the week has one. A day's projection stops counting as soon as
@@ -2156,7 +2164,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     node.querySelector('.catch-up-btn').setAttribute('aria-label', `Mark earlier dates paid: ${bill.name}`);
     node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${bill.name}`);
     node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${bill.name}`);
-    node.querySelector('.bill-amount').textContent = `$${bill.amount.toFixed(2)}`;
+    node.querySelector('.bill-amount').textContent = `${formatMoney(bill.amount)}`;
     const due = billDueInfo(bill, todayK);
     const dueEl = node.querySelector('.bill-due');
     dueEl.textContent = due.text;
@@ -2309,7 +2317,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     node.querySelector('.recurring-income-name').textContent = source.name;
     node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${source.name}`);
     node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${source.name}`);
-    node.querySelector('.recurring-income-amount').textContent = `$${source.amount.toFixed(2)}`;
+    node.querySelector('.recurring-income-amount').textContent = `${formatMoney(source.amount)}`;
     node.querySelector('.recurring-income-start').textContent = `Starts: ${formatDateKeyShort(source.dueDate)}`;
     node.querySelector('.recurring-income-frequency').textContent =
       RECURRING_INCOME_FREQUENCY_LABELS[source.frequency] || source.frequency;
@@ -2559,7 +2567,7 @@ function renderPlan() {
   document.getElementById('plan-scenario-input').checked = planScenarioOn;
 
   const records = planCategories();
-  const money = (n) => `$${n.toFixed(2)}`;
+  const money = formatMoney;
   const totals = { weekly: 0, monthly: 0, businessWeekly: 0, businessMonthly: 0, planMonthly: 0 };
   let anyWhatIf = false;
 
@@ -3040,6 +3048,8 @@ document.getElementById('received-income-date-input').value = todayKey();
 
 // How many of the newest expenses the list shows.
 const MAX_EXPENSES_SHOWN = 50;
+// How many different recent amounts a category's Quick Add row offers.
+const MAX_QUICK_AMOUNTS = 3;
 // Days of entries a category needs before its average per week is worked out (less is too noisy to trust).
 const MIN_AVERAGE_DAYS = 14;
 
@@ -3136,7 +3146,7 @@ function saveExpense(fields, id) {
 // Draws the Expenses tab: the category lists, the "spent vs plan" rows for this week and this month, each
 // category's average per week once it has two weeks of entries, and the newest expenses with Edit and Delete.
 function renderExpenses() {
-  const money = (n) => `$${n.toFixed(2)}`;
+  const money = formatMoney;
   fillExpenseCategorySelect(document.getElementById('expense-category-input'));
 
   const todayK = todayKey();
@@ -3146,6 +3156,33 @@ function renderExpenses() {
   const monthEnd = `${todayK.slice(0, 8)}31`; // date keys sort as text, so day 31 covers every month
   const expenses = expenseRecords();
   const sumIn = (records, start, end) => records.filter((r) => r.spentOn >= start && r.spentOn <= end).reduce((sum, r) => sum + r.amount, 0);
+
+  // ---- Quick Add: the last few different amounts per category, one tap each
+  const quickList = document.getElementById('expense-quick-list');
+  quickList.innerHTML = '';
+  planCategories().forEach((plan) => {
+    const recent = [];
+    expenses.filter((r) => r.planId === plan.id).forEach((r) => {
+      if (recent.length < MAX_QUICK_AMOUNTS && !recent.includes(r.amount)) recent.push(r.amount);
+    });
+    if (!recent.length) return;
+    const row = document.createElement('div');
+    row.className = 'expense-quick-row';
+    const label = document.createElement('strong');
+    label.textContent = plan.planName;
+    row.appendChild(label);
+    recent.forEach((amount) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'expense-quick-btn';
+      button.textContent = money(amount);
+      button.setAttribute('aria-label', `Log ${money(amount)} for ${plan.planName} today`);
+      button.addEventListener('click', () => saveExpense({ dateKey: todayKey(), amountRaw: String(amount), planId: plan.id, notes: '' }));
+      row.appendChild(button);
+    });
+    quickList.appendChild(row);
+  });
+  document.getElementById('expense-quick-empty').hidden = quickList.children.length !== 0;
 
   // ---- Spent vs Plan
   const summaryList = document.getElementById('expense-summary-list');
@@ -3274,6 +3311,11 @@ document.getElementById('expense-add-form').addEventListener('submit', (e) => {
 
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
+
+// The Today buttons next to the date boxes put today's date back in the box they name.
+document.querySelectorAll('.today-btn').forEach((button) => {
+  button.addEventListener('click', () => { document.getElementById(button.dataset.dateInput).value = todayKey(); });
+});
 
 // ---- Backup reminders ----
 // The sync server's copy is temporary (the free plan forgets it whenever the server sleeps or redeploys), so
@@ -3418,10 +3460,10 @@ function renderReminderBanner(overdueBills, soon) {
     return;
   }
   const parts = soon.map(({ bill, dateKey }) =>
-    `${bill.name} $${bill.amount.toFixed(2)} ${whenLabel(daysUntilDateKey(dateKey))}`);
+    `${bill.name} ${formatMoney(bill.amount)} ${whenLabel(daysUntilDateKey(dateKey))}`);
   if (overdueBills.length > 0) {
     const total = overdueBills.reduce((sum, x) => sum + x.amount, 0);
-    parts.push(`${overdueBills.length} overdue ($${total.toFixed(2)})`);
+    parts.push(`${overdueBills.length} overdue (${formatMoney(total)})`);
   }
   document.getElementById('reminder-banner-text').textContent = `Bills: ${parts.join(' · ')}`;
   renderBannerPayButtons(overdueBills, soon);
@@ -3627,7 +3669,7 @@ document.getElementById('redo-btn').addEventListener('click', redo);
 
 // ---- Undo toast ----
 // A short bar at the bottom of the screen after a delete or a Mark paid, with an Undo button, so a
-// mis-tap can be fixed without opening the Menu. Edits and typing a day's income get no toast.
+// mis-tap can be fixed without opening the Menu. Edits get no toast; adding an expense does, since a quick-add is one tap.
 
 // How long the toast stays before it hides itself.
 const UNDO_TOAST_MS = 6000;
@@ -3638,7 +3680,10 @@ var undoToastTimer = null;
 function undoToastMessage(collectionName, before, after) {
   if (!after) return null;
   const name = after.name || 'item';
-  if (!before) return collectionName === 'income' ? null : `Added ${name}`;
+  if (!before) {
+    if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}`;
+    return collectionName === 'income' ? null : `Added ${name}`;
+  }
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
   if (after.dateKey && after.deleted && !before.deleted) return 'Deleted income';
   if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
@@ -4286,7 +4331,7 @@ function buildCalendarFile() {
     }
     if (!start) return;
     const rule = icsRepeatRule(bill);
-    const money = `$${bill.amount.toFixed(2)}`;
+    const money = formatMoney(bill.amount);
     const lines = [
       'BEGIN:VEVENT',
       `UID:${bill.id}@budget-app`,
@@ -4634,7 +4679,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 24;
+const APP_VERSION = 25;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

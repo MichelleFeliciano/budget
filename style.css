@@ -787,6 +787,17 @@ select[id$="-sort-input"] {
 
 .add-form button:hover { opacity: 0.9; }
 
+/* The small Today button under a date box: it only fills the box, so it is an outline, not the form's submit button. */
+
+.add-form .today-btn {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-weight: 400;
+}
+
 /* A label stacked above a date input. */
 
 .date-field {
@@ -1289,6 +1300,30 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--muted);
 }
 
+/* One Quick Add row on the Expenses tab: the category name, then its recent amounts as buttons. */
+
+.expense-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+/* A quick-add amount: a finger-sized outline button. */
+
+.expense-quick-btn {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* Weekly totals under each week's day cells. */
 
 .budget-week-total,
@@ -1667,7 +1702,7 @@ input[type="date"]::-webkit-date-and-time-value {
 }
 
 /* The bar that follows a delete or a Mark paid. It sits under the day sheet (z-index 60) so it never
-   covers the sheet's income box, and leaves room on the right for the + button. */
+   covers the sheet's buttons, and leaves room on the right for the + button. */
 
 .undo-toast {
   position: fixed;

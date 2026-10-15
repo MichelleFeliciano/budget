@@ -180,6 +180,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <label class="date-field">Date
               <input type="date" id="received-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date the income was received">
             </label>
+            <button type="button" class="today-btn" data-date-input="received-income-date-input">Today</button>
             <input type="number" inputmode="decimal" step="any" id="received-income-amount-input" placeholder="Amount received" required aria-label="Amount received">
             <input type="text" id="received-income-source-input" list="income-source-options" maxlength="60" placeholder="Source (choose or type, optional)" autocomplete="off" aria-label="Source of the income">
             <p class="form-error" id="received-income-form-error" hidden></p>
@@ -196,6 +197,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <label class="date-field">Date
               <input type="date" id="projected-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the projected income">
             </label>
+            <button type="button" class="today-btn" data-date-input="projected-income-date-input">Today</button>
             <input type="number" inputmode="decimal" step="any" id="projected-income-amount-input" placeholder="Amount you expect" required aria-label="Projected amount">
             <input type="text" id="projected-income-source-input" list="income-source-options" maxlength="60" placeholder="Source (choose or type, optional)" autocomplete="off" aria-label="Source of the projected income">
             <p class="form-error" id="projected-income-form-error" hidden></p>
@@ -261,12 +263,20 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
       <!-- Expenses: log what you actually spent, compared with the Spending Plan. -->
       <div class="tab-panel" id="tab-expenses" hidden>
+        <details class="fold" id="fold-expense-quick" open>
+          <summary class="fold-summary"><h2>Quick Add</h2></summary>
+          <p class="stats-line">One tap logs a repeat amount for today. Each category shows the last few different amounts you logged for it.</p>
+          <div id="expense-quick-list"></div>
+          <p class="empty-state" id="expense-quick-empty" hidden>Log an expense below once and its amounts show up here.</p>
+        </details>
+
         <details class="fold" id="fold-expense-log" open>
           <summary class="fold-summary"><h2>Log an Expense</h2></summary>
           <form id="expense-add-form" class="add-form add-form-stacked">
             <label class="date-field">Date
               <input type="date" id="expense-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the expense">
             </label>
+            <button type="button" class="today-btn" data-date-input="expense-date-input">Today</button>
             <input type="number" inputmode="decimal" id="expense-amount-input" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Amount spent">
             <select id="expense-category-input" aria-label="Spending Plan category"></select>
             <input type="text" id="expense-notes-input" maxlength="200" placeholder="Note (optional, e.g. where)" aria-label="Note">

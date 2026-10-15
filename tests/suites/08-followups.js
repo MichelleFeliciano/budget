@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the three Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 9 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the four Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 10 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -507,15 +507,15 @@ check('each card shows its weekly and monthly figure and what it was entered as'
 check('a monthly category shows its weekly figure too', /\$20\.77 per week/.test(planCards().find((c) => /Cleaning/.test(c.textContent)).textContent));
 check('the business flag shows and notes are kept', /Business/.test(planCards().find((c) => /Fuel/.test(c.textContent)).textContent) && /sample note/.test(planCards().find((c) => /Food/.test(c.textContent)).textContent));
 const weeklySum = 60 + (90 * 12) / 52 + 120 + 30, monthlySum = (60 * 52) / 12 + 90 + (120 * 52) / 12 + (30 * 52) / 12;
-check('the overall totals add every category in both views', $('plan-total-line').textContent === `Total: $${weeklySum.toFixed(2)} per week \u00b7 $${monthlySum.toFixed(2)} per month.`, $('plan-total-line').textContent);
+check('the overall totals add every category in both views', $('plan-total-line').textContent === `Total: ${formatMoney(weeklySum)} per week \u00b7 ${formatMoney(monthlySum)} per month.`, $('plan-total-line').textContent);
 check('business and personal are totalled separately', /Business: \$120\.00 per week \u00b7 \$520\.00 per month\./.test($('plan-split-line').textContent), $('plan-split-line').textContent);
 check('the what-if line is empty while the switch is off', $('plan-scenario-line').textContent === '');
 $('plan-scenario-input').checked = true; $('plan-scenario-input').dispatchEvent(new Event('change'));
 const whatIfMonthly = monthlySum - (30 * 52) / 12 + (10 * 52) / 12;
-check('the What-if switch swaps in the what-if amounts and shows the difference', $('plan-total-line').textContent.includes(`$${whatIfMonthly.toFixed(2)} per month`) && /less than the plan/.test($('plan-scenario-line').textContent), $('plan-total-line').textContent + ' | ' + $('plan-scenario-line').textContent);
+check('the What-if switch swaps in the what-if amounts and shows the difference', $('plan-total-line').textContent.includes(`${formatMoney(whatIfMonthly)} per month`) && /less than the plan/.test($('plan-scenario-line').textContent), $('plan-total-line').textContent + ' | ' + $('plan-scenario-line').textContent);
 check('the switch is remembered on this device under a budgetApp key', localStorage.getItem('budgetApp.planScenario.v1') === '1');
 $('plan-scenario-input').checked = false; $('plan-scenario-input').dispatchEvent(new Event('change'));
-check('switching back restores the plan totals', $('plan-total-line').textContent.includes(`$${monthlySum.toFixed(2)} per month`) && $('plan-scenario-line').textContent === '');
+check('switching back restores the plan totals', $('plan-total-line').textContent.includes(`${formatMoney(monthlySum)} per month`) && $('plan-scenario-line').textContent === '');
 planCards().find((c) => /Drinks/.test(c.textContent)).querySelector('.edit-btn').click();
 const drinksCard = () => planCards().find((c) => /Drinks/.test(c.textContent));
 drinksCard().querySelector('.plan-edit-amount').value = '45'; drinksCard().querySelector('.plan-edit-frequency').value = 'monthly'; drinksCard().querySelector('.plan-edit-type').value = 'business';
@@ -625,3 +625,33 @@ check('the month totals are not rolled over', !/from earlier/.test(document.quer
 income.length = 0; bills.length = 0; recurringIncome.length = 0; renderBudget();
 check('with no income at all nothing is carried', weekNets().every((t) => !/from earlier/.test(t)));
 hideUndoToast(); showTab('home'); renderBudget();
+
+// ---- Quick Add, Today buttons and thousands separators ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('expenses'); renderBudget(); hideUndoToast();
+check('amounts get thousands separators', formatMoney(1185.2) === '$1,185.20' && formatMoney(5) === '$5.00' && formatSignedCurrency(-1234.5) === '-$1,234.50' && formatSignedCurrency(-0.001) === '$0.00');
+check('with nothing logged the Quick Add section says how it fills', $('expense-quick-empty').hidden === false && $('expense-quick-list').children.length === 0);
+savePlanCategory({ name: 'Fuel', amountRaw: '70', frequency: 'weekly', type: 'business', altRaw: '', notes: '' });
+savePlanCategory({ name: 'Coffee', amountRaw: '30', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const fuelPlanId = income.find((r) => r.planName === 'Fuel').id;
+[['2026-01-01', 40], ['2026-01-02', 45], ['2026-01-03', 40], ['2026-01-04', 50], ['2026-01-05', 55]].forEach(([d, a], i) => saveExpense({ dateKey: d, amountRaw: String(a), planId: fuelPlanId, notes: '' }));
+renderBudget();
+const quickButtons = () => [...document.querySelectorAll('#expense-quick-list .expense-quick-btn')];
+check('Quick Add offers the last three different amounts, newest first', quickButtons().map((b) => b.textContent).join(',') === '$55.00,$50.00,$40.00' && $('expense-quick-empty').hidden === true, quickButtons().map((b) => b.textContent).join(','));
+check('a category with no expenses has no Quick Add row', document.querySelectorAll('.expense-quick-row').length === 1);
+const beforeCount = income.filter((r) => r.spentOn).length;
+quickButtons()[2].click(); await sleep(30);
+const quickLogged = income.filter((r) => r.spentOn === todayKey());
+check('one tap logs that amount for today under that category', income.filter((r) => r.spentOn).length === beforeCount + 1 && quickLogged.length === 1 && quickLogged[0].amount === 40 && quickLogged[0].planId === fuelPlanId);
+check('the undo bar says what was logged and Undo removes it', /Logged \$40\.00 for Fuel/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo takes the quick-added expense back out', income.find((r) => r.id === quickLogged[0].id).deleted === true);
+showTab('income'); renderBudget();
+$('received-income-date-input').value = '2026-01-01'; document.querySelector('[data-date-input="received-income-date-input"]').click();
+check('the Today button fills the Income Received date', $('received-income-date-input').value === todayKey());
+$('projected-income-date-input').value = '2026-01-01'; document.querySelector('[data-date-input="projected-income-date-input"]').click();
+check('the Today button fills the Projected Income date', $('projected-income-date-input').value === todayKey());
+$('expense-date-input').value = '2026-01-01'; document.querySelector('[data-date-input="expense-date-input"]').click();
+check('the Today button fills the Expenses date', $('expense-date-input').value === todayKey());
+check('every Today button has a visible name and a target', [...document.querySelectorAll('.today-btn')].length === 3 && [...document.querySelectorAll('.today-btn')].every((b) => b.textContent === 'Today' && document.getElementById(b.dataset.dateInput)));
+hideUndoToast(); income.length = 0; showTab('home'); renderBudget();

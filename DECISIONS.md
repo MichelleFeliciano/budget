@@ -159,3 +159,9 @@ so a surplus or a shortfall carries into the next week. The running total starts
 is (a typed entry or a recurring source's first date), looks back at most 104 weeks, and is worked out once for the first
 week shown and then carried through the three weeks, so sliding the calendar stays consistent. Bills due before that start
 are left out, and the month and pay-period nets do not roll. Each rolled week says how much came from earlier weeks.
+
+## Quick Add logs in one tap, and amounts show with thousands separators
+Each plan category with expenses offers its last three different amounts as buttons that log that amount for today
+(with an Undo bar saying what was logged), so a purchase at the pump is two taps. The three date boxes for adding income,
+projected income and expenses have a Today button. Money is shown as $1,234.50 through one function (`formatMoney`, and
+`formatSignedCurrency` for amounts that can be negative) instead of formatting each figure by hand.
