@@ -2665,6 +2665,7 @@ function renderBudget() {
   renderBudgetList(nonDeleted, openEdit);
   renderRecurringIncomeList(nonDeletedRecurringIncome, openRecurringIncomeEdit);
   renderIncomeSourceOptions();
+  renderReceivedIncomeList();
   renderProjectedIncomeList();
   renderPlan();
 
@@ -2886,6 +2887,97 @@ document.getElementById('projected-income-add-form').addEventListener('submit', 
 
 // The projected-income date starts on today.
 document.getElementById('projected-income-date-input').value = todayKey();
+
+// Draws the Income Received list on the Income tab: every income entry typed by hand, newest day first, each with
+// Edit (amount and source) and Delete. Recurring income is not listed here: it has its own section.
+function renderReceivedIncomeList() {
+  const list = document.getElementById('received-income-list');
+  const template = document.getElementById('received-income-card-template');
+  list.innerHTML = '';
+
+  const entries = uniqueIncomeEntries(income).filter((r) => !r.deleted)
+    .sort((a, b) => (a.dateKey < b.dateKey ? 1 : a.dateKey > b.dateKey ? -1 : (a.source || '').localeCompare(b.source || '')));
+
+  entries.forEach((record) => {
+    const node = template.content.cloneNode(true);
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editAmount = node.querySelector('.received-income-edit-amount');
+    const editSource = node.querySelector('.received-income-edit-source');
+    const editError = node.querySelector('.received-income-edit-error');
+    const editBtn = node.querySelector('.edit-btn');
+    const deleteBtn = node.querySelector('.delete-btn');
+    const cancelBtn = node.querySelector('.cancel-btn');
+
+    node.querySelector('.recurring-income-name').textContent = formatDateKeyShort(record.dateKey);
+    node.querySelector('.recurring-income-amount').textContent = formatSignedCurrency(record.amount);
+    node.querySelector('.recurring-income-start').textContent = record.source || '';
+    editBtn.setAttribute('aria-label', `Edit income for ${formatDateKeyShort(record.dateKey)}${record.source ? ` from ${record.source}` : ''}`);
+    deleteBtn.setAttribute('aria-label', `Delete income for ${formatDateKeyShort(record.dateKey)}${record.source ? ` from ${record.source}` : ''}`);
+
+    editBtn.addEventListener('click', () => {
+      editAmount.value = String(record.amount);
+      editSource.value = record.source || '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      editAmount.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const value = Number(editAmount.value);
+      if (editAmount.value === '' || !Number.isFinite(value) || Math.abs(value) > MAX_MONEY) {
+        editError.textContent = 'Enter an amount up to $1,000,000,000.';
+        editError.hidden = false;
+        return;
+      }
+      // A new source on the entry first (refused if that day already has one from it), then the amount.
+      if (!setIncomeSource(record.id, editSource.value)) {
+        editError.textContent = 'That day already has an entry from that source.';
+        editError.hidden = false;
+        return;
+      }
+      setIncomeForDate(record.dateKey, editAmount.value, editSource.value);
+    });
+    deleteBtn.addEventListener('click', () => setIncomeForDate(record.dateKey, '', record.source));
+
+    list.appendChild(node);
+  });
+
+  document.getElementById('received-income-empty-state').hidden = entries.length !== 0;
+}
+
+// Add-income form: validate, save the entry for that date and source (the same day and source is updated), and
+// clear the amount when it worked.
+document.getElementById('received-income-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const dateInput = document.getElementById('received-income-date-input');
+  const amountInput = document.getElementById('received-income-amount-input');
+  const errorEl = document.getElementById('received-income-form-error');
+  const amount = Number(amountInput.value);
+
+  let error = '';
+  if (!dateInput.value) error = 'Pick a date.';
+  else if (!isReasonableDateKey(dateInput.value)) error = DATE_RANGE_MESSAGE;
+  else if (amountInput.value === '' || !Number.isFinite(amount) || Math.abs(amount) > MAX_MONEY) error = 'Enter an amount up to $1,000,000,000.';
+  if (error) {
+    errorEl.textContent = error;
+    errorEl.hidden = false;
+    return;
+  }
+
+  errorEl.hidden = true;
+  setIncomeForDate(dateInput.value, amountInput.value, document.getElementById('received-income-source-input').value);
+  amountInput.value = '';
+  amountInput.focus();
+});
+
+// The income date starts on today.
+document.getElementById('received-income-date-input').value = todayKey();
 
 // ---- Backup reminders ----
 // The sync server's copy is temporary (the free plan forgets it whenever the server sleeps or redeploys), so
@@ -3252,6 +3344,7 @@ function undoToastMessage(collectionName, before, after) {
   const name = after.name || 'item';
   if (!before) return collectionName === 'income' ? null : `Added ${name}`;
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
+  if (after.dateKey && after.deleted && !before.deleted) return 'Deleted income';
   if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
   if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
   if (collectionName === 'bills') {
@@ -4241,7 +4334,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

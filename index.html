@@ -172,6 +172,22 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
         </details>
 
+        <details class="fold" id="fold-received-income" open>
+          <summary class="fold-summary"><h2>Income Received</h2></summary>
+          <p class="stats-line">Extra income you actually received (a refund, a side payment); regular paychecks go in Recurring Income below. Each day holds one entry per source. It counts in that week's and month's Income and Net, and replaces any projection for the same day.</p>
+          <form id="received-income-add-form" class="add-form add-form-stacked">
+            <label class="date-field">Date
+              <input type="date" id="received-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date the income was received">
+            </label>
+            <input type="number" inputmode="decimal" step="any" id="received-income-amount-input" placeholder="Amount received" required aria-label="Amount received">
+            <input type="text" id="received-income-source-input" list="income-source-options" maxlength="60" placeholder="Source (choose or type, optional)" autocomplete="off" aria-label="Source of the income">
+            <p class="form-error" id="received-income-form-error" hidden></p>
+            <button type="submit">Add income</button>
+          </form>
+          <ul class="card-list flat-list" id="received-income-list"></ul>
+          <p class="empty-state" id="received-income-empty-state" hidden>No income entered yet.</p>
+        </details>
+
         <details class="fold" id="fold-projected-income" open>
           <summary class="fold-summary"><h2>Projected Income</h2></summary>
           <p class="stats-line">Money you expect to receive on a day, for today or later. It shows in that week's Projected lines until you enter real income for the day.</p>
@@ -445,6 +461,33 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
 <!-- The choices every Source box offers: the Recurring Income names and sources used before (renderIncomeSourceOptions). -->
 <datalist id="income-source-options"></datalist>
+
+<!-- One received-income entry in the Income Received list (renderReceivedIncomeList). It reuses the recurring income
+     card's classes, so it looks the same. -->
+<template id="received-income-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount"></span>
+        <span class="recurring-income-start"></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="number" inputmode="decimal" step="any" class="received-income-edit-amount" placeholder="Amount received" required aria-label="Edit amount received">
+      <input type="text" class="received-income-edit-source" list="income-source-options" maxlength="60" placeholder="Source (optional)" autocomplete="off" aria-label="Edit source of the income">
+      <p class="form-error received-income-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
 
 <!-- One projected-income day in the Projected Income list (renderProjectedIncomeList). It reuses the recurring income
      card's classes, so it looks the same. -->

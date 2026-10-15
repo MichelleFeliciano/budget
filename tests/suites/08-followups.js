@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Projected Income, Spending Plan, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 5 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 6 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -533,3 +533,35 @@ check('plan records pass the import check and bad ones do not', isValidImportRec
 check('the + button is hidden on the Plan tab', $('add-bill-fab').hidden === true);
 check('every button and box on the Plan tab has a name for screen readers', [...$('tab-plan').querySelectorAll('button, input, select')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
 hideUndoToast(); income.length = 0; planScenarioOn = false; try { localStorage.removeItem('budgetApp.planScenario.v1'); } catch {} showTab('home'); renderBudget();
+
+// ---- the Income Received section on the Income tab ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; showTab('income'); renderBudget(); hideUndoToast();
+check('the Income tab has an Income Received form and list, dated today', $('tab-income').contains($('received-income-add-form')) && $('received-income-date-input').value === todayKey() && $('received-income-empty-state').hidden === false);
+const receivedCards = () => [...document.querySelectorAll('#received-income-list .recurring-income-card')];
+$('received-income-date-input').value = dk(-2); $('received-income-amount-input').value = '80'; $('received-income-source-input').value = 'Refund';
+$('received-income-add-form').requestSubmit(); await sleep(30);
+check('adding income saves it for that date and source and lists it', income.some((r) => r.dateKey === dk(-2) && r.amount === 80 && r.source === 'Refund' && !r.deleted) && receivedCards().length === 1 && /\$80\.00/.test(receivedCards()[0].textContent) && /Refund/.test(receivedCards()[0].textContent), receivedCards().map((c) => c.textContent.trim()).join('|'));
+$('received-income-date-input').value = dk(-2); $('received-income-amount-input').value = '95'; $('received-income-source-input').value = 'refund';
+$('received-income-add-form').requestSubmit(); await sleep(30);
+check('the same day and source updates the entry', receivedCards().length === 1 && income.find((r) => r.source === 'Refund').amount === 95);
+$('received-income-date-input').value = dk(-2); $('received-income-amount-input').value = '20'; $('received-income-source-input').value = 'Tips';
+$('received-income-add-form').requestSubmit(); await sleep(30);
+check('another source on the same day is a second entry, and the week counts both', receivedCards().length === 2 && incomeSumInRange(dk(-2), dk(-2), uniqueIncomeEntries(income).filter((r) => !r.deleted)) === 115);
+$('received-income-date-input').value = dk(-2); $('received-income-amount-input').value = 'abc';
+check('a missing amount is stopped by the form itself', $('received-income-amount-input').validity.valueMissing === true || $('received-income-amount-input').value === '');
+const tipsCard = () => receivedCards().find((c) => /Tips/.test(c.textContent));
+tipsCard().querySelector('.edit-btn').click();
+tipsCard().querySelector('.received-income-edit-amount').value = '30';
+tipsCard().querySelector('.recurring-income-edit-form').requestSubmit(); await sleep(30);
+check('Edit changes the amount', income.find((r) => r.source === 'Tips').amount === 30);
+tipsCard().querySelector('.edit-btn').click();
+tipsCard().querySelector('.received-income-edit-source').value = 'refund';
+tipsCard().querySelector('.recurring-income-edit-form').requestSubmit();
+check('changing a source to one the day already has is refused with a message', !tipsCard().querySelector('.received-income-edit-error').hidden && income.find((r) => r.amount === 30).source === 'Tips');
+tipsCard().querySelector('.cancel-btn').click();
+tipsCard().querySelector('.delete-btn').click(); await sleep(30);
+check('Delete removes it, keeps a tombstone and offers Undo', receivedCards().length === 1 && /Deleted income/.test($('undo-toast-text').textContent) && income.find((r) => r.source === 'Tips').deleted === true, $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo brings it back', receivedCards().length === 2);
+check('every button and box in the section has a name for screen readers', [...$('fold-received-income').querySelectorAll('button, input')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
+hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
