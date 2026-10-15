@@ -13,8 +13,8 @@
      10. Paid history
      11. App lock
      11b. Folding parts
-     12. Phone layout (max-width: 700px)
-     13. Wide screens only (min-width: 901px), just before the reduced-motion rule
+     12. Wide screens only (wider than 900px), just before the reduced-motion rule
+     13. Phone layout (max-width: 700px)
 
    Order matters: rules of equal strength are decided by source order, so a media query that
    overrides a base rule sits after it (the calendar's 900px block ends section 8; the 700px
@@ -235,7 +235,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 .quick-sync-btn,
 .quick-sync-note { display: none; }
 
-/* The title (and the phone sync note) on one side, the buttons on the other. */
+/* The Menu's top buttons sit in a row. */
 
 .header-actions {
   display: flex;
@@ -282,8 +282,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   top: 6px;
 }
 
-/* Undo / redo buttons at the top of the sidebar, and the backup, Theme, Text size and App lock
-   buttons further down: the same quiet outlined pill. */
+/* The Undo and Redo buttons side by side at the top of the sidebar. The Menu's other buttons (backup, Theme,
+   Text size, App lock) share the quiet outlined pill look given in the rule below. */
 
 .undo-redo-panel {
   display: flex;
@@ -371,6 +371,10 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   cursor: pointer;
   font-size: 0.72rem;
 }
+
+/* Dimmed and not clickable while a sync is running. */
+
+.sync-change-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Accent colour when hovered. */
 
@@ -473,11 +477,13 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   max-width: 960px;
 }
 
-/* The three tabs (Home, Income, Bills): pills above the page on wide screens; the phone block at the end
-   of the file turns the row into a bar along the bottom of the screen. */
+/* The tabs (Home, Income, Bills, Plan, Expenses): pills above the page on wide screens (wrapping onto a second line
+   when the column is narrow); the phone block at the end of the file turns the row into a bar along the bottom
+   of the screen. */
 
 .tabbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -539,6 +545,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   border-radius: 13px;
   background: var(--surface);
   color: var(--text);
+  font-family: inherit;
 }
 
 /* The "Sort:" dropdown: same look as the search box. */
@@ -811,15 +818,9 @@ select[id$="-sort-input"] {
   min-width: 0; /* lets the date box shrink to fit a phone screen */
 }
 
-/* The date box inside a labelled date field. */
+/* The date box inside a labelled date field fills the field (its look comes from the form it is in). */
 
 .date-field input[type="date"] {
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
   width: 100%;
   /* `.add-form input[type="date"]` (class+attribute+element) also matches
      this input via descendant selection, applying its `flex: 1 1 160px`
@@ -896,10 +897,6 @@ input[type="date"]::-webkit-date-and-time-value {
   z-index: 65;
   background: rgba(0, 0, 0, 0.5);
 }
-
-/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
-
-.sheet-backdrop[hidden] { display: none; }
 
 /* ===== 7. Bill and recurring income cards ===== */
 
@@ -981,7 +978,7 @@ input[type="date"]::-webkit-date-and-time-value {
   overflow-wrap: anywhere;
 }
 
-/* A category badge is only as wide as its text. */
+/* A badge that wraps onto a second line keeps a softer corner than the full pill shape. */
 
 .bill-info .badge,
 .recurring-income-info .badge {
@@ -1370,9 +1367,9 @@ input[type="date"]::-webkit-date-and-time-value {
 
 @media (max-width: 900px) {
   /* Compact phone/tablet calendar: all 7 columns always fit the screen (no
-     sideways scrolling). Each day shows only its date plus one dot per bill/
-     income item; tapping a day lifts that live cell into a bottom sheet
-     (.budget-day-open) showing names and paid checkboxes. */
+     sideways scrolling). Each day shows its date, one dot per bill and the first bill's name
+     (with "+N" for more); tapping a day lifts that live cell into a bottom sheet
+     (.budget-day-open) showing every name and the paid checkboxes. */
 
   .budget-week-cells,
   .budget-weekday-row {
@@ -1447,6 +1444,7 @@ input[type="date"]::-webkit-date-and-time-value {
     justify-content: center;
     gap: 3px;
     max-height: none;
+    overflow: visible; /* the dots' overdue and due-soon rings sit outside the tiny box and must not be clipped */
     margin: 3px 0 0;
   }
 
@@ -1457,11 +1455,10 @@ input[type="date"]::-webkit-date-and-time-value {
     font-size: 0;
   }
 
-  /* Names, checkboxes and Close are hidden in the compact grid (shown again in the open sheet). */
+  /* Names and checkboxes are hidden in the compact grid (shown again in the open sheet). */
 
   .budget-occurrence-name,
-  .budget-occurrence-checkbox,
-  .budget-day-close {
+  .budget-occurrence-checkbox {
     display: none;
   }
 
@@ -1504,7 +1501,6 @@ input[type="date"]::-webkit-date-and-time-value {
     right: 12px;
     bottom: 12px;
     z-index: 60;
-    min-height: 0;
     max-height: 70vh;
     overflow-y: auto;
     padding: 16px;
@@ -1735,7 +1731,7 @@ input[type="date"]::-webkit-date-and-time-value {
   cursor: pointer;
 }
 
-/* The round + button that jumps to the Add bill form. */
+/* The round + button that opens the Add bill form (a sheet on phones). It is hidden on the Income, Plan and Expenses tabs. */
 
 .fab {
   position: fixed;
@@ -1753,10 +1749,6 @@ input[type="date"]::-webkit-date-and-time-value {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
-
-/* display is not set above, but this keeps the hidden attribute winning if it ever is. */
-
-.fab[hidden] { display: none; }
 
 /* Shown when the browser refuses to save (storage full or blocked). */
 
@@ -1793,6 +1785,8 @@ input[type="date"]::-webkit-date-and-time-value {
 }
 
 /* ===== 10. Paid history ===== */
+
+/* The previous-month and next-month arrow buttons. */
 
 .paid-history-nav {
   padding: 2px 12px;
@@ -1990,9 +1984,9 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   outline-offset: 2px;
 }
 
-/* ===== Wide screens only: a tidier desktop layout. Phones and tablets keep the layouts above. ===== */
+/* ===== 12. Wide screens only (wider than 900px): a tidier desktop layout. Phones and tablets keep the layouts above. ===== */
 
-@media (min-width: 901px) {
+@media (min-width: 900.02px) {
   /* The content sits in the middle of the space beside the Menu instead of hugging its edge. */
 
   .content { margin: 0 auto; }
@@ -2069,9 +2063,14 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   /* The fold arrow turns instantly. */
 
   .fold-summary::before { transition: none; }
+
+  /* A card's shadow changes instantly. */
+
+  .bill-card,
+  .recurring-income-card { transition: none; }
 }
 
-/* ===== 12. Phone layout (max-width: 700px) ===== */
+/* ===== 13. Phone layout (max-width: 700px) ===== */
 
 /* Last in the file on purpose: these override base rules of equal strength from above. */
 
@@ -2214,10 +2213,11 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
     font-size: 0.85rem;
   }
 
-  /* The + button and the undo bar sit above the tab bar. */
+  /* The + button, the undo bar and the "couldn't save" warning sit above the tab bar. */
 
   .fab,
-  .undo-toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .undo-toast,
+  .storage-warning { bottom: calc(76px + env(safe-area-inset-bottom)); }
 
   /* A reminder banner is a little tighter on a phone. */
 
@@ -2235,8 +2235,8 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* ---- Calendar ---- */
 
-  /* A week's four numbers sit in a tidy two-by-two block (total and income, then net and due)
-     instead of four stacked lines. */
+  /* A week's totals (up to six: total, income, net, due, then projected and projected net) sit two to a row
+     instead of one per line. */
 
   .budget-week-total,
   .budget-week-income-total,
