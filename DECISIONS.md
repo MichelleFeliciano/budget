@@ -85,6 +85,25 @@ A monthly bill first due months ago would show every month since as unpaid and o
 the bill's first save, so one Undo still removes the whole bill. One-time bills are never offered it, because an old
 one-time bill really is overdue. A card with two or more unpaid earlier dates can do the same in one tap.
 
+## Three tabs, everything always drawn
+Home (the calendar), Income (Pay Period and Recurring Income) and Bills (the list, the Add bill form and Paid
+History) only show one part of the page at a time, which replaced the long scroll and the jump links. Every part
+is still redrawn on every change, so switching tabs is instant and no code has to know which tab is showing. The
+banners and reminders stay above all three, and the + button opens the Add bill form from any tab but Income.
+
+## Projected income is a record in the income list
+A day's projected income (what you expect to receive) is saved as `{ id: 'projected-<date>', projectedFor, projected }`
+in the existing `income` list, so it syncs, undoes and exports with no change to the sync server (which merges
+income by id). It deliberately has no `dateKey`, so every actual-income total ignores it and a copy of the app that
+has not updated yet ignores it too instead of counting it as money received. A week shows Projected (the typed
+projections for days that have no real income yet) and Projected net (income plus that, minus the week's bills);
+typing real income for a day replaces that day's projection, so nothing is counted twice.
+
+## A payment is credited to the labelled, live copy of a bill
+When the same payment is on several copies of a bill (a sync conflict, an import), Paid History counts it once. It
+used to credit whichever copy came first, which could be a deleted or unlabelled one, so labelled bills showed up
+under Uncategorized. Live bills now go first, and labelled ones before unlabelled ones.
+
 ## A skipped date is a payment of nothing
 Skipping a date (a paused subscription, a waived bill) records it as paid with an amount of 0 rather than adding a
 new kind of record. Every existing rule then just works: it is not owed, not overdue, not counted in totals, it syncs

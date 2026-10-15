@@ -120,7 +120,8 @@ class AppFiles(unittest.TestCase):
                      "renderJournal", "renderHome", "healthSummary", "therapySummary", "cookMode", "globalSearch",
                      "quickAdd", "shoppingItems", "journalEntries"):
             self.assertNotIn(word, APP, word)
-        for word in ("books-collection", "home-collection", "journal-collection", "data-tab=", "health-summary", "cook-mode"):
+        # (Budget's own Home / Income / Bills tabs use data-tab, so that is not on this list.)
+        for word in ("books-collection", "home-collection", "journal-collection", "health-summary", "cook-mode"):
             self.assertNotIn(word, HTML, word)
 
     def test_sync_address_matches_the_deploy_config_and_the_server_lists(self):

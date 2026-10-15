@@ -101,6 +101,15 @@ class MergeRules(unittest.TestCase):
         items, c = self.merge([rec("2026-09-22", 4, dateAdded="x", amount=100)], [rec("2026-09-22", 4, dateAdded="y", amount=100)], "income")
         self.assertEqual((len(items), items[0]["version"], c), (1, 4, []))
 
+    def test_projected_income_records_merge_by_id_like_any_income_record(self):
+        """Projected income is an income-list record with its own id and a projectedFor field: no server change needed."""
+        server = [rec("projected-2026-10-15", version=3, projectedFor="2026-10-15", projected=500)]
+        items, c = self.merge(server, [rec("projected-2026-10-15", version=3, projectedFor="2026-10-15", projected=650, updatedAt="2026-10-08T10:00:00Z")], "income")
+        self.assertEqual(c, [])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["projected"], 650)
+        self.assertEqual(items[0]["projectedFor"], "2026-10-15")
+
     def test_income_conflict_never_makes_a_second_entry_for_the_date(self):
         server = [rec("2026-09-22", 6, amount=100, updatedAt="2026-10-01T10:00:00Z")]
         items, c = self.merge(server, [rec("2026-09-22", 5, amount=250, updatedAt="2026-10-02T10:00:00Z")], "income")

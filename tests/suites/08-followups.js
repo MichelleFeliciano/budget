@@ -173,10 +173,7 @@ const payFold = $('fold-pay-period');
 check('Pay Period, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 3 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
-document.querySelector('[data-jump="fold-pay-period"]').click();
-check('a jump link opens the part it points to', payFold.open === true);
-check('there is a jump link for every part', ['budget-month', 'fold-pay-period', 'fold-paid-history', 'budget-bills', 'fold-recurring-income'].every((id) => !!document.querySelector(`[data-jump="${id}"]`) && !!$(id)));
-await sleep(30);
+payFold.open = true; await sleep(30);
 localStorage.removeItem('budgetApp.folds.v1');
 
 // ---- a bill's name shows on its day in the compact calendar ----
@@ -360,3 +357,63 @@ addRecurringIncome({ name: 'Paycheck', amount: '1000', dueDate: dk(-9), frequenc
 check('a recurring income card shows its start date in plain words', /^Starts: [A-Z][a-z]{2}, [A-Z][a-z]{2} \d+/.test(document.querySelector('.recurring-income-start').textContent), document.querySelector('.recurring-income-start').textContent);
 check('its buttons name it', document.querySelector('#recurring-income-list .delete-btn').getAttribute('aria-label') === 'Delete Paycheck');
 hideUndoToast(); recurringIncome.length = 0; renderBudget();
+
+// ---- the three tabs ----
+showTab('home'); // earlier checks in this suite switch tabs, so start from Home
+check('the app has Home, Income and Bills tabs, and Home shows the calendar',['tab-home', 'tab-income', 'tab-bills'].every((id) => !!$(id)) && !$('tab-home').hidden && $('tab-income').hidden && $('tab-bills').hidden);
+check('the calendar is on Home, pay period and recurring income on Income, bills and Paid History on Bills',
+  $('tab-home').contains($('budget-calendar')) && $('tab-income').contains($('payday-settings-form')) && $('tab-income').contains($('recurring-income-list')) &&
+  $('tab-bills').contains($('budget-list')) && $('tab-bills').contains($('budget-add-form')) && $('tab-bills').contains($('paid-history-list')));
+document.querySelector('.tabbar-btn[data-tab="bills"]').click();
+check('a tab button shows its tab and hides the others', !$('tab-bills').hidden && $('tab-home').hidden && $('tab-income').hidden && document.querySelector('.tabbar-btn[data-tab="bills"]').getAttribute('aria-current') === 'page' && !document.querySelector('.tabbar-btn[data-tab="home"]').hasAttribute('aria-current'));
+check('the last tab is remembered on this device', localStorage.getItem('budgetApp.tab.v1') === 'bills');
+showTab('income');
+check('the + button is hidden on the Income tab', $('add-bill-fab').hidden === true);
+showTab('home');
+check('...and back on Home', $('add-bill-fab').hidden === false);
+startBillOnDate(dk(3));
+check('starting a bill from a calendar day switches to the Bills tab', !$('tab-bills').hidden && $('tab-home').hidden && $('budget-duedate-input').value === dk(3));
+$('budget-duedate-input').value = todayKey();
+showTab('bogus');
+check('an unknown tab name falls back to Home', !$('tab-home').hidden && currentTab === 'home');
+localStorage.removeItem('budgetApp.tab.v1');
+
+// ---- projected income, typed per day ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; renderBudget(); hideUndoToast();
+addBill({ name: 'Proj bill', amount: '100', dueDate: dk(0), frequency: 'one_time', category: '', autopay: false });
+setProjectedForDate(dk(0), '300'); await sleep(30);
+const thisWeek = () => document.querySelector('.budget-week-current');
+check('a projection is stored in the income list under its own date field, with no dateKey', income.some((r) => r.id === `projected-${dk(0)}` && r.projectedFor === dk(0) && r.projected === 300 && !r.dateKey && !r.deleted));
+check('it does not count as income received', /Income: \$0\.00/.test(thisWeek().querySelector('.budget-week-income-total').textContent) && /Net: -\$100\.00/.test(thisWeek().querySelector('.budget-week-net-total').textContent));
+check('the week shows Projected and Projected net', /Projected: \$300\.00/.test(thisWeek().querySelector('.budget-week-projected-total').textContent) && /Projected net: \$200\.00/.test(thisWeek().querySelector('.budget-week-projected-net-total').textContent), thisWeek().textContent);
+check('the day has a Projected box holding it, and a hollow dot', document.querySelector(`.budget-day-projected-input[data-date-key="${dk(0)}"]`).value === '300' && !!document.querySelector(`.budget-day-cell[data-date-key="${dk(0)}"] .budget-projected-dot`));
+check('a week with no projection shows no projected lines', document.querySelectorAll('.budget-week-projected-total').length === 1);
+setIncomeForDate(dk(0), '120'); await sleep(30);
+check('real income for that day replaces its projection instead of adding to it', /Projected: \$0\.00/.test(thisWeek().querySelector('.budget-week-projected-total').textContent) && /Projected net: \$20\.00/.test(thisWeek().querySelector('.budget-week-projected-net-total').textContent), thisWeek().textContent);
+setIncomeForDate(dk(0), ''); await sleep(30);
+setProjectedForDate(dk(0), ''); await sleep(30);
+check('clearing a projection removes the lines and keeps a tombstone', !document.querySelector('.budget-week-projected-total') && income.find((r) => r.id === `projected-${dk(0)}`).deleted === true);
+setProjectedForDate(dk(1), '75'); await sleep(30);
+undo(); await sleep(30);
+check('a projection can be undone', !document.querySelector('.budget-week-projected-total'));
+check('actual-income helpers never see a projected record', uniqueIncomeByDate(income).every((r) => !!r.dateKey));
+check('import accepts a projected record and refuses a broken one', isValidImportRecord('income', { id: `projected-${dk(1)}`, projectedFor: dk(1), projected: 50 }) && !isValidImportRecord('income', { id: 'x', projectedFor: 'not-a-date', projected: 5 }) && !isValidImportRecord('income', { id: 'y', projectedFor: dk(1), projected: 'five' }));
+check('the Undo tooltip can name a projected change', (() => { setProjectedForDate(dk(2), '5'); return /projected|20\d\d-/.test($('undo-btn').title); })());
+hideUndoToast(); bills.length = 0; income.length = 0; renderBudget();
+
+// ---- Paid History credits a payment to the labelled, live copy of a bill ----
+const histDate = dk(-5);
+const { y: hy, m: hm } = parseDateKey(histDate);
+const copyOf = { name: 'Utility', amount: 50, frequency: 'monthly', dueDate: histDate, paidDates: [histDate], paidAmounts: { [histDate]: 50 }, dateAdded: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', deviceId: 't', version: 1 };
+bills.length = 0;
+bills.push({ ...copyOf, id: 'dead-copy', category: '', deleted: true }, { ...copyOf, id: 'live-copy', category: 'Utilities', deleted: false });
+const labelledFirst = computePaidByCategory(bills, hy, hm);
+check('a payment on a deleted, unlabelled copy goes to the labelled live bill', labelledFirst.length === 1 && labelledFirst[0].label === 'Utilities' && labelledFirst[0].total === 50, JSON.stringify(labelledFirst.map((r) => [r.label, r.total])));
+bills.length = 0;
+bills.push({ ...copyOf, id: 'live-copy', category: 'Utilities', deleted: false }, { ...copyOf, id: 'dead-copy', category: '', deleted: true });
+check('...whichever order the copies are stored in', computePaidByCategory(bills, hy, hm)[0].label === 'Utilities');
+bills.length = 0;
+bills.push({ ...copyOf, id: 'plain', category: '', deleted: false });
+paidHistoryMonth = { y: hy, m: hm }; renderBudget();
+check('the Uncategorized row says which bills are in it', /Utility/.test(document.querySelector('#paid-history-list .paid-history-detail').textContent), document.querySelector('#paid-history-list').textContent);
+bills.length = 0; paidHistoryMonth = (() => { const { y, m } = parseDateKey(todayKey()); return { y, m }; })(); renderBudget();

@@ -5,14 +5,14 @@
      2.  Base page, headings, focus ring, text size
      3.  Decorative background (corner vines, sidebar sprig)
      4.  Menu (sidebar): undo/redo, sync, backup buttons, footer
-     5.  Content area, toolbars, cards and shared pieces (buttons, chips, badges)
+     5.  Content area, tabs, toolbars, cards and shared pieces (buttons, chips, badges)
      6.  Add forms, the Add bill phone sheet, date fields and checkboxes
      7.  Bill and recurring income cards (view, edit and "Other..." forms)
      8.  Calendar: week buttons, weeks, day cells, phone day sheet
      9.  Banners, the undo bar, the + button and the "couldn't save" warning
      10. Paid history
      11. App lock
-     11b. Folding parts and jump links
+     11b. Folding parts
      12. Phone layout (max-width: 700px)
 
    Order matters: rules of equal strength are decided by source order, so a media query that
@@ -464,6 +464,47 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   min-width: 0;
   padding: 32px 32px 48px;
   max-width: 960px;
+}
+
+/* The three tabs (Home, Income, Bills): pills above the page on wide screens; the phone block at the end
+   of the file turns the row into a bar along the bottom of the screen. */
+
+.tabbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/* One tab button. */
+
+.tabbar-btn {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+/* Accent colour when hovered. */
+
+.tabbar-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The tab on screen is filled in (it stays readable while hovered). */
+
+.tabbar-btn[aria-current="page"],
+.tabbar-btn[aria-current="page"]:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
 }
 
 /* Heading row at the top of each part: title, then totals, search box, sort menu or month arrows. */
@@ -1240,14 +1281,33 @@ input[type="date"]::-webkit-date-and-time-value {
 .budget-day-footer {
   margin-top: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
 }
 
-/* The box for extra income on a day. */
+/* One labelled box in the footer (Income, Projected): the small label above the box. */
 
-.budget-day-manual-input {
+.budget-day-field {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The small muted label over a day box. */
+
+.budget-day-field-label {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+/* The boxes for income received and income expected on a day. */
+
+.budget-day-manual-input,
+.budget-day-projected-input {
   width: 100%;
   min-width: 0;
   padding: 4px 6px;
@@ -1280,12 +1340,24 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .budget-income-dot.amount-negative { background: var(--accent-rose); }
 
+/* A hollow dot marks a day with projected income. */
+
+.budget-projected-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+}
+
 /* Weekly totals under each week's day cells. */
 
 .budget-week-total,
 .budget-week-income-total,
 .budget-week-net-total,
-.budget-week-due-total {
+.budget-week-due-total,
+.budget-week-projected-total,
+.budget-week-projected-net-total {
   margin: 10px 0 0;
   text-align: right;
   color: var(--muted);
@@ -1421,7 +1493,9 @@ input[type="date"]::-webkit-date-and-time-value {
 
   .budget-occurrence-name,
   .budget-occurrence-checkbox,
+  .budget-day-field,
   .budget-day-manual-input,
+  .budget-day-projected-input,
   .budget-day-close {
     display: none;
   }
@@ -1547,9 +1621,20 @@ input[type="date"]::-webkit-date-and-time-value {
     white-space: normal;
   }
 
-  /* Show a finger-sized income box. */
+  /* The labelled boxes (Income, Projected) show again in the open sheet. */
 
-  .budget-day-open .budget-day-manual-input {
+  .budget-day-open .budget-day-field { display: flex; }
+
+  /* A readable label over each box. */
+
+  .budget-day-open .budget-day-field-label {
+    font-size: 0.8rem;
+  }
+
+  /* Finger-sized boxes. */
+
+  .budget-day-open .budget-day-manual-input,
+  .budget-day-open .budget-day-projected-input {
     display: block;
     padding: 8px 10px;
     font-size: 1rem;
@@ -1793,12 +1878,21 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .paid-history-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 14px;
   background: var(--bg);
+}
+
+/* The small line under a row that lists which bills are in it (used by the Uncategorized row). */
+
+.paid-history-detail {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 /* The total row is bold. */
@@ -1912,31 +2006,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 .lock-buttons button { flex: 1; }
 
-/* ===== 11b. Folding parts and jump links ===== */
-
-/* A row of small buttons that scroll to a part of the page; it scrolls sideways if it must. */
-
-.jump-links {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
-  overflow-x: auto;
-  white-space: nowrap;
-  scrollbar-width: none; /* it still scrolls by swiping; the bar itself is just clutter */
-}
-
-/* Bigger than the filter chips they share a style with, and they never shrink. */
-
-.jump-links .chip {
-  flex: none;
-  min-height: 36px;
-  padding: 4px 14px;
-  font-size: 0.85rem;
-}
-
-/* Space under each folding part (Pay Period, Paid History, Recurring Income), so the next heading is not crowded. */
-
-.fold { margin-bottom: 28px; }
+/* ===== 11b. Folding parts ===== */
 
 /* The heading row of a folding part: the title with an arrow, tapped to fold or unfold. */
 
@@ -2104,9 +2174,36 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* ---- Page spacing and banners ---- */
 
-  /* Room under the last card so the + button never covers its buttons. */
+  /* Room under the last card for the tab bar and the + button above it. */
 
-  .content { padding-bottom: 84px; }
+  .content { padding-bottom: 150px; }
+
+  /* The tabs become a bar along the bottom of the screen (under the sheets, which are higher). */
+
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    margin: 0;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Each tab takes an equal share of the bar and is finger-sized. */
+
+  .tabbar-btn {
+    flex: 1;
+    min-height: 44px;
+    border-radius: 13px;
+  }
+
+  /* The + button and the undo bar sit above the tab bar. */
+
+  .fab,
+  .undo-toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
 
   /* A reminder banner is a little tighter on a phone. */
 
@@ -2130,7 +2227,9 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .budget-week-total,
   .budget-week-income-total,
   .budget-week-net-total,
-  .budget-week-due-total {
+  .budget-week-due-total,
+  .budget-week-projected-total,
+  .budget-week-projected-net-total {
     display: inline-block;
     box-sizing: border-box;
     width: 50%;

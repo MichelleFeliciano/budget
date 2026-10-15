@@ -11,8 +11,8 @@
 //   calendar, the Add bill sheet), backup reminders, the due/overdue bills banner, Device Sync
 //   (server address, sync client, undo/redo application, the undo bar), data export/import (and
 //   the calendar reminders file), day rollover, theme, text size and version, App lock, and Init
-//   (which wires the phone Menu button, the calendar buttons, the folding parts, the jump links
-//   and the + button, and registers the service worker).
+//   (which wires the phone Menu button, the tabs, the calendar buttons, the folding parts and the
+//   + button, and registers the service worker).
 //
 // Each list is an array of plain records kept in memory and saved whole to its own
 // localStorage key. A record looks like:
@@ -710,10 +710,65 @@ function restoreIncome(id) {
 function uniqueIncomeByDate(records) {
   const latest = new Map();
   records.forEach((r) => {
+    if (!r.dateKey) return; // a projected-income record (see projectedByDate) is not money received
     const current = latest.get(r.dateKey);
     if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(r.dateKey, r);
   });
   return [...latest.values()];
+}
+
+// ---- Projected income (a per-day number typed by hand: what you expect to receive) ----
+// Stored in the same `income` list, so it syncs, undoes and exports with no server change, but as a separate
+// kind of record: { id: 'projected-<date>', projectedFor: '<date>', projected: amount, ...sync fields }.
+// It has no `dateKey`, so every actual-income total ignores it, and an older copy of the app that has not
+// updated yet ignores it too instead of counting it as money received.
+
+// The newest projected record for each date, as a Map of date key -> record (cleared ones are left out).
+function projectedByDate(records) {
+  const latest = new Map();
+  records.forEach((r) => {
+    if (!r.projectedFor) return;
+    const current = latest.get(r.projectedFor);
+    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(r.projectedFor, r);
+  });
+  [...latest.entries()].forEach(([dateKey, record]) => { if (record.deleted) latest.delete(dateKey); });
+  return latest;
+}
+
+// Sets (or clears, when the value is '') the projected income number for one calendar day.
+function setProjectedForDate(dateKey, rawValue) {
+  const id = `projected-${dateKey}`;
+  const existing = income.find((r) => r.id === id);
+  if (rawValue === '') {
+    if (existing && !existing.deleted) deleteIncome(id); // keeps a tombstone, like clearing actual income
+    return;
+  }
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) > MAX_MONEY) {
+    setTimeout(renderBudget, 0); // refused: put the saved value back in the box
+    return;
+  }
+  const amount = Math.round(parsed * 100) / 100; // whole cents, like bills
+  if (existing) {
+    const before = structuredClone(existing);
+    existing.projected = amount;
+    existing.deleted = false;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id, projectedFor: dateKey, projected: amount,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', id, null, structuredClone(record));
+  }
+  // Deferred for the same reason as setIncomeForDate: this runs from a `change` event that a Tab key triggers.
+  setTimeout(renderBudget, 0);
 }
 
 // Deliberately NOT cumulative-through-date, unlike unpaidAmountThrough(). Each
@@ -1126,7 +1181,12 @@ function computePaidByCategory(allBills, y, m) {
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
   const byKey = new Map();
   const counted = new Set(); // same payment recorded on duplicate bills counts once (see paymentIdentity)
-  allBills.forEach((bill) => {
+  // The first copy of a duplicated payment claims it, so live bills go first and labelled ones before
+  // unlabelled ones: a payment is credited to the copy you kept and labelled, never to a deleted or
+  // unlabelled copy (which is how labelled bills used to end up under Uncategorized).
+  const hasLabel = (b) => normalizeChipKey(b.category) !== '';
+  const ordered = [...allBills].sort((a, b) => (a.deleted ? 1 : 0) - (b.deleted ? 1 : 0) || (hasLabel(b) ? 1 : 0) - (hasLabel(a) ? 1 : 0));
+  ordered.forEach((bill) => {
     // Every recorded payment counts, even one that no longer lines up with the bill's schedule
     // (for example after the schedule was edited): money that was paid should not vanish from history.
     const dates = (bill.paidDates || []).filter((d) => {
@@ -1140,8 +1200,9 @@ function computePaidByCategory(allBills, y, m) {
     if (dates.length === 0) return;
     const raw = (bill.category || '').trim();
     const key = normalizeChipKey(raw);
-    const entry = byKey.get(key) || { label: raw || 'Uncategorized', total: 0 };
+    const entry = byKey.get(key) || { label: raw || 'Uncategorized', total: 0, billNames: new Set() };
     entry.total += dates.reduce((sum, d) => sum + paidAmountFor(bill, d), 0);
+    entry.billNames.add(bill.name);
     byKey.set(key, entry);
   });
   return [...byKey.values()].sort((a, b) => b.total - a.total);
@@ -1157,7 +1218,8 @@ function renderPaidHistory() {
   document.getElementById('paid-history-empty').hidden = rows.length !== 0;
   if (rows.length === 0) return;
 
-  const addRow = (label, total, extraClass) => {
+  // One row: the label and the amount, with an optional muted line underneath (which bills are in it).
+  const addRow = (label, total, extraClass, detail) => {
     const li = document.createElement('li');
     li.className = `paid-history-row${extraClass ? ` ${extraClass}` : ''}`;
     const name = document.createElement('span');
@@ -1165,9 +1227,16 @@ function renderPaidHistory() {
     const amount = document.createElement('span');
     amount.textContent = `$${total.toFixed(2)}`;
     li.append(name, amount);
+    if (detail) {
+      const note = document.createElement('span');
+      note.className = 'paid-history-detail';
+      note.textContent = detail;
+      li.appendChild(note);
+    }
     list.appendChild(li);
   };
-  rows.forEach((r) => addRow(r.label, r.total));
+  // The Uncategorized row says which bills are in it, so a bill that should have a label is easy to spot.
+  rows.forEach((r) => addRow(r.label, r.total, '', r.label === 'Uncategorized' ? [...r.billNames].join(', ') : ''));
   addRow('Total paid', rows.reduce((sum, r) => sum + r.total, 0), 'paid-history-total');
 }
 
@@ -1554,6 +1623,7 @@ function closeCalendarDay({ refocus = false } = {}) {
 // Starts a new bill on a given day: closes the day sheet, puts that date in the Add bill form and moves there.
 function startBillOnDate(dateKey) {
   closeCalendarDay();
+  showTab('bills');
   document.getElementById('budget-duedate-input').value = dateKey;
   updateCaughtUpOption();
   if (isPhoneLayout()) {
@@ -1609,10 +1679,11 @@ document.addEventListener('click', (e) => {
 // list's search filter below — but the category chip filter DOES apply here
 // too (occurrence rendering only; every total stays unfiltered, see the
 // matchesBillCategory comment inside the render loop below).
-function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, focusedManualInput) {
+function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, focusedManualInput) {
   const today = new Date();
   const todayK = todayKey();
   const dueSoonEndK = shiftDateKey(todayK, REMINDER_BANNER_DAYS); // same window as the banner
+  const incomeDates = new Set(nonDeletedIncome.map((r) => r.dateKey)); // days that already have income entered
   // Today only does something while the calendar is slid away from its usual place.
   const calendarTodayBtn = document.getElementById('calendar-today');
   if (calendarTodayBtn) calendarTodayBtn.disabled = calendarWeekOffset === 0;
@@ -1837,7 +1908,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         bodyEl.insertBefore(peekEl, occurrencesEl);
       }
 
-      // Day footer: the box for typing a manual income amount for this day.
+      // Day footer: the boxes for typing income received and income expected for this day.
       const footerEl = document.createElement('div');
       footerEl.className = 'budget-day-footer';
       const manualInput = document.createElement('input');
@@ -1853,6 +1924,19 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
         setIncomeForDate(dateKey, e.target.value);
       });
+      // The Projected box: what you expect to receive this day (see setProjectedForDate).
+      const projectedRecord = projectedMap.get(dateKey);
+      const projectedInput = document.createElement('input');
+      projectedInput.type = 'number';
+      projectedInput.step = 'any';
+      projectedInput.className = 'budget-day-projected-input';
+      projectedInput.dataset.dateKey = dateKey;
+      projectedInput.setAttribute('aria-label', `Projected income for ${MONTH_NAMES[m]} ${d}`);
+      projectedInput.value = projectedRecord ? String(projectedRecord.projected) : '';
+      projectedInput.addEventListener('change', (e) => {
+        if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
+        setProjectedForDate(dateKey, e.target.value);
+      });
       // Sign-aware, not flat "always green" — a negative manually-entered
       // income amount (income's amount is unconstrained) must not be shown
       // with a color that implies "good news." Never
@@ -1864,7 +1948,14 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         dotSpan.className = `budget-income-dot ${signedAmountClass(incomeRecord.amount)}`;
         footerEl.appendChild(dotSpan);
       }
-      footerEl.appendChild(manualInput);
+      // A hollow dot marks a projection (the closed compact day shows only the dots).
+      if (projectedRecord) {
+        const projectedDot = document.createElement('span');
+        projectedDot.className = 'budget-projected-dot';
+        footerEl.appendChild(projectedDot);
+      }
+      footerEl.appendChild(dayField('Income', manualInput));
+      footerEl.appendChild(dayField('Projected', projectedInput));
       bodyEl.appendChild(footerEl);
 
       // In the day sheet: start a bill on this day (the Add bill form gets the date).
@@ -1876,6 +1967,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       bodyEl.appendChild(addOnDayBtn);
 
       if (incomeRecord) daySummary.push(`income entered $${Number(incomeRecord.amount).toFixed(2)}`);
+      if (projectedRecord) daySummary.push(`projected income $${Number(projectedRecord.projected).toFixed(2)}`);
       openBtn.setAttribute('aria-label',
         `${MONTH_NAMES[m]} ${d}${dateKey === todayK ? ', today' : ''}: ` +
         `${daySummary.length ? daySummary.join(', ') : 'nothing scheduled'}. Open day.`);
@@ -1917,19 +2009,51 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     leftEl.innerHTML = `Due: <strong>$${weekLeft.toFixed(2)}</strong>`;
     weekEl.appendChild(leftEl);
 
+    // Projected income, shown once any day of the week has one. A day's projection stops counting as soon as
+    // real income is entered for that day, so typing the real figure replaces the guess instead of adding to it.
+    if (weekDays.some((dateKey) => projectedMap.has(dateKey))) {
+      const weekProjected = weekDays.reduce((sum, dateKey) => (
+        projectedMap.has(dateKey) && !incomeDates.has(dateKey) ? sum + projectedMap.get(dateKey).projected : sum
+      ), 0);
+      const projectedEl = document.createElement('p');
+      projectedEl.className = 'budget-week-projected-total';
+      projectedEl.innerHTML = `Projected: <strong>${formatSignedCurrency(weekProjected)}</strong>`;
+      projectedEl.title = 'Income you expect this week and have not entered yet';
+      weekEl.appendChild(projectedEl);
+
+      const weekProjectedNet = weekIncome + weekProjected - weekTotalDue;
+      const projectedNetEl = document.createElement('p');
+      projectedNetEl.className = 'budget-week-projected-net-total';
+      projectedNetEl.innerHTML = `Projected net: <strong class="${signedAmountClass(weekProjectedNet)}">${formatSignedCurrency(weekProjectedNet)}</strong>`;
+      projectedNetEl.title = 'Net, plus the projected income above';
+      weekEl.appendChild(projectedNetEl);
+    }
+
     calendarEl.appendChild(weekEl);
   }
 
   // If an income box was being typed in when the redraw started, put its text and focus back.
   if (focusedManualInput) {
     const restored = calendarEl.querySelector(
-      `.budget-day-manual-input[data-date-key="${focusedManualInput.dateKey}"]`
+      `.${focusedManualInput.className}[data-date-key="${focusedManualInput.dateKey}"]`
     );
     if (restored) {
       restored.value = focusedManualInput.value;
       restored.focus();
     }
   }
+}
+
+// A small labelled number box for a day ("Income" or "Projected"): the label shows in the day sheet and on the
+// wide calendar, and the box keeps its own spoken name.
+function dayField(labelText, input) {
+  const field = document.createElement('label');
+  field.className = 'budget-day-field';
+  const text = document.createElement('span');
+  text.className = 'budget-day-field-label';
+  text.textContent = labelText;
+  field.append(text, input);
+  return field;
 }
 
 // Draws the Bills list (cards with edit form, delete and "mark oldest unpaid as paid");
@@ -2221,8 +2345,10 @@ function renderBudget() {
   const nonDeletedRecurringIncome = recurringIncome.filter((r) => !r.deleted);
 
   const activeEl = document.activeElement;
-  const focusedManualInput = (activeEl && activeEl.classList && activeEl.classList.contains('budget-day-manual-input'))
-    ? { dateKey: activeEl.dataset.dateKey, value: activeEl.value }
+  const dayBoxClass = ['budget-day-manual-input', 'budget-day-projected-input']
+    .find((name) => activeEl && activeEl.classList && activeEl.classList.contains(name));
+  const focusedManualInput = dayBoxClass
+    ? { className: dayBoxClass, dateKey: activeEl.dataset.dateKey, value: activeEl.value }
     : null;
 
   const list = document.getElementById('budget-list');
@@ -2255,7 +2381,7 @@ function renderBudget() {
   renderBudgetStats(nonDeleted);
   renderBillCategoryFilters(nonDeleted);
   renderCategoryOptions(nonDeleted);
-  renderBudgetCalendar(nonDeleted, nonDeletedIncome, nonDeletedRecurringIncome, focusedManualInput);
+  renderBudgetCalendar(nonDeleted, nonDeletedIncome, nonDeletedRecurringIncome, projectedByDate(income), focusedManualInput);
   renderPayPeriod();
   renderPaidHistory();
   renderBudgetList(nonDeleted, openEdit);
@@ -2776,7 +2902,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? source[labelField] : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -3666,7 +3792,10 @@ function isValidImportRecord(collectionName, rec) {
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
   if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
-  if (collectionName === 'income') return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
+  if (collectionName === 'income') {
+    if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
+    return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
+  }
   return false; // only this app's three lists are ever checked
 }
 
@@ -3794,7 +3923,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -4149,22 +4278,64 @@ document.querySelectorAll('details.fold').forEach((fold) => {
   });
 });
 
-// The jump links scroll to a part of the page, opening it first if it is folded up.
-document.querySelectorAll('[data-jump]').forEach((button) => {
+// ---- Tabs ----
+// Home (the calendar), Income (pay period and recurring income) and Bills (the list, the Add bill form and
+// Paid History). Every part is always drawn; the tabs only show one at a time, and the last one used is
+// remembered on this device.
+
+// localStorage key for the last tab used, and the tabs in order.
+const TAB_KEY = 'budgetApp.tab.v1';
+const TABS = ['home', 'income', 'bills'];
+// The tab on screen.
+let currentTab = 'home';
+
+// Reads the remembered tab; anything unexpected means Home.
+function loadTab() {
+  try {
+    const value = localStorage.getItem(TAB_KEY);
+    return TABS.includes(value) ? value : 'home';
+  } catch {
+    return 'home';
+  }
+}
+
+// Shows one tab (and closes anything open on the one being left), highlights its button and remembers it.
+function showTab(name) {
+  const tab = TABS.includes(name) ? name : 'home';
+  closeCalendarDay();
+  closeAddBillSheet();
+  currentTab = tab;
+  TABS.forEach((id) => { document.getElementById(`tab-${id}`).hidden = id !== tab; });
+  document.querySelectorAll('.tabbar-btn').forEach((button) => {
+    if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  try { localStorage.setItem(TAB_KEY, tab); } catch { /* not saved: it opens on Home next time */ }
+  updateAddFab();
+}
+
+// The tab buttons switch tabs and start the new tab at its top.
+document.querySelectorAll('.tabbar-btn').forEach((button) => {
   button.addEventListener('click', () => {
-    const target = document.getElementById(button.dataset.jump);
-    if (!target) return;
-    if (target.tagName === 'DETAILS') target.open = true;
-    target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+    showTab(button.dataset.tab);
+    window.scrollTo({ top: 0, behavior: scrollBehavior() });
   });
 });
 
-// The floating + button: scrolls down to the Add bill form (a long way down the page) and puts the
-// cursor in its first box. It hides itself while that form is already on screen.
+// The floating + button opens the Add bill form (switching to the Bills tab first). It is hidden on the
+// Income tab, and on the Bills tab while that form is already on screen.
 const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
+let addFormOnScreen = false;
+
+// Shows or hides the + button for the current tab.
+function updateAddFab() {
+  addBillFab.hidden = currentTab === 'income' || (currentTab === 'bills' && addFormOnScreen);
+}
+
 if (addBillFab && addBillForm) {
   addBillFab.addEventListener('click', () => {
+    showTab('bills');
     if (isPhoneLayout()) {
       openAddBillSheet();
       return;
@@ -4173,13 +4344,14 @@ if (addBillFab && addBillForm) {
     document.getElementById('budget-name-input').focus({ preventScroll: true });
   });
   if ('IntersectionObserver' in window) {
-    new IntersectionObserver((entries) => { addBillFab.hidden = entries[0].isIntersecting; }).observe(addBillForm);
+    new IntersectionObserver((entries) => { addFormOnScreen = entries[0].isIntersecting; updateAddFab(); }).observe(addBillForm);
   }
 }
 
 safeRender(renderBudget);
 updateUndoRedoButtons();
 initSyncUI();
+showTab(loadTab());
 
 // Shows the "new version is ready" bar at the top of the page.
 function showUpdateBanner() {

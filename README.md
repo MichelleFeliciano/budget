@@ -4,18 +4,16 @@ A small, local-first bills and income tracker. It runs fully offline in any mode
 everything in that browser's `localStorage`, and has no dependencies, no build step and no CDN scripts.
 Optional manual sync goes to its own small server (`server/`).
 
-It has one screen:
+It has three tabs (a bar along the bottom on a phone, pills above the page on a wide screen), and the last one used is remembered:
 
-- a three-week calendar (last week, this week, next week; Earlier and Later slide it, Today brings it back; on a phone each day shows its first bill's name) with weekly and monthly totals (bills, income and net) and a weekly Due line (what is left to pay), where each day has a box for extra income
-- the **Current Pay Period** (taken from your biggest Recurring Income source until you save a payday by hand)
-- **Paid History** by month and category
-- **Bills** (add, edit, delete, mark paid, autopay, category filter, search, sort by the next date to pay, a "due in the next 2 weeks" filter)
-- **Recurring Income** (a paycheck, for example)
+- **Home**: a three-week calendar (last week, this week, next week; Earlier and Later slide it, Today brings it back; on a phone each day shows its first bill's name) with weekly and monthly totals (bills, income and net) and a weekly Due line (what is left to pay), where each day has two boxes: Income (extra income received) and Projected (what you expect to receive; each week then shows Projected and Projected net, and real income typed for a day replaces that day's projection)
+- **Income**: the **Current Pay Period** (taken from your biggest Recurring Income source until you save a payday by hand) and **Recurring Income** (a paycheck, for example)
+- **Bills**: the bills list (add, edit, delete, mark paid, autopay, category filter, search, sort by the next date to pay, a "due in the next 2 weeks" filter) and **Paid History** by month and category (the Uncategorized row lists which bills are in it)
 - a banner at the top for bills due within two days or overdue (autopay bills are never flagged, in the banner or on the calendar)
   with a Mark paid button for each bill listed
-- a + button that jumps to the Add bill form, and a bar with Undo after every delete or Mark paid
+- a + button that opens the Add bill form (switching to Bills first), and a bar with Undo after every delete or Mark paid
 
-Pay Period, Paid History and Recurring Income fold up (and stay folded), and a row of jump links near the top scrolls to each part.
+Pay Period, Paid History and Recurring Income fold up (and stay folded).
 Adding a repeating bill with an old date offers "I'm caught up" (earlier dates start paid), and a card can mark its
 earlier dates paid in one tap. The pay period shows the next payday and what is left after unpaid bills. The Menu also
 has Text size (Normal, Large, Largest), Share backup (where the phone can share files) and Calendar reminders (a
