@@ -2668,6 +2668,7 @@ function renderBudget() {
   renderReceivedIncomeList();
   renderProjectedIncomeList();
   renderPlan();
+  renderExpenses();
 
   renderBackupNotes();
   renderBillReminders(); // the due/overdue bills banner at the top
@@ -2978,6 +2979,249 @@ document.getElementById('received-income-add-form').addEventListener('submit', (
 
 // The income date starts on today.
 document.getElementById('received-income-date-input').value = todayKey();
+
+// ---- Expenses (what you actually spent, logged by hand) ----
+// Each expense is a record in the same `income` list as projected income and plan categories, { id: 'expense-<id>',
+// spentOn, amount, planId, categoryName, notes, ...sync fields }, so it syncs, undoes and exports with no change to the
+// sync server. It has no `dateKey`, so no income total sees it. `planId` points at a Spending Plan category;
+// `categoryName` is that category's name when it was logged, shown if the category is later deleted.
+
+// How many of the newest expenses the list shows.
+const MAX_EXPENSES_SHOWN = 50;
+// Days of entries a category needs before its average per week is worked out (less is too noisy to trust).
+const MIN_AVERAGE_DAYS = 14;
+
+// The live expenses, newest day first.
+function expenseRecords() {
+  return income.filter((r) => r.spentOn && !r.deleted)
+    .sort((a, b) => (a.spentOn < b.spentOn ? 1 : a.spentOn > b.spentOn ? -1 : (b.dateAdded || '').localeCompare(a.dateAdded || '')));
+}
+
+// The Monday on or before a date key (the calendar's weeks start on Monday).
+function weekStartKey(dateKey) {
+  const { y, m, d } = parseDateKey(dateKey);
+  return shiftDateKey(dateKey, -((new Date(y, m, d).getDay() + 6) % 7));
+}
+
+// The name to show for an expense's category: the plan category's current name, or the name saved with the
+// expense when that category has since been deleted.
+function expenseCategoryName(record) {
+  const plan = income.find((r) => r.id === record.planId && r.planName && !r.deleted);
+  return plan ? plan.planName : (record.categoryName || 'Other');
+}
+
+// Fills a category dropdown with the Spending Plan categories, keeping the chosen one (and, for an expense whose
+// category was deleted, offering its saved name so editing does not silently change it).
+function fillExpenseCategorySelect(select, selectedId, savedName) {
+  const keep = selectedId !== undefined ? selectedId : select.value;
+  select.innerHTML = '';
+  const categories = planCategories();
+  categories.forEach((plan) => {
+    const option = document.createElement('option');
+    option.value = plan.id;
+    option.textContent = plan.planName;
+    select.appendChild(option);
+  });
+  if (keep && !categories.some((plan) => plan.id === keep) && savedName) {
+    const option = document.createElement('option');
+    option.value = keep;
+    option.textContent = `${savedName} (deleted category)`;
+    select.appendChild(option);
+  }
+  if (!select.options.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Add a category on the Plan tab first';
+    select.appendChild(option);
+  }
+  if (keep && [...select.options].some((o) => o.value === keep)) select.value = keep;
+}
+
+// Checks the Add / Edit expense fields and returns the first problem as a sentence ('' when they are fine).
+function expenseFieldsError(fields) {
+  if (!fields.dateKey) return 'Pick a date.';
+  if (!isReasonableDateKey(fields.dateKey)) return DATE_RANGE_MESSAGE;
+  const amount = Number(fields.amountRaw);
+  if (fields.amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  if (!fields.planId) return 'Choose a category (add one on the Plan tab first).';
+  return '';
+}
+
+// Adds an expense, or changes the one with `id`. Returns the problem as a sentence, or '' when it was saved.
+function saveExpense(fields, id) {
+  const error = expenseFieldsError(fields);
+  if (error) return error;
+  const plan = income.find((r) => r.id === fields.planId && r.planName);
+  const existing = id ? income.find((r) => r.id === id) : null;
+  const values = {
+    spentOn: fields.dateKey,
+    amount: Math.round(Number(fields.amountRaw) * 100) / 100, // whole cents, like bills
+    planId: fields.planId,
+    categoryName: plan ? plan.planName : (existing ? existing.categoryName : '') || '',
+    notes: fields.notes.trim().slice(0, 200),
+  };
+  if (existing) {
+    const before = structuredClone(existing);
+    Object.assign(existing, values);
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `expense-${makeId()}`, ...values,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// Draws the Expenses tab: the category lists, the "spent vs plan" rows for this week and this month, each
+// category's average per week once it has two weeks of entries, and the newest expenses with Edit and Delete.
+function renderExpenses() {
+  const money = (n) => `$${n.toFixed(2)}`;
+  fillExpenseCategorySelect(document.getElementById('expense-category-input'));
+
+  const todayK = todayKey();
+  const weekStart = weekStartKey(todayK);
+  const weekEnd = shiftDateKey(weekStart, 6);
+  const monthStart = `${todayK.slice(0, 8)}01`;
+  const monthEnd = `${todayK.slice(0, 8)}31`; // date keys sort as text, so day 31 covers every month
+  const expenses = expenseRecords();
+  const sumIn = (records, start, end) => records.filter((r) => r.spentOn >= start && r.spentOn <= end).reduce((sum, r) => sum + r.amount, 0);
+
+  // ---- Spent vs Plan
+  const summaryList = document.getElementById('expense-summary-list');
+  summaryList.innerHTML = '';
+  const categories = planCategories();
+  const rows = categories.map((plan) => ({
+    name: plan.planName, records: expenses.filter((r) => r.planId === plan.id),
+    plannedWeek: planWeekly(plan.amount, plan.frequency), plannedMonth: planMonthly(plan.amount, plan.frequency),
+  }));
+  const knownIds = new Set(categories.map((plan) => plan.id));
+  const orphans = expenses.filter((r) => !knownIds.has(r.planId));
+  if (orphans.length) rows.push({ name: 'Other (no plan category)', records: orphans, plannedWeek: null, plannedMonth: null });
+
+  let totalWeek = 0; let totalMonth = 0; let plannedWeekAll = 0; let plannedMonthAll = 0;
+  rows.forEach((row) => {
+    const spentWeek = sumIn(row.records, weekStart, weekEnd);
+    const spentMonth = sumIn(row.records, monthStart, monthEnd);
+    totalWeek += spentWeek; totalMonth += spentMonth;
+    if (row.plannedWeek !== null) { plannedWeekAll += row.plannedWeek; plannedMonthAll += row.plannedMonth; }
+
+    const item = document.createElement('li');
+    item.className = 'recurring-income-card';
+    const info = document.createElement('div');
+    info.className = 'recurring-income-info';
+    const lines = [
+      row.plannedWeek === null ? `This week: ${money(spentWeek)}` : `This week: ${money(spentWeek)} of ${money(row.plannedWeek)} planned`,
+      row.plannedMonth === null ? `This month: ${money(spentMonth)}` : `This month: ${money(spentMonth)} of ${money(row.plannedMonth)} planned`,
+    ];
+    if (row.records.length) {
+      const first = row.records.reduce((min, r) => (r.spentOn < min ? r.spentOn : min), row.records[0].spentOn);
+      const days = utcDayDiff(first, todayK) + 1;
+      const total = row.records.reduce((sum, r) => sum + r.amount, 0);
+      lines.push(days >= MIN_AVERAGE_DAYS
+        ? `Average so far: ${money((total / days) * 7)} per week (${money((total / days) * 52 / 12 * 7)} per month)`
+        : 'Average per week: needs two weeks of entries');
+    }
+    const title = document.createElement('strong');
+    title.className = 'recurring-income-name';
+    title.textContent = row.name;
+    info.appendChild(title);
+    lines.forEach((text) => {
+      const span = document.createElement('span');
+      span.className = 'recurring-income-start';
+      span.textContent = text;
+      info.appendChild(span);
+    });
+    item.appendChild(info);
+    summaryList.appendChild(item);
+  });
+  document.getElementById('expense-summary-empty').hidden = rows.length !== 0;
+  document.getElementById('expense-total-line').textContent = rows.length
+    ? `Spent this week: ${money(totalWeek)} of ${money(plannedWeekAll)} planned. This month: ${money(totalMonth)} of ${money(plannedMonthAll)} planned.` : '';
+
+  // ---- Recent expenses
+  const list = document.getElementById('expense-list');
+  const template = document.getElementById('expense-card-template');
+  list.innerHTML = '';
+  expenses.slice(0, MAX_EXPENSES_SHOWN).forEach((record) => {
+    const node = template.content.cloneNode(true);
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const dateBox = node.querySelector('.expense-edit-date');
+    const amountBox = node.querySelector('.expense-edit-amount');
+    const categoryBox = node.querySelector('.expense-edit-category');
+    const notesBox = node.querySelector('.expense-edit-notes');
+    const errorEl = node.querySelector('.expense-edit-error');
+    const editBtn = node.querySelector('.edit-btn');
+    const deleteBtn = node.querySelector('.delete-btn');
+    const cancelBtn = node.querySelector('.cancel-btn');
+    const categoryName = expenseCategoryName(record);
+
+    node.querySelector('.recurring-income-name').textContent = `${formatDateKeyShort(record.spentOn)} · ${categoryName}`;
+    node.querySelector('.recurring-income-amount').textContent = money(record.amount);
+    const noteEl = node.querySelector('.expense-note');
+    if (record.notes) { noteEl.textContent = record.notes; noteEl.hidden = false; }
+    editBtn.setAttribute('aria-label', `Edit ${categoryName} expense on ${formatDateKeyShort(record.spentOn)}`);
+    deleteBtn.setAttribute('aria-label', `Delete ${categoryName} expense on ${formatDateKeyShort(record.spentOn)}`);
+
+    editBtn.addEventListener('click', () => {
+      dateBox.value = record.spentOn;
+      amountBox.value = String(record.amount);
+      fillExpenseCategorySelect(categoryBox, record.planId, record.categoryName);
+      notesBox.value = record.notes || '';
+      errorEl.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      amountBox.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const problem = saveExpense({
+        dateKey: dateBox.value, amountRaw: amountBox.value, planId: categoryBox.value, notes: notesBox.value,
+      }, record.id);
+      if (problem) { errorEl.textContent = problem; errorEl.hidden = false; }
+    });
+    deleteBtn.addEventListener('click', () => deleteIncome(record.id));
+    list.appendChild(node);
+  });
+  document.getElementById('expense-empty-state').hidden = expenses.length !== 0;
+  const noteLine = document.getElementById('expense-list-note');
+  noteLine.hidden = expenses.length <= MAX_EXPENSES_SHOWN;
+  noteLine.textContent = `Showing the newest ${MAX_EXPENSES_SHOWN} of ${expenses.length} expenses.`;
+}
+
+// Log-an-expense form: validate, save, and clear the amount and note when it worked (the date and category stay,
+// since several purchases in a row are usually the same day or kind).
+document.getElementById('expense-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('expense-form-error');
+  const problem = saveExpense({
+    dateKey: document.getElementById('expense-date-input').value,
+    amountRaw: document.getElementById('expense-amount-input').value,
+    planId: document.getElementById('expense-category-input').value,
+    notes: document.getElementById('expense-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  document.getElementById('expense-amount-input').value = '';
+  document.getElementById('expense-notes-input').value = '';
+  document.getElementById('expense-amount-input').focus();
+});
+
+// The expense date starts on today.
+document.getElementById('expense-date-input').value = todayKey();
 
 // ---- Backup reminders ----
 // The sync server's copy is temporary (the free plan forgets it whenever the server sleeps or redeploys), so
@@ -3304,7 +3548,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -3346,6 +3590,7 @@ function undoToastMessage(collectionName, before, after) {
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
   if (after.dateKey && after.deleted && !before.deleted) return 'Deleted income';
   if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
+  if (after.spentOn && after.deleted && !before.deleted) return 'Deleted expense';
   if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
   if (collectionName === 'bills') {
     const paidBefore = (before.paidDates || []).length;
@@ -4199,6 +4444,9 @@ function isValidImportRecord(collectionName, rec) {
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
+    if (rec.spentOn !== undefined) {
+      return isDate(rec.spentOn) && isPositiveMoney(rec.amount) && textOrMissing(rec.planId) && textOrMissing(rec.categoryName) && textOrMissing(rec.notes);
+    }
     if (rec.planName !== undefined) {
       return isText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
         && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
@@ -4334,7 +4582,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -4696,7 +4944,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 
 // localStorage key for the last tab used, and the tabs in order.
 const TAB_KEY = 'budgetApp.tab.v1';
-const TABS = ['home', 'income', 'bills', 'plan'];
+const TABS = ['home', 'income', 'bills', 'plan', 'expenses'];
 // The tab on screen.
 let currentTab = 'home';
 
@@ -4734,14 +4982,14 @@ document.querySelectorAll('.tabbar-btn').forEach((button) => {
 });
 
 // The floating + button opens the Add bill form (switching to the Bills tab first). It is hidden on the
-// Income and Plan tabs, and on the Bills tab while that form is already on screen.
+// Income, Plan and Expenses tabs, and on the Bills tab while that form is already on screen.
 const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
 let addFormOnScreen = false;
 
 // Shows or hides the + button for the current tab.
 function updateAddFab() {
-  addBillFab.hidden = currentTab === 'income' || currentTab === 'plan' || (currentTab === 'bills' && addFormOnScreen);
+  addBillFab.hidden = currentTab === 'income' || currentTab === 'plan' || currentTab === 'expenses' || (currentTab === 'bills' && addFormOnScreen);
 }
 
 if (addBillFab && addBillForm) {

@@ -99,6 +99,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <button type="button" class="tabbar-btn" data-tab="income">Income</button>
       <button type="button" class="tabbar-btn" data-tab="bills">Bills</button>
       <button type="button" class="tabbar-btn" data-tab="plan">Plan</button>
+      <button type="button" class="tabbar-btn" data-tab="expenses">Expenses</button>
     </nav>
 
     <!-- Budget, top to bottom: month calendar with totals (renderBudgetCalendar), current pay period
@@ -255,6 +256,37 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <p class="form-error" id="plan-form-error" hidden></p>
             <button type="submit">Add category</button>
           </form>
+        </details>
+      </div>
+
+      <!-- Expenses: log what you actually spent, compared with the Spending Plan. -->
+      <div class="tab-panel" id="tab-expenses" hidden>
+        <details class="fold" id="fold-expense-log" open>
+          <summary class="fold-summary"><h2>Log an Expense</h2></summary>
+          <form id="expense-add-form" class="add-form add-form-stacked">
+            <label class="date-field">Date
+              <input type="date" id="expense-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the expense">
+            </label>
+            <input type="number" inputmode="decimal" id="expense-amount-input" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Amount spent">
+            <select id="expense-category-input" aria-label="Spending Plan category"></select>
+            <input type="text" id="expense-notes-input" maxlength="200" placeholder="Note (optional, e.g. where)" aria-label="Note">
+            <p class="form-error" id="expense-form-error" hidden></p>
+            <button type="submit">Add expense</button>
+          </form>
+        </details>
+
+        <details class="fold" id="fold-expense-summary" open>
+          <summary class="fold-summary"><h2>Spent vs Plan</h2></summary>
+          <p class="stats-line" id="expense-total-line"></p>
+          <ul class="card-list flat-list" id="expense-summary-list"></ul>
+          <p class="empty-state" id="expense-summary-empty" hidden>Add categories on the Plan tab, then log expenses against them.</p>
+        </details>
+
+        <details class="fold" id="fold-expense-recent" open>
+          <summary class="fold-summary"><h2>Recent Expenses</h2></summary>
+          <ul class="card-list flat-list" id="expense-list"></ul>
+          <p class="stats-line" id="expense-list-note" hidden></p>
+          <p class="empty-state" id="expense-empty-state" hidden>No expenses logged yet.</p>
         </details>
       </div>
 
@@ -451,6 +483,36 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="number" inputmode="decimal" class="plan-edit-alt" placeholder="What-if amount (optional)" min="0" step="0.01" aria-label="Edit what-if amount">
       <input type="text" class="plan-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
       <p class="form-error plan-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One logged expense (renderExpenses). It reuses the recurring income card's classes, so it looks the same. -->
+<template id="expense-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount"></span>
+        <span class="recurring-income-start expense-note" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <label class="date-field">Date
+        <input type="date" class="expense-edit-date" min="1990-01-01" max="2100-12-31" required aria-label="Edit date of the expense">
+      </label>
+      <input type="number" inputmode="decimal" class="expense-edit-amount" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Edit amount spent">
+      <select class="expense-edit-category" aria-label="Edit Spending Plan category"></select>
+      <input type="text" class="expense-edit-notes" maxlength="200" placeholder="Note (optional)" aria-label="Edit note">
+      <p class="form-error expense-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>

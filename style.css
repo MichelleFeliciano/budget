@@ -2104,7 +2104,9 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .tabbar-btn {
     flex: 1;
     min-height: 44px;
+    padding: 8px 4px;
     border-radius: 13px;
+    font-size: 0.85rem;
   }
 
   /* The + button and the undo bar sit above the tab bar. */

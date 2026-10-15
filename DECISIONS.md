@@ -143,3 +143,11 @@ its amount in the frequency it was entered in and everything else is worked out 
 the What-if switch (kept on the device, not synced) swaps those in for every total. A copy of the app from before this
 change ignores plan records. The plan is estimates, not bills: it has no due dates and nothing in it affects the calendar,
 the Due figures or the net.
+
+## Expenses are logged against the Spending Plan categories
+An expense is a record in the `income` list too (`{ id: 'expense-<id>', spentOn, amount, planId, categoryName, notes }`),
+for the same reasons as the plan and projected income: no server change, no `dateKey`, so no income total sees it, and a
+copy of the app from before this change ignores it. The category is a plan category (by id, so renaming a category keeps its
+expenses), not a separate list, so spent and planned line up one to one. If a category is deleted, its expenses keep the name
+saved with them and are totalled under "Other (no plan category)". A category's average per week waits for 14 days of entries
+(counted from its first expense to today) because a shorter stretch is too noisy to replace an estimate with.

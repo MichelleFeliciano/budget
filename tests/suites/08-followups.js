@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 6 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the three Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 9 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -489,7 +489,7 @@ hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
 
 // ---- the Plan tab (estimated spending per category) ----
 bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('plan'); renderBudget(); hideUndoToast();
-check('the Plan tab is the fourth tab and starts empty', TABS.length === 4 && $('tab-plan').hidden === false && $('tab-home').hidden === true && $('plan-empty-state').hidden === false && $('plan-total-line').textContent === '');
+check('the Plan tab is the fourth tab and starts empty', TABS.length === 5 && $('tab-plan').hidden === false && $('tab-home').hidden === true && $('plan-empty-state').hidden === false && $('plan-total-line').textContent === '');
 check('weekly to monthly multiplies by 52 and divides by 12, not by 4', Math.abs(planMonthly(60, 'weekly') - 260) < 1e-9 && planMonthly(100, 'monthly') === 100);
 check('monthly to weekly multiplies by 12 and divides by 52', Math.abs(planWeekly(260, 'monthly') - 60) < 1e-9 && planWeekly(60, 'weekly') === 60);
 const planCards = () => [...document.querySelectorAll('#plan-list .recurring-income-card')];
@@ -564,4 +564,44 @@ check('Delete removes it, keeps a tombstone and offers Undo', receivedCards().le
 $('undo-toast-btn').click(); await sleep(30);
 check('Undo brings it back', receivedCards().length === 2);
 check('every button and box in the section has a name for screen readers', [...$('fold-received-income').querySelectorAll('button, input')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
+hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- the Expenses tab (what you actually spent, against the plan) ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('expenses'); renderBudget(); hideUndoToast();
+check('the Expenses tab starts empty and says to add plan categories first', $('tab-expenses').hidden === false && $('expense-summary-empty').hidden === false && $('expense-empty-state').hidden === false && $('expense-category-input').options.length === 1 && $('expense-category-input').value === '');
+check('with no plan category, saving an expense is refused with a sentence', /Choose a category/.test(saveExpense({ dateKey: todayKey(), amountRaw: '5', planId: '', notes: '' })));
+savePlanCategory({ name: 'Fuel', amountRaw: '70', frequency: 'weekly', type: 'business', altRaw: '', notes: '' });
+savePlanCategory({ name: 'Food', amountRaw: '200', frequency: 'monthly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const fuelId = income.find((r) => r.planName === 'Fuel').id, foodId = income.find((r) => r.planName === 'Food').id;
+check('the category list is the plan categories', [...$('expense-category-input').options].map((o) => o.textContent).join('|') === 'Food|Fuel');
+const logExpense = (date, amount, planId, notes) => { $('expense-date-input').value = date; $('expense-amount-input').value = amount; $('expense-category-input').value = planId; $('expense-notes-input').value = notes || ''; $('expense-add-form').requestSubmit(); };
+logExpense(todayKey(), '40', fuelId, 'station'); await sleep(30);
+check('logging an expense saves a dated record tied to the category', income.some((r) => r.spentOn === todayKey() && r.amount === 40 && r.planId === fuelId && r.categoryName === 'Fuel' && r.notes === 'station' && r.id.startsWith('expense-') && !r.dateKey));
+check('expense records are ignored by every income helper', uniqueIncomeEntries(income).length === 0 && projectedByDate(income).size === 0 && planCategories().length === 2);
+check('the amount and note clear, the date and category stay', $('expense-amount-input').value === '' && $('expense-notes-input').value === '' && $('expense-date-input').value === todayKey() && $('expense-category-input').value === fuelId);
+const expenseCards = () => [...document.querySelectorAll('#expense-list .recurring-income-card')];
+check('the expense shows in the recent list with its category, amount and note', expenseCards().length === 1 && /Fuel/.test(expenseCards()[0].textContent) && /\$40\.00/.test(expenseCards()[0].textContent) && /station/.test(expenseCards()[0].textContent), expenseCards()[0].textContent);
+const summaryText = () => [...document.querySelectorAll('#expense-summary-list li')].map((l) => l.textContent.replace(/\s+/g, ' ').trim());
+check('the summary shows spent against the plan for the week and the month', /Fuel\s*This week: \$40\.00 of \$70\.00 planned\s*This month: \$40\.00 of \$303\.33 planned/.test(summaryText().find((t) => /^Fuel/.test(t))), summaryText().join(' | '));
+check('the total line adds the categories (a monthly plan counts as weekly x 12 / 52)', $('expense-total-line').textContent === `Spent this week: $40.00 of $${(70 + (200 * 12) / 52).toFixed(2)} planned. This month: $40.00 of $${((70 * 52) / 12 + 200).toFixed(2)} planned.`, $('expense-total-line').textContent);
+check('a new category has no average yet', /needs two weeks of entries/.test(summaryText().find((t) => /^Fuel/.test(t))));
+logExpense(dk(-20), '60', fuelId); await sleep(30);
+check('after two weeks of entries the average per week is worked out', /Average so far: \$33\.33 per week/.test(summaryText().find((t) => /^Fuel/.test(t))), summaryText().find((t) => /^Fuel/.test(t)));
+check('the list shows the newest day first', /Fuel/.test(expenseCards()[0].textContent) && /\$40\.00/.test(expenseCards()[0].textContent) && /\$60\.00/.test(expenseCards()[1].textContent));
+expenseCards()[0].querySelector('.edit-btn').click();
+expenseCards()[0].querySelector('.expense-edit-amount').value = '45'; expenseCards()[0].querySelector('.expense-edit-category').value = foodId;
+expenseCards()[0].querySelector('.recurring-income-edit-form').requestSubmit(); await sleep(30);
+const editedExpense = income.find((r) => r.spentOn === todayKey());
+check('editing changes the amount and moves it to another category', editedExpense.amount === 45 && editedExpense.planId === foodId && editedExpense.categoryName === 'Food');
+check('a bad amount or date is refused with a sentence', /at least \$0\.01/.test(saveExpense({ dateKey: todayKey(), amountRaw: '0', planId: foodId, notes: '' })) && /Pick a date/.test(saveExpense({ dateKey: '', amountRaw: '5', planId: foodId, notes: '' })));
+expenseCards()[0].querySelector('.delete-btn').click(); await sleep(30);
+check('Delete removes it, keeps a tombstone and offers Undo', expenseCards().length === 1 && /Deleted expense/.test($('undo-toast-text').textContent) && income.find((r) => r.spentOn === todayKey()).deleted === true, $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo brings it back', expenseCards().length === 2);
+deleteIncome(foodId); await sleep(30);
+check('an expense whose plan category was deleted keeps its name and moves to Other', /Food/.test(expenseCards()[0].textContent) && summaryText().some((t) => /^Other \(no plan category\)\s*This week: \$45\.00/.test(t)), summaryText().join(' | '));
+check('expense records pass the import check and bad ones do not', isValidImportRecord('income', income.find((r) => r.spentOn === dk(-20))) === true && isValidImportRecord('income', { id: 'expense-z', spentOn: 'nope', amount: 5 }) === false && isValidImportRecord('income', { id: 'expense-z', spentOn: dk(0), amount: 0 }) === false);
+check('the + button is hidden on the Expenses tab', $('add-bill-fab').hidden === true);
+check('every button and box on the Expenses tab has a name for screen readers', [...$('tab-expenses').querySelectorAll('button, input, select')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
