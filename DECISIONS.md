@@ -158,7 +158,7 @@ A calendar week's Net (and Projected net) is what the weeks before it left over 
 so a surplus or a shortfall carries into the next week. The running total starts at the Monday of the earliest income there
 is (a typed entry or a recurring source's first date), looks back at most 104 weeks, and is worked out once for the first
 week shown and then carried through the three weeks, so sliding the calendar stays consistent. Bills due before that start
-are left out, and the month and pay-period nets do not roll. Each rolled week says how much came from earlier weeks.
+are left out, and the month and pay-period nets do not roll. The amount that came from earlier weeks is only in the line's hover text, so the figures stay short.
 
 ## Quick Add logs in one tap, and amounts show with thousands separators
 Each plan category with expenses offers its last three different amounts as buttons that log that amount for today

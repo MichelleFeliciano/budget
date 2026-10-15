@@ -1293,13 +1293,6 @@ input[type="date"]::-webkit-date-and-time-value {
   text-decoration: line-through;
 }
 
-/* The note after a week's rolled-forward net: smaller and muted. */
-
-.budget-week-carry {
-  font-size: 0.8em;
-  color: var(--muted);
-}
-
 /* One Quick Add row on the Expenses tab: the category name, then its recent amounts as buttons. */
 
 .expense-quick-row {

@@ -1754,10 +1754,9 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-// The small "(includes $X from earlier weeks)" note after a rolled-forward net ('' when nothing was carried).
-function carryNote(carried) {
-  if (Math.abs(carried) < 0.005) return '';
-  return ` <span class="budget-week-carry">(includes ${formatSignedCurrency(carried)} from earlier weeks)</span>`;
+// The hover text for a rolled-forward net: what the net is made of, and how much came from earlier weeks.
+function carryTitle(base, carried) {
+  return Math.abs(carried) < 0.005 ? base : `${base}. Includes ${formatSignedCurrency(carried)} from earlier weeks.`;
 }
 
 // How many weeks back the running net is added up (older weeks are left out, so a very old income entry cannot
@@ -2074,10 +2073,9 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     rolledNet = weekNet;
     const netTotalEl = document.createElement('p');
     netTotalEl.className = 'budget-week-net-total';
-    netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`
-      + carryNote(carriedNet);
-    netTotalEl.title =
-      'Income entered or expected this week minus every bill due this week (paid or not), plus what the weeks before it left over';
+    netTotalEl.innerHTML = `Net: <strong class="${signedAmountClass(weekNet)}">${formatSignedCurrency(weekNet)}</strong>`;
+    netTotalEl.title = carryTitle(
+      'Income entered or expected this week minus every bill due this week (paid or not), plus what the weeks before it left over', carriedNet);
     weekEl.appendChild(netTotalEl);
 
     // What is left to pay this week: bills due in it that are not ticked paid yet.
@@ -2105,9 +2103,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
       const projectedNetEl = document.createElement('p');
       projectedNetEl.className = 'budget-week-projected-net-total';
-      projectedNetEl.innerHTML = `Projected net: <strong class="${signedAmountClass(weekProjectedNet)}">${formatSignedCurrency(weekProjectedNet)}</strong>`
-        + carryNote(carriedProjectedNet);
-      projectedNetEl.title = 'Net, plus the projected income above, plus what the weeks before it left over';
+      projectedNetEl.innerHTML = `Projected net: <strong class="${signedAmountClass(weekProjectedNet)}">${formatSignedCurrency(weekProjectedNet)}</strong>`;
+      projectedNetEl.title = carryTitle('Net, plus the projected income above, plus what the weeks before it left over', carriedProjectedNet);
       weekEl.appendChild(projectedNetEl);
     }
 
@@ -4679,7 +4676,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
