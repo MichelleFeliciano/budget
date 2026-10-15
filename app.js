@@ -735,8 +735,55 @@ function projectedByDate(records) {
   return latest;
 }
 
-// Sets (or clears, when the value is '') the projected income number for one calendar day.
-function setProjectedForDate(dateKey, rawValue) {
+// ---- Income source (where a day's income, real or projected, comes from) ----
+// An optional text on an income or projected record, chosen from the Recurring Income names and earlier
+// sources or typed fresh. It is only a label: no total reads it.
+
+// Longest source name kept.
+const MAX_SOURCE_LENGTH = 60;
+
+// A source as stored: trimmed and cut to MAX_SOURCE_LENGTH ('' means none).
+function cleanSource(text) {
+  return String(text || '').trim().slice(0, MAX_SOURCE_LENGTH);
+}
+
+// Every source name to suggest: the live Recurring Income names plus sources already used on income records.
+function incomeSourceNames() {
+  const names = new Map(); // lower-case -> first spelling seen, so "Pay" and "pay" are one choice
+  const add = (text) => { const name = cleanSource(text); if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), name); };
+  recurringIncome.filter((r) => !r.deleted).forEach((r) => add(r.name));
+  income.filter((r) => !r.deleted).forEach((r) => add(r.source));
+  return [...names.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// Fills the shared suggestion list that every Source box points at.
+function renderIncomeSourceOptions() {
+  const list = document.getElementById('income-source-options');
+  list.innerHTML = '';
+  incomeSourceNames().forEach((name) => {
+    const option = document.createElement('option');
+    option.value = name;
+    list.appendChild(option);
+  });
+}
+
+// Sets (or clears, when the text is empty) the source on an existing income or projected record. Does nothing
+// for a missing or cleared record, or when the source is unchanged.
+function setIncomeSource(id, text) {
+  const record = income.find((r) => r.id === id);
+  const source = cleanSource(text);
+  if (!record || record.deleted || (record.source || '') === source) return;
+  const before = structuredClone(record);
+  if (source) record.source = source; else delete record.source;
+  stampSync(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', id, before, structuredClone(record));
+  setTimeout(renderBudget, 0); // deferred like setIncomeForDate: this runs from a `change` event
+}
+
+// Sets (or clears, when the value is '') the projected income number for one calendar day. The source is
+// left as it was unless one is passed (an empty string clears it).
+function setProjectedForDate(dateKey, rawValue, source) {
   const id = `projected-${dateKey}`;
   const existing = income.find((r) => r.id === id);
   if (rawValue === '') {
@@ -753,6 +800,9 @@ function setProjectedForDate(dateKey, rawValue) {
     const before = structuredClone(existing);
     existing.projected = amount;
     existing.deleted = false;
+    if (source !== undefined) { // a re-added day without a source keeps no stale one
+      if (cleanSource(source)) existing.source = cleanSource(source); else delete existing.source;
+    }
     stampSync(existing);
     saveCollection(INCOME_KEY, income);
     recordUndo('income', id, before, structuredClone(existing));
@@ -763,6 +813,7 @@ function setProjectedForDate(dateKey, rawValue) {
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
+    if (cleanSource(source)) record.source = cleanSource(source);
     income.push(record);
     saveCollection(INCOME_KEY, income);
     recordUndo('income', id, null, structuredClone(record));
@@ -1954,8 +2005,25 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         projectedDot.className = 'budget-projected-dot';
         footerEl.appendChild(projectedDot);
       }
+      // Source boxes: where the income came from / is expected from. They need an amount first, since the
+      // source is stored on that record.
+      const sourceInput = (record, recordId, label) => {
+        const box = document.createElement('input');
+        box.type = 'text';
+        box.className = 'budget-day-source-input';
+        box.maxLength = MAX_SOURCE_LENGTH;
+        box.placeholder = record ? 'Source' : 'Enter an amount first';
+        box.disabled = !record;
+        box.setAttribute('list', 'income-source-options');
+        box.setAttribute('aria-label', `${label} for ${MONTH_NAMES[m]} ${d}`);
+        box.value = record && record.source ? record.source : '';
+        box.addEventListener('change', (e) => setIncomeSource(recordId, e.target.value));
+        return box;
+      };
       footerEl.appendChild(dayField('Income', manualInput));
+      footerEl.appendChild(dayField('Income from', sourceInput(incomeRecord, dateKey, 'Income source')));
       footerEl.appendChild(dayField('Projected', projectedInput));
+      footerEl.appendChild(dayField('Projected from', sourceInput(projectedRecord, `projected-${dateKey}`, 'Projected income source')));
       bodyEl.appendChild(footerEl);
 
       // In the day sheet: start a bill on this day (the Add bill form gets the date).
@@ -2364,12 +2432,15 @@ function renderProjectedIncomeList() {
     node.querySelector('.recurring-income-name').textContent =
       `${formatDateKeyShort(dateKey)} \u00b7 ${whenLabel(daysUntilDateKey(dateKey))}`;
     node.querySelector('.recurring-income-amount').textContent = formatSignedCurrency(record.projected);
-    node.querySelector('.recurring-income-start').textContent = received ? 'Real income entered: this no longer counts' : '';
+    node.querySelector('.recurring-income-start').textContent =
+      [record.source, received ? 'Real income entered: this no longer counts' : ''].filter(Boolean).join(' · ');
+    const editSource = node.querySelector('.projected-income-edit-source');
     node.querySelector('.delete-btn').setAttribute('aria-label', `Delete projected income for ${formatDateKeyShort(dateKey)}`);
     node.querySelector('.edit-btn').setAttribute('aria-label', `Edit projected income for ${formatDateKeyShort(dateKey)}`);
 
     node.querySelector('.edit-btn').addEventListener('click', () => {
       editAmount.value = String(record.projected);
+      editSource.value = record.source || '';
       editError.hidden = true;
       viewSection.hidden = true;
       editForm.hidden = false;
@@ -2387,7 +2458,7 @@ function renderProjectedIncomeList() {
         editError.hidden = false;
         return;
       }
-      setProjectedForDate(dateKey, editAmount.value);
+      setProjectedForDate(dateKey, editAmount.value, editSource.value);
     });
     node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, ''));
 
@@ -2451,6 +2522,7 @@ function renderBudget() {
   renderPaidHistory();
   renderBudgetList(nonDeleted, openEdit);
   renderRecurringIncomeList(nonDeletedRecurringIncome, openRecurringIncomeEdit);
+  renderIncomeSourceOptions();
   renderProjectedIncomeList();
 
   renderBackupNotes();
@@ -2664,7 +2736,7 @@ document.getElementById('projected-income-add-form').addEventListener('submit', 
   }
 
   errorEl.hidden = true;
-  setProjectedForDate(dateInput.value, amountInput.value);
+  setProjectedForDate(dateInput.value, amountInput.value, document.getElementById('projected-income-source-input').value);
   amountInput.value = '';
   amountInput.focus();
 });
@@ -3889,6 +3961,7 @@ function isValidImportRecord(collectionName, rec) {
   if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
+    if (!textOrMissing(rec.source)) return false;
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
     return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
   }
@@ -4019,7 +4092,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

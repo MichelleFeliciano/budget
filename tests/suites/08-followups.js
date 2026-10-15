@@ -451,3 +451,25 @@ $('undo-toast-btn').click(); await sleep(30);
 check('Undo brings it back', projectedCards().length === 1);
 check('every button and box in the section has a name for screen readers', [...$('fold-projected-income').querySelectorAll('button, input')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- income source (real and projected) ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; showTab('income'); renderBudget(); hideUndoToast();
+recurringIncome.push({ id: 'ri-src', name: 'Paycheck', amount: 1000, dueDate: dk(-3), frequency: 'biweekly', category: '', dateAdded: new Date().toISOString(), updatedAt: new Date().toISOString(), deviceId: 'd', deleted: false, version: 0 });
+setProjectedForDate(dk(3), '300', 'Side gig'); await sleep(30);
+setIncomeForDate(dk(1), '120'); await sleep(30);
+setIncomeSource(dk(1), '  Tips  '); await sleep(30);
+check('a source is saved trimmed on a real income day', income.find((r) => r.id === dk(1)).source === 'Tips');
+check('a source is saved on a projected day', income.find((r) => r.id === `projected-${dk(3)}`).source === 'Side gig');
+check('suggestions are the recurring income names plus sources used before', JSON.stringify(incomeSourceNames()) === JSON.stringify(['Paycheck', 'Side gig', 'Tips']) && document.querySelectorAll('#income-source-options option').length === 3, JSON.stringify(incomeSourceNames()));
+check('the projected list shows the source', /Side gig/.test(document.querySelector('#projected-income-list .recurring-income-start').textContent));
+const srcBox = (id) => document.querySelector(`.budget-day-source-input[aria-label="${id}"]`);
+showTab('home'); renderBudget();
+check('a day with an amount has an enabled source box holding the source', [...document.querySelectorAll('.budget-day-source-input')].some((b) => !b.disabled && b.value === 'Tips') && [...document.querySelectorAll('.budget-day-source-input')].some((b) => !b.disabled && b.value === 'Side gig'));
+check('a day with no amount has its source box disabled', [...document.querySelectorAll('.budget-day-source-input')].some((b) => b.disabled));
+setProjectedForDate(dk(3), '350'); await sleep(30);
+check('changing only the amount keeps the source', income.find((r) => r.id === `projected-${dk(3)}`).source === 'Side gig');
+setIncomeSource(dk(1), ''); await sleep(30);
+check('an empty source clears it', income.find((r) => r.id === dk(1)).source === undefined);
+check('a source is cut to 60 characters', (setIncomeSource(dk(1), 'x'.repeat(80)), income.find((r) => r.id === dk(1)).source.length === 60));
+check('an import with a non-text source is refused', isValidImportRecord('income', { id: 'a', dateKey: dk(1), amount: 5, source: 7 }) === false && isValidImportRecord('income', { id: 'a', dateKey: dk(1), amount: 5, source: 'Tips' }) === true);
+hideUndoToast(); income.length = 0; recurringIncome.length = 0; showTab('home'); renderBudget();

@@ -126,3 +126,9 @@ the file cannot know what is paid. A bill due on the 29th or 30th is skipped by 
 The "download a full backup" reminder is only shown to a device that has never exported and does not sync (a
 syncing device's data also lives on its other devices), and again once an export is older than 30 days. The
 undo bar appears only after a delete or a Mark paid, never for adds, edits or typing a day's income.
+
+## Income source is only a label
+A day's real income and a day's projected income can each carry an optional `source` text (chosen from the Recurring
+Income names and sources already used, or typed). It is stored on the same record, so it syncs and exports with no server
+change, and no total reads it. A day's source box is disabled until the day has an amount, because the source lives on
+that record.

@@ -181,6 +181,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
               <input type="date" id="projected-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the projected income">
             </label>
             <input type="number" inputmode="decimal" step="any" id="projected-income-amount-input" placeholder="Amount you expect" required aria-label="Projected amount">
+            <input type="text" id="projected-income-source-input" list="income-source-options" maxlength="60" placeholder="Source (choose or type, optional)" autocomplete="off" aria-label="Source of the projected income">
             <p class="form-error" id="projected-income-form-error" hidden></p>
             <button type="submit">Add projected income</button>
           </form>
@@ -374,6 +375,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
   </li>
 </template>
 
+<!-- The choices every Source box offers: the Recurring Income names and sources used before (renderIncomeSourceOptions). -->
+<datalist id="income-source-options"></datalist>
+
 <!-- One projected-income day in the Projected Income list (renderProjectedIncomeList). It reuses the recurring income
      card's classes, so it looks the same. -->
 <template id="projected-income-card-template">
@@ -391,6 +395,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
     </div>
     <form class="recurring-income-edit-form" hidden>
       <input type="number" inputmode="decimal" step="any" class="projected-income-edit-amount" placeholder="Amount you expect" required aria-label="Edit projected amount">
+      <input type="text" class="projected-income-edit-source" list="income-source-options" maxlength="60" placeholder="Source (optional)" autocomplete="off" aria-label="Edit source of the projected income">
       <p class="form-error projected-income-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>

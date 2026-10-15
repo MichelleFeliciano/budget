@@ -1307,7 +1307,8 @@ input[type="date"]::-webkit-date-and-time-value {
 /* The boxes for income received and income expected on a day. */
 
 .budget-day-manual-input,
-.budget-day-projected-input {
+.budget-day-projected-input,
+.budget-day-source-input {
   width: 100%;
   min-width: 0;
   padding: 4px 6px;
@@ -1319,6 +1320,10 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.78rem;
   text-align: right;
 }
+
+/* A source is a word, not a number, so it reads from the left. */
+
+.budget-day-source-input { text-align: left; }
 
 /* Indicates a manual `income` entry exists for this day — sign-aware, reuses
    the amount-positive/amount-negative pair above (never --accent-2, reserved
@@ -1496,6 +1501,7 @@ input[type="date"]::-webkit-date-and-time-value {
   .budget-day-field,
   .budget-day-manual-input,
   .budget-day-projected-input,
+  .budget-day-source-input,
   .budget-day-close {
     display: none;
   }
@@ -1634,7 +1640,8 @@ input[type="date"]::-webkit-date-and-time-value {
   /* Finger-sized boxes. */
 
   .budget-day-open .budget-day-manual-input,
-  .budget-day-open .budget-day-projected-input {
+  .budget-day-open .budget-day-projected-input,
+  .budget-day-open .budget-day-source-input {
     display: block;
     padding: 8px 10px;
     font-size: 1rem;
