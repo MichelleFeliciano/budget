@@ -98,6 +98,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <button type="button" class="tabbar-btn" data-tab="home" aria-current="page">Home</button>
       <button type="button" class="tabbar-btn" data-tab="income">Income</button>
       <button type="button" class="tabbar-btn" data-tab="bills">Bills</button>
+      <button type="button" class="tabbar-btn" data-tab="plan">Plan</button>
     </nav>
 
     <!-- Budget, top to bottom: month calendar with totals (renderBudgetCalendar), current pay period
@@ -210,6 +211,36 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
           <ul class="card-list flat-list" id="recurring-income-list"></ul>
           <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
+        </details>
+      </div>
+
+      <!-- Plan: estimated spending per category (weekly or monthly, business or personal) with weekly and monthly totals. -->
+      <div class="tab-panel" id="tab-plan" hidden>
+        <details class="fold" id="fold-plan" open>
+          <summary class="fold-summary"><h2>Spending Plan</h2></summary>
+          <p class="stats-line">Your estimated spending by category. Each amount is kept in the way you entered it (weekly or monthly) and the other view is worked out from it: weekly &times; 52 &divide; 12 for a month, monthly &times; 12 &divide; 52 for a week. These are estimates, so edit them whenever you have real numbers.</p>
+          <label class="check-field"><input type="checkbox" id="plan-scenario-input"> What-if: use each category's what-if amount</label>
+          <p class="stats-line" id="plan-total-line"></p>
+          <p class="stats-line" id="plan-split-line"></p>
+          <p class="stats-line" id="plan-scenario-line"></p>
+          <ul class="card-list flat-list" id="plan-list"></ul>
+          <p class="empty-state" id="plan-empty-state" hidden>No categories yet. Add one below.</p>
+          <form id="plan-add-form" class="add-form add-form-stacked">
+            <input type="text" id="plan-name-input" maxlength="60" placeholder="Category (e.g. Groceries)" required aria-label="Category name">
+            <input type="number" inputmode="decimal" id="plan-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Amount">
+            <select id="plan-frequency-input" aria-label="Amount is per">
+              <option value="weekly">Per week</option>
+              <option value="monthly">Per month</option>
+            </select>
+            <select id="plan-type-input" aria-label="Business or personal">
+              <option value="personal">Personal</option>
+              <option value="business">Business</option>
+            </select>
+            <input type="number" inputmode="decimal" id="plan-alt-input" placeholder="What-if amount (optional, same period)" min="0" step="0.01" aria-label="What-if amount">
+            <input type="text" id="plan-notes-input" maxlength="500" placeholder="Notes (optional)" aria-label="Notes">
+            <p class="form-error" id="plan-form-error" hidden></p>
+            <button type="submit">Add category</button>
+          </form>
         </details>
       </div>
 
@@ -367,6 +398,45 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </select>
       <input type="text" class="recurring-income-edit-category" placeholder="Category (optional)" aria-label="Edit income category">
       <p class="form-error recurring-income-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One Spending Plan category (renderPlan). It reuses the recurring income card's classes, so it looks the same. -->
+<template id="plan-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="plan-type badge"></span>
+        <span class="recurring-income-amount plan-amounts"></span>
+        <span class="recurring-income-frequency plan-entered"></span>
+        <span class="recurring-income-start plan-whatif" hidden></span>
+        <span class="recurring-income-start plan-notes" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="text" class="plan-edit-name" maxlength="60" placeholder="Category" required aria-label="Edit category name">
+      <input type="number" inputmode="decimal" class="plan-edit-amount" placeholder="Amount" min="0.01" step="0.01" required aria-label="Edit amount">
+      <select class="plan-edit-frequency" aria-label="Edit: amount is per">
+        <option value="weekly">Per week</option>
+        <option value="monthly">Per month</option>
+      </select>
+      <select class="plan-edit-type" aria-label="Edit: business or personal">
+        <option value="personal">Personal</option>
+        <option value="business">Business</option>
+      </select>
+      <input type="number" inputmode="decimal" class="plan-edit-alt" placeholder="What-if amount (optional)" min="0" step="0.01" aria-label="Edit what-if amount">
+      <input type="text" class="plan-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
+      <p class="form-error plan-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>

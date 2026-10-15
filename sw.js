@@ -13,7 +13,7 @@
 // The browser only detects a Service Worker update when sw.js's bytes change —
 // if this string is left unchanged, sw.js is byte-identical after a deploy, the
 // browser never notices, and users silently stay on old code forever.
-const CACHE_NAME = 'budget-v18';
+const CACHE_NAME = 'budget-v19';
 
 // Files pre-cached at install time: everything needed to run with no network.
 const APP_SHELL = [

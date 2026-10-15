@@ -2527,6 +2527,215 @@ function renderProjectedIncomeList() {
   document.getElementById('projected-income-empty-state').hidden = upcoming.length !== 0;
 }
 
+// ---- Spending Plan (estimated spending per category) ----
+// Each category is a record in the same `income` list as projected income, { id: 'plan-<id>', planName, amount,
+// frequency, business, notes, altAmount, ...sync fields }, so it syncs, undoes and exports with no change to the
+// sync server (which only knows the three lists). Like a projected record it has no `dateKey`, so every actual-income
+// total ignores it. The amount is stored in the frequency it was entered in; the other view is always worked out.
+
+// The periods a category can be entered in.
+const PLAN_FREQUENCIES = ['weekly', 'monthly'];
+// localStorage key for the What-if switch (kept per device, not synced).
+const PLAN_SCENARIO_KEY = 'budgetApp.planScenario.v1';
+// Whether the What-if amounts are being used in the totals.
+let planScenarioOn = loadPlanScenario();
+
+// Reads the saved What-if switch (off when nothing is saved or storage is blocked).
+function loadPlanScenario() {
+  try { return localStorage.getItem(PLAN_SCENARIO_KEY) === '1'; } catch { return false; }
+}
+
+// A plan amount as a monthly figure: weekly amounts are multiplied by 52 weeks and divided by 12 months (not by 4).
+function planMonthly(amount, frequency) {
+  return frequency === 'weekly' ? (amount * 52) / 12 : amount;
+}
+
+// A plan amount as a weekly figure: monthly amounts are multiplied by 12 months and divided by 52 weeks.
+function planWeekly(amount, frequency) {
+  return frequency === 'monthly' ? (amount * 12) / 52 : amount;
+}
+
+// The live Spending Plan categories, by name.
+function planCategories() {
+  return income.filter((r) => r.planName && !r.deleted)
+    .sort((a, b) => a.planName.localeCompare(b.planName));
+}
+
+// The amount a category counts for right now: its What-if amount while the switch is on and it has one,
+// otherwise its normal amount (both are in the category's own frequency).
+function planAmount(record) {
+  return planScenarioOn && typeof record.altAmount === 'number' ? record.altAmount : record.amount;
+}
+
+// Checks the Add / Edit category fields and returns the first problem as a sentence ('' when they are fine).
+function planFieldsError(fields) {
+  if (!fields.name.trim()) return 'Enter a category name.';
+  const amount = Number(fields.amountRaw);
+  if (fields.amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  if (!PLAN_FREQUENCIES.includes(fields.frequency)) return 'Choose weekly or monthly.';
+  const alt = Number(fields.altRaw);
+  if (fields.altRaw !== '' && (!Number.isFinite(alt) || alt < 0 || alt > MAX_MONEY)) return 'The what-if amount must be $0 or more, up to $1,000,000,000.';
+  return '';
+}
+
+// Adds a category, or changes the one with `id`. Returns the problem as a sentence, or '' when it was saved.
+function savePlanCategory(fields, id) {
+  const error = planFieldsError(fields);
+  if (error) return error;
+  const values = {
+    planName: fields.name.trim().slice(0, 60),
+    amount: Math.round(Number(fields.amountRaw) * 100) / 100, // whole cents, like bills
+    frequency: fields.frequency,
+    business: fields.type === 'business',
+    notes: fields.notes.trim().slice(0, 500),
+  };
+  const alt = fields.altRaw === '' ? undefined : Math.round(Number(fields.altRaw) * 100) / 100;
+  const existing = id ? income.find((r) => r.id === id) : null;
+  if (existing) {
+    const before = structuredClone(existing);
+    Object.assign(existing, values);
+    if (alt === undefined) delete existing.altAmount; else existing.altAmount = alt;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `plan-${makeId()}`, ...values,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    if (alt !== undefined) record.altAmount = alt;
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// Draws the Spending Plan tab: each category with its weekly and monthly figures (the one it was entered in is
+// marked), the totals for everything and for business and personal, and the What-if comparison.
+function renderPlan() {
+  const list = document.getElementById('plan-list');
+  const template = document.getElementById('plan-card-template');
+  list.innerHTML = '';
+  document.getElementById('plan-scenario-input').checked = planScenarioOn;
+
+  const records = planCategories();
+  const money = (n) => `$${n.toFixed(2)}`;
+  const totals = { weekly: 0, monthly: 0, businessWeekly: 0, businessMonthly: 0, planMonthly: 0 };
+  let anyWhatIf = false;
+
+  records.forEach((record) => {
+    const amount = planAmount(record);
+    const weekly = planWeekly(amount, record.frequency);
+    const monthly = planMonthly(amount, record.frequency);
+    totals.weekly += weekly;
+    totals.monthly += monthly;
+    totals.planMonthly += planMonthly(record.amount, record.frequency);
+    if (record.business) { totals.businessWeekly += weekly; totals.businessMonthly += monthly; }
+    const usingWhatIf = planScenarioOn && typeof record.altAmount === 'number';
+    if (typeof record.altAmount === 'number') anyWhatIf = true;
+
+    const node = template.content.cloneNode(true);
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editError = node.querySelector('.plan-edit-error');
+    node.querySelector('.recurring-income-name').textContent = record.planName;
+    node.querySelector('.plan-type').textContent = record.business ? 'Business' : 'Personal';
+    node.querySelector('.plan-amounts').textContent = `${money(weekly)} per week · ${money(monthly)} per month`;
+    node.querySelector('.plan-entered').textContent = usingWhatIf
+      ? `What-if amount in use (the plan says ${money(record.amount)} ${record.frequency})`
+      : `Entered ${record.frequency}: ${money(record.amount)}`;
+    const whatIfEl = node.querySelector('.plan-whatif');
+    if (typeof record.altAmount === 'number' && !usingWhatIf) {
+      whatIfEl.textContent = `What-if: ${money(record.altAmount)} ${record.frequency}`;
+      whatIfEl.hidden = false;
+    }
+    const notesEl = node.querySelector('.plan-notes');
+    if (record.notes) { notesEl.textContent = record.notes; notesEl.hidden = false; }
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${record.planName}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${record.planName}`);
+
+    // Elements are captured now: once the fragment is appended it is empty, so node.querySelector would find nothing.
+    const nameBox = node.querySelector('.plan-edit-name');
+    const amountBox = node.querySelector('.plan-edit-amount');
+    const frequencyBox = node.querySelector('.plan-edit-frequency');
+    const typeBox = node.querySelector('.plan-edit-type');
+    const altBox = node.querySelector('.plan-edit-alt');
+    const notesBox = node.querySelector('.plan-edit-notes');
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      nameBox.value = record.planName;
+      amountBox.value = String(record.amount);
+      frequencyBox.value = record.frequency;
+      typeBox.value = record.business ? 'business' : 'personal';
+      altBox.value = typeof record.altAmount === 'number' ? String(record.altAmount) : '';
+      notesBox.value = record.notes || '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      nameBox.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const problem = savePlanCategory({
+        name: nameBox.value, amountRaw: amountBox.value, frequency: frequencyBox.value,
+        type: typeBox.value, altRaw: altBox.value, notes: notesBox.value,
+      }, record.id);
+      if (problem) { editError.textContent = problem; editError.hidden = false; }
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
+
+    list.appendChild(node);
+  });
+
+  document.getElementById('plan-empty-state').hidden = records.length !== 0;
+  document.getElementById('plan-total-line').textContent = records.length
+    ? `Total: ${money(totals.weekly)} per week · ${money(totals.monthly)} per month.` : '';
+  document.getElementById('plan-split-line').textContent = records.length
+    ? `Business: ${money(totals.businessWeekly)} per week · ${money(totals.businessMonthly)} per month. ` +
+      `Personal: ${money(totals.weekly - totals.businessWeekly)} per week · ${money(totals.monthly - totals.businessMonthly)} per month.` : '';
+  const scenarioLine = document.getElementById('plan-scenario-line');
+  if (planScenarioOn && anyWhatIf) {
+    const saved = totals.planMonthly - totals.monthly;
+    scenarioLine.textContent = saved >= 0
+      ? `What-if: ${money(saved)} per month less than the plan (${money(totals.planMonthly)} per month).`
+      : `What-if: ${money(-saved)} per month more than the plan (${money(totals.planMonthly)} per month).`;
+  } else {
+    scenarioLine.textContent = '';
+  }
+}
+
+// The What-if switch: remember it on this device and redraw the totals.
+document.getElementById('plan-scenario-input').addEventListener('change', (e) => {
+  planScenarioOn = e.target.checked;
+  try { localStorage.setItem(PLAN_SCENARIO_KEY, planScenarioOn ? '1' : '0'); } catch { /* not saved: it starts off next time */ }
+  renderPlan();
+});
+
+// Add category form: validate, save, and clear the boxes when it worked.
+document.getElementById('plan-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('plan-form-error');
+  const problem = savePlanCategory({
+    name: document.getElementById('plan-name-input').value,
+    amountRaw: document.getElementById('plan-amount-input').value,
+    frequency: document.getElementById('plan-frequency-input').value,
+    type: document.getElementById('plan-type-input').value,
+    altRaw: document.getElementById('plan-alt-input').value,
+    notes: document.getElementById('plan-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  e.target.reset();
+  document.getElementById('plan-name-input').focus();
+});
+
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
 // (one of each can be open at once) and a focused day income box (any paid tick redraws all 21 days).
@@ -2578,6 +2787,7 @@ function renderBudget() {
   renderRecurringIncomeList(nonDeletedRecurringIncome, openRecurringIncomeEdit);
   renderIncomeSourceOptions();
   renderProjectedIncomeList();
+  renderPlan();
 
   renderBackupNotes();
   renderBillReminders(); // the due/overdue bills banner at the top
@@ -3123,7 +3333,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -3163,6 +3373,7 @@ function undoToastMessage(collectionName, before, after) {
   const name = after.name || 'item';
   if (!before) return collectionName === 'income' ? null : `Added ${name}`;
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
+  if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
   if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
   if (collectionName === 'bills') {
     const paidBefore = (before.paidDates || []).length;
@@ -4016,6 +4227,11 @@ function isValidImportRecord(collectionName, rec) {
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
+    if (rec.planName !== undefined) {
+      return isText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
+        && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
+        && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
+    }
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
     return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
   }
@@ -4146,7 +4362,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -4508,7 +4724,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 
 // localStorage key for the last tab used, and the tabs in order.
 const TAB_KEY = 'budgetApp.tab.v1';
-const TABS = ['home', 'income', 'bills'];
+const TABS = ['home', 'income', 'bills', 'plan'];
 // The tab on screen.
 let currentTab = 'home';
 
@@ -4546,14 +4762,14 @@ document.querySelectorAll('.tabbar-btn').forEach((button) => {
 });
 
 // The floating + button opens the Add bill form (switching to the Bills tab first). It is hidden on the
-// Income tab, and on the Bills tab while that form is already on screen.
+// Income and Plan tabs, and on the Bills tab while that form is already on screen.
 const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
 let addFormOnScreen = false;
 
 // Shows or hides the + button for the current tab.
 function updateAddFab() {
-  addBillFab.hidden = currentTab === 'income' || (currentTab === 'bills' && addFormOnScreen);
+  addBillFab.hidden = currentTab === 'income' || currentTab === 'plan' || (currentTab === 'bills' && addFormOnScreen);
 }
 
 if (addBillFab && addBillForm) {

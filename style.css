@@ -1321,6 +1321,10 @@ input[type="date"]::-webkit-date-and-time-value {
   text-align: right;
 }
 
+/* A Spending Plan category's notes keep their line breaks and wrap like text. */
+
+.plan-notes { white-space: pre-wrap; }
+
 /* One income or projected entry on a day: its Source box beside its Amount box. */
 
 .budget-day-entry {

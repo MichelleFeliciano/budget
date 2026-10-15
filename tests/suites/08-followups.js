@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Projected Income, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 4 && payFold.open === true);
+check('Pay Period, Projected Income, Spending Plan, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 5 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -490,3 +490,50 @@ check('an entry with no source and one with a source can share a day', (setIncom
 setProjectedForDate(dk(2), '200', 'Job'); setProjectedForDate(dk(2), '50', 'Gift'); await sleep(30);
 check('projected income also holds one entry per source', projectedByDate(income).get(dk(2)).length === 2);
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- the Plan tab (estimated spending per category) ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('plan'); renderBudget(); hideUndoToast();
+check('the Plan tab is the fourth tab and starts empty', TABS.length === 4 && $('tab-plan').hidden === false && $('tab-home').hidden === true && $('plan-empty-state').hidden === false && $('plan-total-line').textContent === '');
+check('weekly to monthly multiplies by 52 and divides by 12, not by 4', Math.abs(planMonthly(60, 'weekly') - 260) < 1e-9 && planMonthly(100, 'monthly') === 100);
+check('monthly to weekly multiplies by 12 and divides by 52', Math.abs(planWeekly(260, 'monthly') - 60) < 1e-9 && planWeekly(60, 'weekly') === 60);
+const planCards = () => [...document.querySelectorAll('#plan-list .recurring-income-card')];
+const addPlan = (name, amount, frequency, type, alt, notes) => {
+  $('plan-name-input').value = name; $('plan-amount-input').value = amount; $('plan-frequency-input').value = frequency;
+  $('plan-type-input').value = type; $('plan-alt-input').value = alt || ''; $('plan-notes-input').value = notes || '';
+  $('plan-add-form').requestSubmit();
+};
+addPlan('Food', '60', 'weekly', 'personal', '', 'sample note'); addPlan('Cleaning', '90', 'monthly', 'personal');
+addPlan('Fuel', '120', 'weekly', 'business'); addPlan('Drinks', '30', 'weekly', 'personal', '10');
+await sleep(30);
+check('categories are saved in the frequency they were entered in', income.find((r) => r.planName === 'Food').amount === 60 && income.find((r) => r.planName === 'Food').frequency === 'weekly' && income.find((r) => r.planName === 'Cleaning').frequency === 'monthly');
+check('they are plan records with no date, so income totals ignore them', income.filter((r) => r.planName).every((r) => r.id.startsWith('plan-') && !r.dateKey) && uniqueIncomeEntries(income).length === 0);
+check('each card shows its weekly and monthly figure and what it was entered as', /\$60\.00 per week/.test(planCards()[2].textContent) && /\$260\.00 per month/.test(planCards()[2].textContent) && /Entered weekly: \$60\.00/.test(planCards()[2].textContent), planCards()[2].textContent);
+check('a monthly category shows its weekly figure too', /\$20\.77 per week/.test(planCards().find((c) => /Cleaning/.test(c.textContent)).textContent));
+check('the business flag shows and notes are kept', /Business/.test(planCards().find((c) => /Fuel/.test(c.textContent)).textContent) && /sample note/.test(planCards().find((c) => /Food/.test(c.textContent)).textContent));
+const weeklySum = 60 + (90 * 12) / 52 + 120 + 30, monthlySum = (60 * 52) / 12 + 90 + (120 * 52) / 12 + (30 * 52) / 12;
+check('the overall totals add every category in both views', $('plan-total-line').textContent === `Total: $${weeklySum.toFixed(2)} per week \u00b7 $${monthlySum.toFixed(2)} per month.`, $('plan-total-line').textContent);
+check('business and personal are totalled separately', /Business: \$120\.00 per week \u00b7 \$520\.00 per month\./.test($('plan-split-line').textContent), $('plan-split-line').textContent);
+check('the what-if line is empty while the switch is off', $('plan-scenario-line').textContent === '');
+$('plan-scenario-input').checked = true; $('plan-scenario-input').dispatchEvent(new Event('change'));
+const whatIfMonthly = monthlySum - (30 * 52) / 12 + (10 * 52) / 12;
+check('the What-if switch swaps in the what-if amounts and shows the difference', $('plan-total-line').textContent.includes(`$${whatIfMonthly.toFixed(2)} per month`) && /less than the plan/.test($('plan-scenario-line').textContent), $('plan-total-line').textContent + ' | ' + $('plan-scenario-line').textContent);
+check('the switch is remembered on this device under a budgetApp key', localStorage.getItem('budgetApp.planScenario.v1') === '1');
+$('plan-scenario-input').checked = false; $('plan-scenario-input').dispatchEvent(new Event('change'));
+check('switching back restores the plan totals', $('plan-total-line').textContent.includes(`$${monthlySum.toFixed(2)} per month`) && $('plan-scenario-line').textContent === '');
+planCards().find((c) => /Drinks/.test(c.textContent)).querySelector('.edit-btn').click();
+const drinksCard = () => planCards().find((c) => /Drinks/.test(c.textContent));
+drinksCard().querySelector('.plan-edit-amount').value = '45'; drinksCard().querySelector('.plan-edit-frequency').value = 'monthly'; drinksCard().querySelector('.plan-edit-type').value = 'business';
+drinksCard().querySelector('.recurring-income-edit-form').requestSubmit(); await sleep(30);
+const drinks = income.find((r) => r.planName === 'Drinks');
+check('editing changes the amount, frequency and business flag', drinks.amount === 45 && drinks.frequency === 'monthly' && drinks.business === true && drinks.altAmount === 10);
+check('the form itself stops a missing name or a zero amount', (addPlan('', '5', 'weekly', 'personal'), $('plan-name-input').validity.valueMissing) && (($('plan-name-input').value = 'X'), ($('plan-amount-input').value = '0'), $('plan-amount-input').validity.rangeUnderflow) && !income.some((r) => r.planName === 'X'));
+$('plan-name-input').value = ''; $('plan-amount-input').value = '';
+check('saving refuses bad fields with a sentence (a missing name, a zero amount, a huge one)', /category name/.test(savePlanCategory({ name: ' ', amountRaw: '5', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' })) && /at least \$0\.01/.test(savePlanCategory({ name: 'X', amountRaw: '0', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' })) && /at least \$0\.01/.test(savePlanCategory({ name: 'X', amountRaw: '1e12', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' })) && !income.some((r) => r.planName === 'X'));
+planCards().find((c) => /Food/.test(c.textContent)).querySelector('.delete-btn').click(); await sleep(30);
+check('Delete removes it, keeps a tombstone and offers Undo', planCards().length === 3 && income.find((r) => r.planName === 'Food').deleted === true && /Deleted Food/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo brings it back', planCards().length === 4);
+check('plan records pass the import check and bad ones do not', isValidImportRecord('income', income.find((r) => r.planName === 'Food')) === true && isValidImportRecord('income', { id: 'plan-z', planName: 'Z', amount: 5, frequency: 'daily' }) === false && isValidImportRecord('income', { id: 'plan-z', planName: 'Z', amount: 5, frequency: 'weekly', business: 'yes' }) === false);
+check('the + button is hidden on the Plan tab', $('add-bill-fab').hidden === true);
+check('every button and box on the Plan tab has a name for screen readers', [...$('tab-plan').querySelectorAll('button, input, select')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
+hideUndoToast(); income.length = 0; planScenarioOn = false; try { localStorage.removeItem('budgetApp.planScenario.v1'); } catch {} showTab('home'); renderBudget();

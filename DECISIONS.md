@@ -134,3 +134,13 @@ them all. The first entry of a day keeps the date as its id and later ones get a
 this change still reads only one entry per day: update every device. A source is otherwise only a label (chosen from the
 Recurring Income names and sources already used, or typed); changing an entry's source to one the day already has is
 refused, since that would be two entries from one source.
+
+## The Spending Plan lives in the income list, and the what-if is per category
+The server only knows bills, income and recurringIncome, so a plan category is a record in the `income` list
+(`{ id: 'plan-<id>', planName, amount, frequency, business, notes, altAmount }`), the same trick as projected income:
+it syncs, undoes and exports with no server change, and has no `dateKey`, so no income total sees it. Each category stores
+its amount in the frequency it was entered in and everything else is worked out from that (weekly x 52 / 12, monthly x
+12 / 52, never x 4), so there is one source of truth. A what-if amount is optional per category, in the same frequency;
+the What-if switch (kept on the device, not synced) swaps those in for every total. A copy of the app from before this
+change ignores plan records. The plan is estimates, not bills: it has no due dates and nothing in it affects the calendar,
+the Due figures or the net.
