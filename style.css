@@ -1130,11 +1130,12 @@ input[type="date"]::-webkit-date-and-time-value {
   box-shadow: 0 0 0 2px var(--accent) inset;
 }
 
-/* Month totals (bills, income, net) next to the month name. */
+/* Month totals (bills, income, net, left after plan) next to the month name. */
 
 .budget-month-total,
 .budget-month-income-total,
-.budget-month-net-total {
+.budget-month-net-total,
+.budget-month-left-total {
   margin: 0;
   color: var(--muted);
   font-size: 0.85rem;
@@ -1289,6 +1290,167 @@ input[type="date"]::-webkit-date-and-time-value {
 .budget-occurrence.skipped .budget-occurrence-name {
   color: var(--muted);
   text-decoration: line-through;
+}
+
+/* A small quiet outlined button (Edit amounts, Clear, Use ... as my plan). */
+
+.small-btn {
+  min-height: 36px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* Accent colour when hovered. */
+
+.small-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* The Edit amounts and Show hidden amounts buttons sit in a row above the Quick Add amounts. */
+
+.expense-quick-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* A category's spending that has used 80% or more of its plan turns rose; over the plan it turns the warning colour.
+   The line also says it in words, so colour is not the only sign. */
+
+.spend-near { color: var(--accent-rose); font-weight: 600; }
+
+/* Over the plan. */
+
+.spend-over { color: var(--accent-2); font-weight: 600; }
+
+/* The filter row above Recent Expenses: category, dates, search and Clear in one wrapping row. */
+
+.expense-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Filter boxes look like the form boxes. */
+
+.expense-filters select,
+.expense-filters input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* A filter date box sits beside its label, not stretched. */
+
+.expense-filters .date-field { flex: 0 1 150px; }
+
+/* A heading over one chart. */
+
+.chart-title {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+/* The by-category chart: one row per category (name, bar, amount). */
+
+.chart-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+/* One category row: the name takes a fixed share, the bar the rest, then the amount. */
+
+.chart-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 28%) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+/* The grey track a horizontal bar fills. */
+
+.chart-track {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+/* The filled part of a horizontal bar. */
+
+.chart-fill {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent);
+}
+
+/* A chart's amount text. */
+
+.chart-value { color: var(--text); font-size: 0.8rem; text-align: right; }
+
+/* A chart's name or date text. */
+
+.chart-label { color: var(--muted); overflow-wrap: anywhere; }
+
+/* The weekly chart: eight columns side by side. */
+
+.chart-columns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+
+/* One week: amount on top, the bar, then the week's first day under it. */
+
+.chart-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+/* The grey track a column fills from the bottom. */
+
+.chart-vtrack {
+  display: flex;
+  align-items: flex-end;
+  width: 70%;
+  height: 90px;
+  border-radius: 6px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+/* The filled part of a column. */
+
+.chart-vfill {
+  display: block;
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent);
 }
 
 /* One Quick Add row on the Expenses tab: the category name, then its recent amounts as buttons. */
@@ -2031,6 +2193,13 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .add-form-stacked button:not(.today-btn) {
     grid-column: 1 / -1;
     justify-self: start;
+  }
+
+  /* The Today button sits at the foot of the next column, only as wide as its text. */
+
+  .add-form-stacked .today-btn {
+    justify-self: start;
+    align-self: end;
   }
 
   /* A card's details run along a line (amount, date, tags) under its name, as on a phone, instead of one per line. */

@@ -178,3 +178,17 @@ older delete, a stale delete is ignored, a conflict never forks) apply only to t
 expenses (`expense-`) and the fallback unique ids merge like bills: a delete always wins, and a real conflict keeps both
 sides. The client does the matching thing on a server reset: a delete on the server that is newer than this device's last
 edit is taken, so a stale device cannot bring a deleted record back.
+
+## Backups are nudged weekly, and the app says what an import left it holding
+The backup reminder comes back every 7 days on every device (a syncing one too), because the sync server's data is temporary
+and a backup file is the only safe copy; on a phone that can share files, its button shares the backup in one tap. After an
+import the status says how many bills, income entries, plan categories and so on the app now holds, so a restore can be
+checked at a glance. The top-bar Sync note reads the last sync time back from storage ("Synced 3h ago", "Synced 4 days ago"),
+and its button is highlighted after 3 days without one.
+
+## Spending warnings, left-after-plan and "use this average"
+A category's line turns amber at 80% of its plan and red once it is over, and also says so in words ("90% used", "$20.00 over"),
+so colour is never the only sign. The Home month line "left after plan" is the month's net minus a month of planned spending.
+The Expenses tab's average per week (14 days of entries or more) can be made the plan amount in one tap (in the category's own
+weekly or monthly frequency) with an Undo. Quick Add amounts can be removed per device (they are only hidden, not deleted), and
+the form remembers the last expense category and the last income source typed.

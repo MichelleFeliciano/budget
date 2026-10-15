@@ -26,7 +26,7 @@ bills.length = 0; income.length = 0; recurringIncome.length = 0; renderBackupNot
 check('no backup reminder when there is nothing to back up', $('backup-notes').hidden);
 addBill({ name: 'Rent', amount: '900', dueDate: dk(3), frequency: 'monthly', category: '', autopay: false });
 backupNotesDismissed = false; renderBackupNotes();
-check('with data and no backup yet, it offers a full backup', /downloaded a full backup/.test(noteText()) && [...$('backup-notes').querySelectorAll('button')].some((x) => x.textContent === 'Download full backup'), noteText());
+check('with data and no backup yet, it offers a full backup', /saved a full backup/.test(noteText()) && [...$('backup-notes').querySelectorAll('button')].some((x) => x.textContent === (CAN_SHARE_FILES ? 'Share backup' : 'Download full backup')), noteText());
 localStorage.setItem('budgetApp.exportAt.v1', new Date().toISOString()); backupNotesDismissed = false; renderBackupNotes();
 check('a recent backup clears it', $('backup-notes').hidden);
 localStorage.setItem('budgetApp.exportAt.v1', new Date(Date.now() - 40 * 86400000).toISOString()); backupNotesDismissed = false; renderBackupNotes();

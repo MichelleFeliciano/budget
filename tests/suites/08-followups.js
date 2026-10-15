@@ -96,9 +96,9 @@ check('it appears once sync is set up', !$('quick-sync-btn').hidden && !$('quick
 // ---- the full-backup reminder leaves a syncing device alone until it has exported once ----
 addBill({ name: 'Backup bill', amount: '10', dueDate: dk(20), frequency: 'monthly', category: '', autopay: false });
 localStorage.removeItem(EXPORT_AT_KEY); backupNotesDismissed = false; renderBackupNotes();
-check('a device that syncs is not asked for a backup file it has never made', !/full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
+check('a device that syncs is asked for a backup file too, since the server forgets its data', /full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
 localStorage.removeItem('budgetApp.syncConfig.v1'); updateQuickSync(); renderBackupNotes();
-check('a device that does not sync still is', /full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
+check('a device that does not sync is asked as well', /full backup/.test($('backup-notes').textContent), $('backup-notes').textContent);
 localStorage.removeItem('budgetApp.lastSyncAt.v1');
 bills.length = 0; renderBudget();
 
@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the four Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 10 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the five Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 11 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -701,3 +701,65 @@ const editedLater = { ...livePlan, updatedAt: '2026-10-03T10:00:00.000Z' };
 const keepEdit = reconcileServerReply({ name: 'income', get: () => [editedLater] }, [tomb], { 'plan-z': JSON.stringify(editedLater) });
 check('a copy edited after the server delete is kept and sent again', keepEdit.result[0].deleted === false && !keepEdit.known['plan-z']);
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
+
+// ---- backup nudge, import summary, plan from average, budget warnings, left after plan, filters, quick edit, memory, charts, last synced ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('expenses'); renderBudget(); hideUndoToast();
+try { localStorage.removeItem('budgetApp.quickHidden.v1'); localStorage.removeItem('budgetApp.lastExpenseCategory.v1'); localStorage.removeItem('budgetApp.lastIncomeSource.v1'); } catch {}
+check('the backup reminder comes back after a week', (() => { addBill({ name: 'Nudge bill', amount: '5', dueDate: dk(20), frequency: 'monthly', category: '', autopay: false }); localStorage.setItem(EXPORT_AT_KEY, new Date(Date.now() - 8 * 86400000).toISOString()); backupNotesDismissed = false; renderBackupNotes(); return /in 8 days/.test($('backup-notes').textContent); })(), $('backup-notes').textContent);
+check('and a backup made 3 days ago keeps it quiet', (() => { localStorage.setItem(EXPORT_AT_KEY, new Date(Date.now() - 3 * 86400000).toISOString()); renderBackupNotes(); return $('backup-notes').hidden; })());
+bills.length = 0;
+check('describeContents says what the app holds, in words', (() => { addBill({ name: 'Cnt', amount: '5', dueDate: dk(1), frequency: 'monthly', category: '', autopay: false }); savePlanCategory({ name: 'CntPlan', amountRaw: '10', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' }); return describeContents() === 'You now have 1 bill and 1 plan category.'; })(), describeContents());
+check('an import ends by saying what the app now holds', (() => { importData({ collections: { bills: [], income: [], recurringIncome: [] } }); return /You now have 1 bill and 1 plan category\./.test($('data-io-status').textContent); })(), $('data-io-status').textContent);
+bills.length = 0; income.length = 0; renderBudget();
+check('spend status turns amber from 80% and shows how far over past the plan', spendStatus(50, 100).cls === '' && spendStatus(80, 100).cls === 'spend-near' && /80% used/.test(spendStatus(80, 100).note) && spendStatus(120, 100).cls === 'spend-over' && /\$20\.00 over/.test(spendStatus(120, 100).note) && spendStatus(5, null).cls === '');
+savePlanCategory({ name: 'Tank', amountRaw: '100', frequency: 'weekly', type: 'business', altRaw: '', notes: '' });
+savePlanCategory({ name: 'Snacks', amountRaw: '40', frequency: 'monthly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const tankId = income.find((r) => r.planName === 'Tank').id, snackId = income.find((r) => r.planName === 'Snacks').id;
+saveExpense({ dateKey: todayKey(), amountRaw: '90', planId: tankId, notes: 'fill up' });
+saveExpense({ dateKey: shiftDateKey(todayKey(), -20), amountRaw: '70', planId: tankId, notes: '' });
+renderBudget();
+const summary = () => [...document.querySelectorAll('#expense-summary-list li')];
+const tankRow = () => summary().find((li) => /^Tank/.test(li.textContent.trim()));
+check('a category near its plan is marked amber in words and colour', !!tankRow().querySelector('.spend-near') && /90% used/.test(tankRow().textContent), tankRow().textContent);
+check('a category with two weeks of entries offers its average as the plan', [...tankRow().querySelectorAll('button')].some((b) => /Use \$53\.33 per week as my plan/.test(b.textContent)), tankRow().textContent);
+[...tankRow().querySelectorAll('button')].find((b) => /as my plan/.test(b.textContent)).click(); await sleep(30);
+check('the button sets the plan amount in its own frequency and offers Undo', income.find((r) => r.id === tankId).amount === 53.33 && /Changed Tank to \$53\.33 per week/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo puts the old plan amount back', income.find((r) => r.id === tankId).amount === 100);
+showTab('home'); renderBudget();
+const leftEl = $('budget-month-left-total');
+check('Home shows what is left after the plan once there is a plan', leftEl.hidden === false && /left after plan/.test(leftEl.textContent) && /\$/.test(leftEl.textContent) && /Spending Plan sets aside/.test(leftEl.title), leftEl.textContent);
+showTab('expenses'); renderBudget();
+check('the list line says how many expenses and their total', $('expense-filter-total').textContent === '2 expenses, $160.00 in total.', $('expense-filter-total').textContent);
+$('expense-filter-search').value = 'fill'; $('expense-filter-search').dispatchEvent(new Event('input'));
+check('the note search narrows the list and the total', document.querySelectorAll('#expense-list li').length === 1 && /Showing 1 of 2 expenses, \$90\.00 in total\./.test($('expense-filter-total').textContent), $('expense-filter-total').textContent);
+$('expense-filter-clear').click();
+$('expense-filter-category').value = snackId; $('expense-filter-category').dispatchEvent(new Event('input'));
+check('the category filter shows only that category', document.querySelectorAll('#expense-list li').length === 0 && /Showing 0 of 2/.test($('expense-filter-total').textContent));
+$('expense-filter-clear').click();
+$('expense-filter-from').value = shiftDateKey(todayKey(), -5); $('expense-filter-from').dispatchEvent(new Event('input'));
+check('the from date hides older expenses', document.querySelectorAll('#expense-list li').length === 1);
+$('expense-filter-clear').click();
+check('Clear brings everything back', document.querySelectorAll('#expense-list li').length === 2 && $('expense-filter-from').value === '');
+const quickBtns = () => [...document.querySelectorAll('#expense-quick-list .expense-quick-btn')];
+check('Quick Add buttons carry an id so keyboard focus can return to them', quickBtns().length === 2 && quickBtns().every((b) => b.id.startsWith('quick-add-')), String(quickBtns().length));
+$('expense-quick-edit-btn').click();
+check('edit mode turns the buttons into removers', $('expense-quick-edit-btn').textContent === 'Done' && quickBtns().every((b) => /^✕/.test(b.textContent)));
+const countBefore = income.filter((r) => r.spentOn).length;
+quickBtns()[0].click();
+check('removing an amount only hides it and logs nothing', quickBtns().length === 1 && income.filter((r) => r.spentOn).length === countBefore && $('expense-quick-reset-btn').hidden === false);
+$('expense-quick-edit-btn').click(); $('expense-quick-reset-btn').click();
+check('Show hidden amounts brings it back', quickBtns().length === 2 && $('expense-quick-reset-btn').hidden === true && $('expense-quick-edit-btn').textContent === 'Edit amounts');
+$('expense-date-input').value = todayKey(); $('expense-amount-input').value = '12'; $('expense-category-input').value = snackId; $('expense-add-form').requestSubmit(); await sleep(30);
+check('the last expense category is remembered', loadLastChoice(LAST_EXPENSE_CATEGORY_KEY) === snackId && $('expense-category-input').value === snackId);
+showTab('income'); renderBudget();
+$('received-income-date-input').value = todayKey(); $('received-income-amount-input').value = '5'; $('received-income-source-input').value = 'Cash tips'; $('received-income-add-form').requestSubmit(); await sleep(30);
+check('the last income source is remembered', loadLastChoice(LAST_INCOME_SOURCE_KEY) === 'Cash tips');
+showTab('expenses'); renderBudget();
+check('the month chart has a bar and an amount per category, largest first', (() => { const rowsText = [...document.querySelectorAll('#expense-month-chart li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()); return rowsText.length === 2 && /^Tank/.test(rowsText[0]); })(), [...document.querySelectorAll('#expense-month-chart li')].map((li) => li.textContent).join('|'));
+check('the weekly chart has 8 columns and the last one holds this week', document.querySelectorAll('#expense-week-chart li').length === 8 && /\$/.test(document.querySelector('#expense-week-chart li:last-child').textContent), document.querySelector('#expense-week-chart li:last-child').textContent);
+check('chart bars are hidden from screen readers (the numbers say it in text)', [...document.querySelectorAll('.chart-track, .chart-vtrack')].every((el) => el.getAttribute('aria-hidden') === 'true'));
+check('formatAgo speaks in minutes, hours and days', formatAgo(new Date()) === 'just now' && formatAgo(new Date(Date.now() - 5 * 60000)) === '5m ago' && formatAgo(new Date(Date.now() - 3 * 3600000)) === '3h ago' && formatAgo(new Date(Date.now() - 2 * 86400000)) === '2 days ago' && formatAgo(new Date(Date.now() - 86400000)) === '1 day ago');
+check('the last sync time is read back from storage', (() => { localStorage.setItem(LAST_SYNC_AT_KEY, new Date(Date.now() - 4 * 86400000).toISOString()); return lastSyncTime() !== null && /^4 days ago$/.test(formatAgo(lastSyncTime())); })());
+hideUndoToast(); income.length = 0; bills.length = 0; localStorage.removeItem(LAST_SYNC_AT_KEY); showTab('home'); renderBudget();

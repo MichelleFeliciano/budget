@@ -129,6 +129,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="budget-month-total" id="budget-month-total"></p>
           <p class="budget-month-income-total" id="budget-month-income-total"></p>
           <p class="budget-month-net-total" id="budget-month-net-total"></p>
+          <p class="budget-month-left-total" id="budget-month-left-total" hidden></p>
         </div>
 
         <!-- Slide the three weeks shown earlier or later; Today brings them back (the totals above stay this month's). -->
@@ -266,6 +267,10 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <details class="fold" id="fold-expense-quick" open>
           <summary class="fold-summary"><h2>Quick Add</h2></summary>
           <p class="stats-line">One tap logs a repeat amount for today. Each category shows the last few different amounts you logged for it.</p>
+          <div class="expense-quick-tools">
+            <button type="button" class="small-btn" id="expense-quick-edit-btn">Edit amounts</button>
+            <button type="button" class="small-btn" id="expense-quick-reset-btn" hidden>Show hidden amounts</button>
+          </div>
           <div id="expense-quick-list"></div>
           <p class="empty-state" id="expense-quick-empty" hidden>Log an expense below once and its amounts show up here.</p>
         </details>
@@ -292,8 +297,29 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="empty-state" id="expense-summary-empty" hidden>Add categories on the Plan tab, then log expenses against them.</p>
         </details>
 
+        <details class="fold" id="fold-expense-charts" open>
+          <summary class="fold-summary"><h2>Charts</h2></summary>
+          <h3 class="chart-title">This month by category</h3>
+          <ul class="chart-rows" id="expense-month-chart"></ul>
+          <p class="empty-state" id="expense-month-chart-empty" hidden>Nothing spent this month yet.</p>
+          <h3 class="chart-title">Last 8 weeks</h3>
+          <ol class="chart-columns" id="expense-week-chart"></ol>
+        </details>
+
         <details class="fold" id="fold-expense-recent" open>
           <summary class="fold-summary"><h2>Recent Expenses</h2></summary>
+          <div class="expense-filters">
+            <select id="expense-filter-category" aria-label="Show category"></select>
+            <label class="date-field">From
+              <input type="date" id="expense-filter-from" aria-label="Show expenses from this date">
+            </label>
+            <label class="date-field">To
+              <input type="date" id="expense-filter-to" aria-label="Show expenses up to this date">
+            </label>
+            <input type="search" id="expense-filter-search" placeholder="Search notes" aria-label="Search expense notes">
+            <button type="button" class="small-btn" id="expense-filter-clear">Clear</button>
+          </div>
+          <p class="stats-line" id="expense-filter-total"></p>
           <ul class="card-list flat-list" id="expense-list"></ul>
           <p class="stats-line" id="expense-list-note" hidden></p>
           <p class="empty-state" id="expense-empty-state" hidden>No expenses logged yet.</p>
