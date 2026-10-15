@@ -165,3 +165,8 @@ Each plan category with expenses offers its last three different amounts as butt
 (with an Undo bar saying what was logged), so a purchase at the pump is two taps. The three date boxes for adding income,
 projected income and expenses have a Today button. Money is shown as $1,234.50 through one function (`formatMoney`, and
 `formatSignedCurrency` for amounts that can be negative) instead of formatting each figure by hand.
+
+## Wide screens get their own tidy layout
+Only above 900px: the content is centred beside the Menu, a week's totals run across in one row under its days (the stacked
+right-aligned column left most of the box empty), add forms use two columns, and a card's details run along a line under its
+name as they already do on a phone. Phone and tablet layouts are untouched.

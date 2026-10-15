@@ -1992,6 +1992,75 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
 /* People who ask their device for less motion get no flash on a new card and no turning arrow. */
 
+/* ===== Wide screens only: a tidier desktop layout. Phones and tablets keep the layouts above. ===== */
+
+@media (min-width: 901px) {
+  /* The content sits in the middle of the space beside the Menu instead of hugging its edge. */
+
+  .content { margin: 0 auto; }
+
+  /* A week's totals run across in one row under its days; the tall right-aligned stack left most of the box empty. */
+
+  .budget-week {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    column-gap: 12px;
+  }
+
+  /* The seven days take the whole width of the week box. */
+
+  .budget-week-cells { grid-column: 1 / -1; }
+
+  /* Each total reads from the left, under its own column. */
+
+  .budget-week-total,
+  .budget-week-income-total,
+  .budget-week-net-total,
+  .budget-week-due-total,
+  .budget-week-projected-total,
+  .budget-week-projected-net-total {
+    margin: 12px 0 0;
+    text-align: left;
+  }
+
+  /* Add forms use two columns instead of one long stack of full-width boxes. */
+
+  .add-form-stacked {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+    align-items: end;
+  }
+
+  /* Messages, tick boxes and the submit button take a whole row. */
+
+  .add-form-stacked .form-error,
+  .add-form-stacked .check-field,
+  .add-form-stacked button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  /* A card's details run along a line (amount, date, tags) under its name, as on a phone, instead of one per line. */
+
+  .bill-info,
+  .recurring-income-info {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+  }
+
+  /* The name keeps a line to itself. */
+
+  .bill-name,
+  .recurring-income-name { flex: 1 1 100%; }
+
+  /* The small notes and totals under a heading sit closer together. */
+
+  .stats-line { margin-bottom: 8px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* No flash on a just-added card. */
 
