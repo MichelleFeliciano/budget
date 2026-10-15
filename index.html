@@ -173,6 +173,22 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="empty-state" id="pay-period-empty-state" hidden>No bills due in this pay period.</p>
         </details>
 
+        <details class="fold" id="fold-projected-income" open>
+          <summary class="fold-summary"><h2>Projected Income</h2></summary>
+          <p class="stats-line">Money you expect to receive on a day, for today or later (you can also type it in a day on the calendar). It shows in that week's Projected lines until you enter real income for the day.</p>
+          <form id="projected-income-add-form" class="add-form add-form-stacked">
+            <label class="date-field">Date
+              <input type="date" id="projected-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the projected income">
+            </label>
+            <input type="number" inputmode="decimal" step="any" id="projected-income-amount-input" placeholder="Amount you expect" required aria-label="Projected amount">
+            <p class="form-error" id="projected-income-form-error" hidden></p>
+            <button type="submit">Add projected income</button>
+          </form>
+          <p class="stats-line" id="projected-income-summary"></p>
+          <ul class="card-list flat-list" id="projected-income-list"></ul>
+          <p class="empty-state" id="projected-income-empty-state" hidden>No projected income coming up.</p>
+        </details>
+
         <details class="fold" id="fold-recurring-income" open>
           <summary class="fold-summary"><h2>Recurring Income</h2></summary>
           <form id="recurring-income-add-form" class="add-form add-form-stacked">
@@ -350,6 +366,32 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </select>
       <input type="text" class="recurring-income-edit-category" placeholder="Category (optional)" aria-label="Edit income category">
       <p class="form-error recurring-income-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One projected-income day in the Projected Income list (renderProjectedIncomeList). It reuses the recurring income
+     card's classes, so it looks the same. -->
+<template id="projected-income-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount"></span>
+        <span class="recurring-income-start"></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn" aria-label="Delete projected income">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="number" inputmode="decimal" step="any" class="projected-income-edit-amount" placeholder="Amount you expect" required aria-label="Edit projected amount">
+      <p class="form-error projected-income-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>

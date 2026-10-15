@@ -97,7 +97,9 @@ in the existing `income` list, so it syncs, undoes and exports with no change to
 income by id). It deliberately has no `dateKey`, so every actual-income total ignores it and a copy of the app that
 has not updated yet ignores it too instead of counting it as money received. A week shows Projected (the typed
 projections for days that have no real income yet) and Projected net (income plus that, minus the week's bills);
-typing real income for a day replaces that day's projection, so nothing is counted twice.
+typing real income for a day replaces that day's projection, so nothing is counted twice. The Income tab's Projected
+Income section lists the days from today on (add, edit the amount, delete) and shows the total still expected; it reads
+and writes the same records as the day boxes, one projection per date.
 
 ## A payment is credited to the labelled, live copy of a bill
 When the same payment is on several copies of a bill (a sync conflict, an import), Paid History counts it once. It

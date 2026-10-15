@@ -2335,6 +2335,71 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
   document.getElementById('recurring-income-empty-state').hidden = nonDeletedRecurringIncome.length !== 0;
 }
 
+// Draws the Projected Income list on the Income tab: the projected days from today on, soonest first, each
+// with Edit (the amount) and Delete, plus a line with the total still expected. A day that already has real
+// income entered says so, because its projection no longer counts.
+function renderProjectedIncomeList() {
+  const list = document.getElementById('projected-income-list');
+  const template = document.getElementById('projected-income-card-template');
+  list.innerHTML = '';
+
+  const todayK = todayKey();
+  const upcoming = [...projectedByDate(income).values()]
+    .filter((record) => record.projectedFor >= todayK)
+    .sort((a, b) => (a.projectedFor < b.projectedFor ? -1 : a.projectedFor > b.projectedFor ? 1 : 0));
+  const receivedDates = new Set(uniqueIncomeByDate(income).filter((r) => !r.deleted).map((r) => r.dateKey));
+  let stillExpected = 0;
+
+  upcoming.forEach((record) => {
+    const dateKey = record.projectedFor;
+    const received = receivedDates.has(dateKey);
+    if (!received) stillExpected += record.projected;
+
+    const node = template.content.cloneNode(true);
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editAmount = node.querySelector('.projected-income-edit-amount');
+    const editError = node.querySelector('.projected-income-edit-error');
+
+    node.querySelector('.recurring-income-name').textContent =
+      `${formatDateKeyShort(dateKey)} \u00b7 ${whenLabel(daysUntilDateKey(dateKey))}`;
+    node.querySelector('.recurring-income-amount').textContent = formatSignedCurrency(record.projected);
+    node.querySelector('.recurring-income-start').textContent = received ? 'Real income entered: this no longer counts' : '';
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete projected income for ${formatDateKeyShort(dateKey)}`);
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit projected income for ${formatDateKeyShort(dateKey)}`);
+
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      editAmount.value = String(record.projected);
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      editAmount.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const value = Number(editAmount.value);
+      if (editAmount.value === '' || !Number.isFinite(value) || Math.abs(value) > MAX_MONEY) {
+        editError.textContent = 'Enter an amount up to $1,000,000,000.';
+        editError.hidden = false;
+        return;
+      }
+      setProjectedForDate(dateKey, editAmount.value);
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, ''));
+
+    list.appendChild(node);
+  });
+
+  document.getElementById('projected-income-summary').textContent = upcoming.length
+    ? `${formatSignedCurrency(stillExpected)} still expected across ${upcoming.length} day${upcoming.length === 1 ? '' : 's'}.`
+    : '';
+  document.getElementById('projected-income-empty-state').hidden = upcoming.length !== 0;
+}
+
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
 // (one of each can be open at once) and a focused day income box (any paid tick redraws all 21 days).
@@ -2386,6 +2451,7 @@ function renderBudget() {
   renderPaidHistory();
   renderBudgetList(nonDeleted, openEdit);
   renderRecurringIncomeList(nonDeletedRecurringIncome, openRecurringIncomeEdit);
+  renderProjectedIncomeList();
 
   renderBackupNotes();
   renderBillReminders(); // the due/overdue bills banner at the top
@@ -2576,6 +2642,35 @@ document.getElementById('recurring-income-add-form').addEventListener('submit', 
   categoryInput.value = '';
   nameInput.focus();
 });
+
+// Add-projected-income form: validate, save the projection for that date (replacing one already there), and
+// clear the amount when it worked.
+document.getElementById('projected-income-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const dateInput = document.getElementById('projected-income-date-input');
+  const amountInput = document.getElementById('projected-income-amount-input');
+  const errorEl = document.getElementById('projected-income-form-error');
+  const amount = Number(amountInput.value);
+
+  let error = '';
+  if (!dateInput.value) error = 'Pick a date.';
+  else if (!isReasonableDateKey(dateInput.value)) error = DATE_RANGE_MESSAGE;
+  else if (dateInput.value < todayKey()) error = 'Projected income is for today or a later day.';
+  else if (amountInput.value === '' || !Number.isFinite(amount) || Math.abs(amount) > MAX_MONEY) error = 'Enter an amount up to $1,000,000,000.';
+  if (error) {
+    errorEl.textContent = error;
+    errorEl.hidden = false;
+    return;
+  }
+
+  errorEl.hidden = true;
+  setProjectedForDate(dateInput.value, amountInput.value);
+  amountInput.value = '';
+  amountInput.focus();
+});
+
+// The projected-income date starts on today.
+document.getElementById('projected-income-date-input').value = todayKey();
 
 // ---- Backup reminders ----
 // The sync server's copy is temporary (the free plan forgets it whenever the server sleeps or redeploys), so
@@ -2941,6 +3036,7 @@ function undoToastMessage(collectionName, before, after) {
   if (!after) return null;
   const name = after.name || 'item';
   if (!before) return collectionName === 'income' ? null : `Added ${name}`;
+  if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
   if (collectionName !== 'income' && after.deleted && !before.deleted) return `Deleted ${name}`;
   if (collectionName === 'bills') {
     const paidBefore = (before.paidDates || []).length;
@@ -3923,7 +4019,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

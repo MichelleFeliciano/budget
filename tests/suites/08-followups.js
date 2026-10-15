@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 3 && payFold.open === true);
+check('Pay Period, Projected Income, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 4 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -417,3 +417,37 @@ bills.push({ ...copyOf, id: 'plain', category: '', deleted: false });
 paidHistoryMonth = { y: hy, m: hm }; renderBudget();
 check('the Uncategorized row says which bills are in it', /Utility/.test(document.querySelector('#paid-history-list .paid-history-detail').textContent), document.querySelector('#paid-history-list').textContent);
 bills.length = 0; paidHistoryMonth = (() => { const { y, m } = parseDateKey(todayKey()); return { y, m }; })(); renderBudget();
+
+// ---- the Projected Income section on the Income tab ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; showTab('income'); renderBudget(); hideUndoToast();
+check('the Income tab has a Projected Income section with a form and a list', $('tab-income').contains($('projected-income-add-form')) && $('tab-income').contains($('projected-income-list')) && !!$('fold-projected-income'));
+check('its date starts on today, and with nothing projected it says so', $('projected-income-date-input').value === todayKey() && $('projected-income-empty-state').hidden === false && $('projected-income-summary').textContent === '');
+const projectedCards = () => [...document.querySelectorAll('#projected-income-list .recurring-income-card')];
+$('projected-income-date-input').value = dk(2); $('projected-income-amount-input').value = '400';
+$('projected-income-add-form').requestSubmit(); await sleep(30);
+check('adding a projected amount saves it for that date and lists it', income.some((r) => r.id === `projected-${dk(2)}` && r.projected === 400 && !r.deleted) && projectedCards().length === 1 && /\$400\.00/.test(projectedCards()[0].textContent), projectedCards().map((c) => c.textContent.trim()).join('|'));
+check('the list says when it is, and the total still expected', /in 2 days/.test(projectedCards()[0].querySelector('.recurring-income-name').textContent) && /\$400\.00 still expected across 1 day\./.test($('projected-income-summary').textContent), $('projected-income-summary').textContent);
+check('the amount box clears and the empty message goes away', $('projected-income-amount-input').value === '' && $('projected-income-empty-state').hidden === true);
+check('the same projection shows in the calendar day box', document.querySelector(`.budget-day-projected-input[data-date-key="${dk(2)}"]`).value === '400');
+$('projected-income-date-input').value = dk(2); $('projected-income-amount-input').value = '450';
+$('projected-income-add-form').requestSubmit(); await sleep(30);
+check('adding the same date again replaces it (one projection per day)', projectedCards().length === 1 && /\$450\.00/.test(projectedCards()[0].textContent) && income.filter((r) => r.id === `projected-${dk(2)}`).length === 1);
+$('projected-income-date-input').value = dk(-1); $('projected-income-amount-input').value = '10';
+$('projected-income-add-form').requestSubmit();
+check('a past date is refused with a message', !$('projected-income-form-error').hidden && /today or a later day/.test($('projected-income-form-error').textContent) && !income.some((r) => r.projectedFor === dk(-1)));
+$('projected-income-date-input').value = dk(3); $('projected-income-amount-input').value = '';
+check('a missing amount is stopped by the form itself', $('projected-income-amount-input').validity.valueMissing === true);
+$('projected-income-date-input').value = todayKey();
+projectedCards()[0].querySelector('.edit-btn').click();
+projectedCards()[0].querySelector('.projected-income-edit-amount').value = '500';
+projectedCards()[0].querySelector('.recurring-income-edit-form').requestSubmit(); await sleep(30);
+check('Edit changes the amount', /\$500\.00/.test(projectedCards()[0].textContent) && income.find((r) => r.id === `projected-${dk(2)}`).projected === 500);
+setIncomeForDate(dk(2), '90'); await sleep(30);
+check('a day with real income entered says its projection no longer counts', /no longer counts/.test(projectedCards()[0].textContent) && /\$0\.00 still expected/.test($('projected-income-summary').textContent), $('projected-income-summary').textContent);
+setIncomeForDate(dk(2), ''); await sleep(30);
+projectedCards()[0].querySelector('.delete-btn').click(); await sleep(30);
+check('Delete removes it, keeps a tombstone and shows a toast with Undo', projectedCards().length === 0 && income.find((r) => r.id === `projected-${dk(2)}`).deleted === true && /Deleted projected income/.test($('undo-toast-text').textContent), $('undo-toast-text').textContent);
+$('undo-toast-btn').click(); await sleep(30);
+check('Undo brings it back', projectedCards().length === 1);
+check('every button and box in the section has a name for screen readers', [...$('fold-projected-income').querySelectorAll('button, input')].every((el) => el.textContent.trim() || el.getAttribute('aria-label') || el.closest('label')));
+hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
