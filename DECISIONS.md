@@ -127,8 +127,10 @@ The "download a full backup" reminder is only shown to a device that has never e
 syncing device's data also lives on its other devices), and again once an export is older than 30 days. The
 undo bar appears only after a delete or a Mark paid, never for adds, edits or typing a day's income.
 
-## Income source is only a label
-A day's real income and a day's projected income can each carry an optional `source` text (chosen from the Recurring
-Income names and sources already used, or typed). It is stored on the same record, so it syncs and exports with no server
-change, and no total reads it. A day's source box is disabled until the day has an amount, because the source lives on
-that record.
+## A day can hold several income entries, one per source
+A day's real income and its projected income each hold one entry per source (case does not matter; no source counts as
+its own). Typing an amount with the same source updates that entry, a different source adds another, and every total adds
+them all. The first entry of a day keeps the date as its id and later ones get a fresh id, so a copy of the app from before
+this change still reads only one entry per day: update every device. A source is otherwise only a label (chosen from the
+Recurring Income names and sources already used, or typed); changing an entry's source to one the day already has is
+refused, since that would be two entries from one source.

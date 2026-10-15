@@ -1321,6 +1321,20 @@ input[type="date"]::-webkit-date-and-time-value {
   text-align: right;
 }
 
+/* One income or projected entry on a day: its Source box beside its Amount box. */
+
+.budget-day-entry {
+  display: flex;
+  gap: 4px;
+}
+
+/* The two boxes share the row. */
+
+.budget-day-entry > input {
+  flex: 1 1 0;
+  width: auto;
+}
+
 /* A source is a word, not a number, so it reads from the left. */
 
 .budget-day-source-input { text-align: left; }

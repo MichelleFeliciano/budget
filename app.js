@@ -627,15 +627,28 @@ const INCOME_KEY = 'budgetApp.income.v1';
 // Every per-day income record, loaded and upgraded at startup.
 let income = migrateSyncFields(loadCollection(INCOME_KEY), INCOME_KEY, getDeviceId());
 
-// Sets (or clears, when the value is '') the manual income number for one calendar day.
-function setIncomeForDate(dateKey, rawValue) {
-  const existing = income.find((r) => r.id === dateKey);
+// The key that makes an entry unique: its day plus its source (case does not matter), so a day holds one income
+// entry per source and a second source makes a second entry.
+function entryKey(dateKey, source) {
+  return `${dateKey}|${cleanSource(source).toLowerCase()}`;
+}
+
+// The day a real or projected income record belongs to.
+function recordDay(record) {
+  return record.dateKey || record.projectedFor;
+}
+
+// Sets (or clears, when the value is '') the manual income number for one calendar day and source ('' or
+// nothing = no source). The same day and source updates its entry; a different source makes another entry.
+function setIncomeForDate(dateKey, rawValue, source) {
+  const key = entryKey(dateKey, source);
+  const matches = income.filter((r) => r.dateKey === dateKey && entryKey(r.dateKey, r.source) === key);
 
   if (rawValue === '') {
-    // Clear every live record for the date (a restore or conflict can leave a second one with a
+    // Clear every live entry for that day and source (a restore or conflict can leave a second copy with a
     // different id), otherwise the old value would come back.
-    income.filter((r) => r.dateKey === dateKey && !r.deleted).forEach((r) => deleteIncome(r.id));
-    return; // already blank/absent — no-op, nothing to record
+    matches.filter((r) => !r.deleted).forEach((r) => deleteIncome(r.id));
+    return; // already blank/absent: nothing to record
   }
 
   const parsed = Number(rawValue);
@@ -645,24 +658,28 @@ function setIncomeForDate(dateKey, rawValue) {
   }
   const amount = Math.round(parsed * 100) / 100; // whole cents, like bills
 
+  // The newest copy for this day and source is the entry (a cleared one is brought back).
+  const existing = matches.reduce((best, r) => (!best || (r.updatedAt || '') > (best.updatedAt || '') ? r : best), null);
   if (existing) {
     const before = structuredClone(existing);
     existing.amount = amount;
-    existing.deleted = false; // re-entering a value on a previously-cleared date un-tombstones
-                               // the same record rather than creating a second one for that id
+    existing.deleted = false; // re-entering a value on a previously-cleared entry un-tombstones
+                               // the same record rather than creating a second one
     stampSync(existing);
     saveCollection(INCOME_KEY, income);
-    recordUndo('income', dateKey, before, structuredClone(existing));
+    recordUndo('income', existing.id, before, structuredClone(existing));
   } else {
     const now = new Date().toISOString();
+    // The first entry of a day keeps the date as its id; later ones (another source) get a fresh id.
     const record = {
-      id: dateKey, dateKey, amount,
+      id: income.some((r) => r.id === dateKey) ? makeId() : dateKey, dateKey, amount,
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
+    if (cleanSource(source)) record.source = cleanSource(source);
     income.push(record);
     saveCollection(INCOME_KEY, income);
-    recordUndo('income', dateKey, null, structuredClone(record));
+    recordUndo('income', record.id, null, structuredClone(record));
   }
 
   // Deferred, not called synchronously: this fires from the income input's
@@ -705,14 +722,15 @@ function restoreIncome(id) {
   renderBudget();
 }
 
-// Income is one entry per date. If two live entries for one date ever exist (from an old conflict or
-// restore), only the most recently edited one is used, so nothing is counted twice.
-function uniqueIncomeByDate(records) {
+// Income is one entry per day and source. If two copies of the same day and source ever exist (from an old
+// conflict or restore), only the most recently edited one is used, so nothing is counted twice.
+function uniqueIncomeEntries(records) {
   const latest = new Map();
   records.forEach((r) => {
     if (!r.dateKey) return; // a projected-income record (see projectedByDate) is not money received
-    const current = latest.get(r.dateKey);
-    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(r.dateKey, r);
+    const key = entryKey(r.dateKey, r.source);
+    const current = latest.get(key);
+    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(key, r);
   });
   return [...latest.values()];
 }
@@ -723,21 +741,28 @@ function uniqueIncomeByDate(records) {
 // It has no `dateKey`, so every actual-income total ignores it, and an older copy of the app that has not
 // updated yet ignores it too instead of counting it as money received.
 
-// The newest projected record for each date, as a Map of date key -> record (cleared ones are left out).
+// The live projected records for each date, as a Map of date key -> list of records (one per source, newest copy
+// wins; cleared ones are left out), in a steady order: no source first, then by source name.
 function projectedByDate(records) {
   const latest = new Map();
   records.forEach((r) => {
     if (!r.projectedFor) return;
-    const current = latest.get(r.projectedFor);
-    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(r.projectedFor, r);
+    const key = entryKey(r.projectedFor, r.source);
+    const current = latest.get(key);
+    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) latest.set(key, r);
   });
-  [...latest.entries()].forEach(([dateKey, record]) => { if (record.deleted) latest.delete(dateKey); });
-  return latest;
+  const byDate = new Map();
+  [...latest.values()].filter((r) => !r.deleted).forEach((r) => {
+    if (!byDate.has(r.projectedFor)) byDate.set(r.projectedFor, []);
+    byDate.get(r.projectedFor).push(r);
+  });
+  byDate.forEach((list) => list.sort((a, b) => (a.source || '').localeCompare(b.source || '')));
+  return byDate;
 }
 
 // ---- Income source (where a day's income, real or projected, comes from) ----
 // An optional text on an income or projected record, chosen from the Recurring Income names and earlier
-// sources or typed fresh. It is only a label: no total reads it.
+// sources or typed fresh. It only labels the entry and tells entries on one day apart: no total reads it.
 
 // Longest source name kept.
 const MAX_SOURCE_LENGTH = 60;
@@ -767,27 +792,33 @@ function renderIncomeSourceOptions() {
   });
 }
 
-// Sets (or clears, when the text is empty) the source on an existing income or projected record. Does nothing
-// for a missing or cleared record, or when the source is unchanged.
+// Changes the source on an existing income or projected record (empty text clears it). Refused, returning false,
+// when the same day already has a live entry of the same kind from that source; true otherwise.
 function setIncomeSource(id, text) {
   const record = income.find((r) => r.id === id);
   const source = cleanSource(text);
-  if (!record || record.deleted || (record.source || '') === source) return;
+  if (!record || record.deleted) return true;
+  if ((record.source || '') === source) return true;
+  const key = entryKey(recordDay(record), source);
+  const taken = income.some((r) => r !== record && !r.deleted && !r.projectedFor === !record.projectedFor
+    && entryKey(recordDay(r), r.source) === key);
+  if (taken) return false;
   const before = structuredClone(record);
   if (source) record.source = source; else delete record.source;
   stampSync(record);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', id, before, structuredClone(record));
   setTimeout(renderBudget, 0); // deferred like setIncomeForDate: this runs from a `change` event
+  return true;
 }
 
-// Sets (or clears, when the value is '') the projected income number for one calendar day. The source is
-// left as it was unless one is passed (an empty string clears it).
+// Sets (or clears, when the value is '') the projected income number for one calendar day and source ('' or
+// nothing = no source). The same day and source updates its entry; a different source makes another entry.
 function setProjectedForDate(dateKey, rawValue, source) {
-  const id = `projected-${dateKey}`;
-  const existing = income.find((r) => r.id === id);
+  const key = entryKey(dateKey, source);
+  const matches = income.filter((r) => r.projectedFor === dateKey && entryKey(r.projectedFor, r.source) === key);
   if (rawValue === '') {
-    if (existing && !existing.deleted) deleteIncome(id); // keeps a tombstone, like clearing actual income
+    matches.filter((r) => !r.deleted).forEach((r) => deleteIncome(r.id)); // keeps a tombstone, like clearing actual income
     return;
   }
   const parsed = Number(rawValue);
@@ -796,27 +827,27 @@ function setProjectedForDate(dateKey, rawValue, source) {
     return;
   }
   const amount = Math.round(parsed * 100) / 100; // whole cents, like bills
+  const existing = matches.reduce((best, r) => (!best || (r.updatedAt || '') > (best.updatedAt || '') ? r : best), null);
   if (existing) {
     const before = structuredClone(existing);
     existing.projected = amount;
     existing.deleted = false;
-    if (source !== undefined) { // a re-added day without a source keeps no stale one
-      if (cleanSource(source)) existing.source = cleanSource(source); else delete existing.source;
-    }
     stampSync(existing);
     saveCollection(INCOME_KEY, income);
-    recordUndo('income', id, before, structuredClone(existing));
+    recordUndo('income', existing.id, before, structuredClone(existing));
   } else {
     const now = new Date().toISOString();
+    const primaryId = `projected-${dateKey}`; // the first entry of a day; later ones (another source) get a fresh id
     const record = {
-      id, projectedFor: dateKey, projected: amount,
+      id: income.some((r) => r.id === primaryId) ? `${primaryId}-${makeId()}` : primaryId,
+      projectedFor: dateKey, projected: amount,
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
     if (cleanSource(source)) record.source = cleanSource(source);
     income.push(record);
     saveCollection(INCOME_KEY, income);
-    recordUndo('income', id, null, structuredClone(record));
+    recordUndo('income', record.id, null, structuredClone(record));
   }
   // Deferred for the same reason as setIncomeForDate: this runs from a `change` event that a Tab key triggers.
   setTimeout(renderBudget, 0);
@@ -1574,7 +1605,7 @@ function renderPayPeriod() {
   const periodIncome = totalIncomeInRange(
     periodStart,
     shiftDateKey(periodEnd, -1),
-    uniqueIncomeByDate(income).filter((r) => !r.deleted),
+    uniqueIncomeEntries(income).filter((r) => !r.deleted),
     recurringIncome.filter((r) => !r.deleted)
   );
   const periodNet = periodIncome - grandTotal;
@@ -1959,71 +1990,88 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
         bodyEl.insertBefore(peekEl, occurrencesEl);
       }
 
-      // Day footer: the boxes for typing income received and income expected for this day.
+      // Day footer: the rows for typing income received and income expected for this day. A row is one source
+      // (Source box, then Amount). The last, empty row adds an entry: the same source updates its row, a
+      // different source makes another one.
       const footerEl = document.createElement('div');
       footerEl.className = 'budget-day-footer';
-      const manualInput = document.createElement('input');
-      manualInput.type = 'number';
-      manualInput.step = 'any';
-      manualInput.className = 'budget-day-manual-input';
-      manualInput.dataset.dateKey = dateKey;
-      manualInput.setAttribute('aria-label', `Income for ${MONTH_NAMES[m]} ${d}`);
-      const incomeRecord = nonDeletedIncome.find((r) => r.dateKey === dateKey);
-      manualInput.value = incomeRecord ? String(incomeRecord.amount) : '';
-      manualInput.addEventListener('change', (e) => {
-        // A half-typed number ("1e", "-") reads as empty: put the saved amount back rather than clearing the day.
-        if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
-        setIncomeForDate(dateKey, e.target.value);
-      });
-      // The Projected box: what you expect to receive this day (see setProjectedForDate).
-      const projectedRecord = projectedMap.get(dateKey);
-      const projectedInput = document.createElement('input');
-      projectedInput.type = 'number';
-      projectedInput.step = 'any';
-      projectedInput.className = 'budget-day-projected-input';
-      projectedInput.dataset.dateKey = dateKey;
-      projectedInput.setAttribute('aria-label', `Projected income for ${MONTH_NAMES[m]} ${d}`);
-      projectedInput.value = projectedRecord ? String(projectedRecord.projected) : '';
-      projectedInput.addEventListener('change', (e) => {
-        if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
-        setProjectedForDate(dateKey, e.target.value);
-      });
+      const dayIncome = nonDeletedIncome.filter((r) => r.dateKey === dateKey)
+        .sort((a, b) => (a.source || '').localeCompare(b.source || ''));
+      const dayProjected = projectedMap.get(dateKey) || [];
+      const dayIncomeTotal = dayIncome.reduce((sum, r) => sum + r.amount, 0);
+      const dayProjectedTotal = dayProjected.reduce((sum, r) => sum + r.projected, 0);
+      const dayLabel = `${MONTH_NAMES[m]} ${d}`;
+      const entryRows = (kind, records, labelText) => {
+        const section = document.createElement('div');
+        section.className = 'budget-day-field';
+        const heading = document.createElement('span');
+        heading.className = 'budget-day-field-label';
+        heading.textContent = labelText;
+        section.appendChild(heading);
+        [...records, null].forEach((record) => {
+          const rowKey = `${kind}-${record ? record.id : 'new'}`;
+          const row = document.createElement('div');
+          row.className = 'budget-day-entry';
+
+          const sourceBox = document.createElement('input');
+          sourceBox.type = 'text';
+          sourceBox.className = 'budget-day-source-input';
+          sourceBox.maxLength = MAX_SOURCE_LENGTH;
+          sourceBox.placeholder = 'Source';
+          sourceBox.autocomplete = 'off';
+          sourceBox.setAttribute('list', 'income-source-options');
+          sourceBox.dataset.focusKey = `${rowKey}-source`;
+          sourceBox.setAttribute('aria-label', `${labelText} source for ${dayLabel}${record ? '' : ' (new entry)'}`);
+          sourceBox.value = record && record.source ? record.source : '';
+          if (record) {
+            // Changing a row's source; refused (and put back) if the day already has that source.
+            sourceBox.addEventListener('change', (e) => {
+              if (!setIncomeSource(record.id, e.target.value)) setTimeout(renderBudget, 0);
+            });
+          }
+
+          const amountBox = document.createElement('input');
+          amountBox.type = 'number';
+          amountBox.step = 'any';
+          amountBox.className = kind === 'income' ? 'budget-day-manual-input' : 'budget-day-projected-input';
+          amountBox.dataset.dateKey = dateKey;
+          amountBox.dataset.focusKey = `${rowKey}-amount`;
+          amountBox.placeholder = 'Amount';
+          amountBox.setAttribute('aria-label',
+            `${labelText} amount for ${dayLabel}${record && record.source ? ` from ${record.source}` : ''}${record ? '' : ' (new entry)'}`);
+          amountBox.value = record ? String(kind === 'income' ? record.amount : record.projected) : '';
+          amountBox.addEventListener('change', (e) => {
+            // A half-typed number ("1e", "-") reads as empty: put the saved amount back rather than clearing the day.
+            if (e.target.value === '' && e.target.validity && e.target.validity.badInput) { setTimeout(renderBudget, 0); return; }
+            const source = record ? record.source : sourceBox.value;
+            if (kind === 'income') setIncomeForDate(dateKey, e.target.value, source);
+            else setProjectedForDate(dateKey, e.target.value, source);
+          });
+
+          row.append(sourceBox, amountBox);
+          section.appendChild(row);
+        });
+        return section;
+      };
       // Sign-aware, not flat "always green" — a negative manually-entered
       // income amount (income's amount is unconstrained) must not be shown
       // with a color that implies "good news." Never
       // --accent-2, reserved for error/overdue/destructive semantics. This
-      // reflects only the manual `income` entry's sign — it is NOT a summary
+      // reflects only the day's manual `income` entries — it is NOT a summary
       // of the day's combined manual + recurring total.
-      if (incomeRecord) {
+      if (dayIncome.length) {
         const dotSpan = document.createElement('span');
-        dotSpan.className = `budget-income-dot ${signedAmountClass(incomeRecord.amount)}`;
+        dotSpan.className = `budget-income-dot ${signedAmountClass(dayIncomeTotal)}`;
         footerEl.appendChild(dotSpan);
       }
       // A hollow dot marks a projection (the closed compact day shows only the dots).
-      if (projectedRecord) {
+      if (dayProjected.length) {
         const projectedDot = document.createElement('span');
         projectedDot.className = 'budget-projected-dot';
         footerEl.appendChild(projectedDot);
       }
-      // Source boxes: where the income came from / is expected from. They need an amount first, since the
-      // source is stored on that record.
-      const sourceInput = (record, recordId, label) => {
-        const box = document.createElement('input');
-        box.type = 'text';
-        box.className = 'budget-day-source-input';
-        box.maxLength = MAX_SOURCE_LENGTH;
-        box.placeholder = record ? 'Source' : 'Enter an amount first';
-        box.disabled = !record;
-        box.setAttribute('list', 'income-source-options');
-        box.setAttribute('aria-label', `${label} for ${MONTH_NAMES[m]} ${d}`);
-        box.value = record && record.source ? record.source : '';
-        box.addEventListener('change', (e) => setIncomeSource(recordId, e.target.value));
-        return box;
-      };
-      footerEl.appendChild(dayField('Income', manualInput));
-      footerEl.appendChild(dayField('Income from', sourceInput(incomeRecord, dateKey, 'Income source')));
-      footerEl.appendChild(dayField('Projected', projectedInput));
-      footerEl.appendChild(dayField('Projected from', sourceInput(projectedRecord, `projected-${dateKey}`, 'Projected income source')));
+      footerEl.appendChild(entryRows('income', dayIncome, 'Income'));
+      footerEl.appendChild(entryRows('projected', dayProjected, 'Projected'));
       bodyEl.appendChild(footerEl);
 
       // In the day sheet: start a bill on this day (the Add bill form gets the date).
@@ -2034,8 +2082,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       addOnDayBtn.addEventListener('click', (e) => { e.stopPropagation(); startBillOnDate(dateKey); });
       bodyEl.appendChild(addOnDayBtn);
 
-      if (incomeRecord) daySummary.push(`income entered $${Number(incomeRecord.amount).toFixed(2)}`);
-      if (projectedRecord) daySummary.push(`projected income $${Number(projectedRecord.projected).toFixed(2)}`);
+      if (dayIncome.length) daySummary.push(`income entered $${dayIncomeTotal.toFixed(2)}`);
+      if (dayProjected.length) daySummary.push(`projected income $${dayProjectedTotal.toFixed(2)}`);
       openBtn.setAttribute('aria-label',
         `${MONTH_NAMES[m]} ${d}${dateKey === todayK ? ', today' : ''}: ` +
         `${daySummary.length ? daySummary.join(', ') : 'nothing scheduled'}. Open day.`);
@@ -2081,7 +2129,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     // real income is entered for that day, so typing the real figure replaces the guess instead of adding to it.
     if (weekDays.some((dateKey) => projectedMap.has(dateKey))) {
       const weekProjected = weekDays.reduce((sum, dateKey) => (
-        projectedMap.has(dateKey) && !incomeDates.has(dateKey) ? sum + projectedMap.get(dateKey).projected : sum
+        projectedMap.has(dateKey) && !incomeDates.has(dateKey)
+          ? sum + projectedMap.get(dateKey).reduce((daySum, r) => daySum + r.projected, 0) : sum
       ), 0);
       const projectedEl = document.createElement('p');
       projectedEl.className = 'budget-week-projected-total';
@@ -2102,11 +2151,10 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
 
   // If an income box was being typed in when the redraw started, put its text and focus back.
   if (focusedManualInput) {
-    const restored = calendarEl.querySelector(
-      `.${focusedManualInput.className}[data-date-key="${focusedManualInput.dateKey}"]`
-    );
+    const restored = calendarEl.querySelector(`[data-focus-key="${focusedManualInput.focusKey}"]`);
     if (restored) {
-      restored.value = focusedManualInput.value;
+      // An empty new-entry row stays empty: a number just saved has become its own row.
+      if (!/-new-amount$/.test(focusedManualInput.focusKey)) restored.value = focusedManualInput.value;
       restored.focus();
     }
   }
@@ -2412,10 +2460,11 @@ function renderProjectedIncomeList() {
   list.innerHTML = '';
 
   const todayK = todayKey();
-  const upcoming = [...projectedByDate(income).values()]
+  const upcoming = [...projectedByDate(income).values()].flat()
     .filter((record) => record.projectedFor >= todayK)
-    .sort((a, b) => (a.projectedFor < b.projectedFor ? -1 : a.projectedFor > b.projectedFor ? 1 : 0));
-  const receivedDates = new Set(uniqueIncomeByDate(income).filter((r) => !r.deleted).map((r) => r.dateKey));
+    .sort((a, b) => (a.projectedFor < b.projectedFor ? -1 : a.projectedFor > b.projectedFor ? 1 : 0)
+      || (a.source || '').localeCompare(b.source || ''));
+  const receivedDates = new Set(uniqueIncomeEntries(income).filter((r) => !r.deleted).map((r) => r.dateKey));
   let stillExpected = 0;
 
   upcoming.forEach((record) => {
@@ -2458,15 +2507,22 @@ function renderProjectedIncomeList() {
         editError.hidden = false;
         return;
       }
+      // A new source on the entry first (refused if that day already has one from it), then the amount.
+      if (!setIncomeSource(record.id, editSource.value)) {
+        editError.textContent = 'That day already has a projected entry from that source.';
+        editError.hidden = false;
+        return;
+      }
       setProjectedForDate(dateKey, editAmount.value, editSource.value);
     });
-    node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, ''));
+    node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, '', record.source));
 
     list.appendChild(node);
   });
 
+  const upcomingDays = new Set(upcoming.map((record) => record.projectedFor)).size;
   document.getElementById('projected-income-summary').textContent = upcoming.length
-    ? `${formatSignedCurrency(stillExpected)} still expected across ${upcoming.length} day${upcoming.length === 1 ? '' : 's'}.`
+    ? `${formatSignedCurrency(stillExpected)} still expected across ${upcomingDays} day${upcomingDays === 1 ? '' : 's'}.`
     : '';
   document.getElementById('projected-income-empty-state').hidden = upcoming.length !== 0;
 }
@@ -2477,14 +2533,12 @@ function renderProjectedIncomeList() {
 function renderBudget() {
   const nonDeleted = bills.filter((b) => !b.deleted);
   // One record per date first (the newest wins, even if it is a cleared one), then drop cleared ones.
-  const nonDeletedIncome = uniqueIncomeByDate(income).filter((r) => !r.deleted);
+  const nonDeletedIncome = uniqueIncomeEntries(income).filter((r) => !r.deleted);
   const nonDeletedRecurringIncome = recurringIncome.filter((r) => !r.deleted);
 
   const activeEl = document.activeElement;
-  const dayBoxClass = ['budget-day-manual-input', 'budget-day-projected-input']
-    .find((name) => activeEl && activeEl.classList && activeEl.classList.contains(name));
-  const focusedManualInput = dayBoxClass
-    ? { className: dayBoxClass, dateKey: activeEl.dataset.dateKey, value: activeEl.value }
+  const focusedManualInput = activeEl && activeEl.dataset && activeEl.dataset.focusKey && activeEl.closest('.budget-day-footer')
+    ? { focusKey: activeEl.dataset.focusKey, value: activeEl.value }
     : null;
 
   const list = document.getElementById('budget-list');
@@ -4092,7 +4146,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

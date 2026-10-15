@@ -80,8 +80,8 @@ check('closing the day sheet is safe when none is open', (() => { closeCalendarD
 income.length = 0;
 const incomeRec = (id, dateKey, amount, updatedAt) => ({ ...base, id, dateKey, amount, updatedAt });
 income.push(incomeRec(dk(0), dk(0), 100, '2026-10-01T10:00:00.000Z'), incomeRec('stray-copy', dk(0), 100, '2026-10-02T10:00:00.000Z'));
-check('two entries for one date are counted once', incomeSumInRange(dk(0), dk(0), uniqueIncomeByDate(income)) === 100, incomeSumInRange(dk(0), dk(0), uniqueIncomeByDate(income)));
-check('the most recently edited entry is the one used', uniqueIncomeByDate(income).find((r) => r.dateKey === dk(0)).id === 'stray-copy');
+check('two entries for one date are counted once', incomeSumInRange(dk(0), dk(0), uniqueIncomeEntries(income)) === 100, incomeSumInRange(dk(0), dk(0), uniqueIncomeEntries(income)));
+check('the most recently edited entry is the one used', uniqueIncomeEntries(income).find((r) => r.dateKey === dk(0)).id === 'stray-copy');
 renderBudget();
 check('the month total uses one entry per date', /\$100\.00/.test($('budget-month-income-total').textContent), $('budget-month-income-total').textContent);
 income.length = 0;

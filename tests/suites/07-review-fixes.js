@@ -55,7 +55,7 @@ check('a past-due autopay bill is not listed as overdue, a manual one still is',
 income.length = 0;
 const inc = (id, dateKey, amount, updatedAt, deleted) => ({ id, dateKey, amount, dateAdded: old, updatedAt, deviceId: 'x', deleted: !!deleted, version: 1 });
 income.push(inc('2026-10-01', '2026-10-01', 50, '2026-10-01T10:00:00.000Z', false), inc('copy-1', '2026-10-01', 70, '2026-10-03T10:00:00.000Z', true));
-check('a newer cleared record hides an older live duplicate for the date', uniqueIncomeByDate(income).filter((r) => !r.deleted).length === 0);
+check('a newer cleared record hides an older live duplicate for the date', uniqueIncomeEntries(income).filter((r) => !r.deleted).length === 0);
 income.length = 0;
 income.push(inc('2026-10-02', '2026-10-02', 20, old, false), inc('clone-2', '2026-10-02', 25, '2026-10-03T00:00:00.000Z', false));
 setIncomeForDate('2026-10-02', '');
