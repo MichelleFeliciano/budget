@@ -91,7 +91,6 @@ check('restoring a conflicting income entry replaces it, never adds a second', i
 importData({ collections: { income: [{ ...incomeRec(dk(0), dk(0), 999, '2026-10-01T10:00:00.000Z'), version: 3 }] } });
 check('an older conflicting income entry in a backup is ignored', income.length === 1 && income[0].amount === 250);
 
-// ---- the day boxes are explained as extra income ----
 
 // ---- the bills banner (inside the Budget; autopay bills are never overdue) ----
 bills.length = 0; income.length = 0; recurringIncome.length = 0;

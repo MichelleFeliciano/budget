@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Budget sync server.
 
-Serves a single API endpoint, POST /api/sync, over plain HTTP. Intended to
+Serves POST /api/sync and POST /api/backup over plain HTTP. Intended to
 run on Render's free plan, which has no persistent disk: the data file lives in a
 temporary folder and is lost whenever the service sleeps (after about 15 minutes
 idle) or redeploys. That is acceptable because every device keeps its own full copy
@@ -23,7 +23,12 @@ this server does not serve them. Stdlib only — no pip installs.
 #   - Tombstones (deleted: true) win over stale live copies, so deletes stick.
 #   - If two live copies conflict, the client's copy is saved as a new record
 #     (a fork) so nothing is silently lost.
-#   - Income is the exception: one entry per date, and the newest edit wins.
+#   - Income records whose id is a date (`YYYY-MM-DD`, with an optional `#source`, optionally prefixed
+#     `projected-`) are the exception: one entry per day and source, and the newest edit wins, even over a
+#     delete. Every other income-list record (plan categories, expenses, expected costs, savings goals and
+#     deposits) merges like a bill.
+#   - A delete that is older than the stored edit is ignored; the same device editing a record again is an
+#     update, not a fork; a live copy at the same version as a tombstone is an undo.
 #   - Resending identical content is a no-op and does not bump the version.
 #
 # Backups: the first save each UTC day keeps a copy of the data as it was before
@@ -39,6 +44,7 @@ this server does not serve them. Stdlib only — no pip installs.
 
 import hmac
 import json
+import math
 import os
 import re
 import shutil
@@ -51,6 +57,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+# The port to listen on (Render sets PORT), and where the data file lives (a temporary folder by default).
 PORT = int(os.environ.get("PORT", "8443"))
 DATA_DIR = Path(os.environ.get("DATA_DIR") or Path(tempfile.gettempdir()) / "budget-data")
 DATA_PATH = DATA_DIR / "sync_data.json"
@@ -77,6 +84,7 @@ ALLOWED_SYNC_ORIGINS = {
     if origin.strip()
 }
 
+# Held around every load, merge and save, so two requests never change the data file at once.
 data_lock = threading.Lock()
 
 
@@ -123,8 +131,8 @@ def load_dataset():
         else:
             # Only real records are kept (a stray number or null in a list must not crash the merge).
             data[name] = [item for item in data[name] if isinstance(item, dict)]
-    # Lists the app no longer has (coursework and appointments were removed) are dropped, so the
-    # next save no longer carries them. Older daily restore points keep them
+    # Any list that is not in COLLECTION_NAMES is dropped, so the
+    # next save no longer carries it. Older daily restore points keep them
     # until they age out after BACKUP_KEEP days.
     for stale in [key for key in data if key not in COLLECTION_NAMES]:
         del data[stale]
@@ -137,7 +145,7 @@ def save_dataset(data):
     Callers must hold data_lock."""
     # The threading.Lock around every caller of this function is the real
     # correctness mechanism; os.replace() is defense in depth on top of it
-    # (its atomicity isn't fully guaranteed on Windows, per CPython #143909).
+    # (its atomicity isn't fully guaranteed on Windows).
     # The folder is recreated if it has vanished (temporary storage can be cleared under a running service).
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp_path = DATA_PATH.with_suffix(".tmp")
@@ -189,12 +197,11 @@ def list_backups():
 _BOOKKEEPING_FIELDS = {"version", "updatedAt", "deviceId"}
 
 # Per-collection extra bookkeeping fields, beyond the universal set above.
-# `income` uses id = dateKey (not a fresh UUID like every other collection)
-# specifically so two devices independently entering the same date's income
-# converge onto one record instead of duplicating — dateAdded differing
-# between two independently-created same-dateKey records is the expected
-# normal case here, not an anomaly, unlike every other collection where a
-# dateAdded mismatch on a shared id is a real red flag worth surfacing.
+# Income records use ids built from a date (and source) where they can, not a fresh UUID like every other
+# collection, so two devices independently entering the same day's income converge onto one record instead of
+# duplicating. dateAdded differing between two independently-created records with the same id is the expected
+# normal case for income, unlike every other collection where a dateAdded mismatch on a shared id is a real red
+# flag worth surfacing.
 _EXTRA_BOOKKEEPING_FIELDS_BY_COLLECTION = {"income": {"dateAdded"}}
 
 
@@ -230,6 +237,15 @@ def _reject_constant(name):
     """json.loads hook: Python accepts NaN/Infinity, but they are not valid JSON, so storing one
     would make every later reply unparseable in the browser for all devices."""
     raise ValueError(f"{name} is not valid JSON")
+
+
+def _finite_float(text):
+    """json.loads hook for decimal numbers: a literal such as 1e999 overflows to infinity without ever reaching
+    parse_constant, and json.dumps would then write an `Infinity` the browser cannot read."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("a number is too large")
+    return value
 
 
 def _usable_id(value):
@@ -401,7 +417,7 @@ class SyncHandler(BaseHTTPRequestHandler):
         origin = self._allowed_origin()
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
+        self.send_header("Vary", "Origin")  # always: the reply differs by origin, so a cache must not share it
         self.end_headers()
         self.wfile.write(body)
 
@@ -441,7 +457,7 @@ class SyncHandler(BaseHTTPRequestHandler):
         origin = self._allowed_origin()
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Vary", "Origin")
+        self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Sync-Token")
         self.send_header("Access-Control-Max-Age", "86400")
@@ -523,7 +539,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             self._send_json(413, {"error": "payload too large"})
             return
         try:
-            body = json.loads(self.rfile.read(length) or b"{}", parse_constant=_reject_constant)
+            body = json.loads(self.rfile.read(length) or b"{}", parse_constant=_reject_constant, parse_float=_finite_float)
         except ValueError:  # JSONDecodeError and UnicodeDecodeError
             self._send_json(400, {"error": "invalid JSON"})
             return

@@ -6,9 +6,10 @@
      3.  Decorative background (corner vines, sidebar sprig)
      4.  Menu (sidebar): undo/redo, sync, backup buttons, footer
      5.  Content area, tabs, toolbars, cards and shared pieces (buttons, chips, badges)
-     6.  Add forms, the Add bill phone sheet, date fields and checkboxes
+     6.  Add forms, date fields and checkboxes (the Add bill phone sheet itself is in section 13)
      7.  Bill and recurring income cards (view, edit and "Other..." forms)
      8.  Calendar: week buttons, weeks, day cells, phone day sheet
+     8b. Plan, savings goals, the custom-repeat row, Expenses (Quick Add, filters, spend warnings) and charts
      9.  Banners, the undo bar, the + button and the "couldn't save" warning
      10. Paid history
      11. App lock
@@ -86,13 +87,14 @@
 
 /* ===== 2. Base page, headings, focus ring ===== */
 
+/* Padding and borders count inside every element's width. */
+
 * { box-sizing: border-box; }
 
 /* Page background, text colour, font and line height. */
 
 body {
   margin: 0;
-  padding: 0;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -190,6 +192,8 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 }
 
 /* ===== 4. Menu (sidebar) ===== */
+
+/* The page layout: the Menu column beside the content, side by side on wide screens. */
 
 .app-shell {
   display: flex;
@@ -621,6 +625,7 @@ select[id$="-sort-input"] {
 .cancel-btn,
 .delete-btn,
 .pay-other-btn,
+.catch-up-btn,
 .mark-oldest-paid-btn {
   padding: 5px 12px;
   border: 1px solid var(--border);
@@ -642,6 +647,7 @@ select[id$="-sort-input"] {
 .edit-btn:hover,
 .cancel-btn:hover,
 .pay-other-btn:hover:not(:disabled),
+.catch-up-btn:hover,
 .mark-oldest-paid-btn:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
@@ -1292,6 +1298,8 @@ input[type="date"]::-webkit-date-and-time-value {
   text-decoration: line-through;
 }
 
+/* ===== 8b. Plan, goals, custom repeat, Expenses and charts ===== */
+
 /* A small quiet outlined button (Edit amounts, Clear, Use ... as my plan). */
 
 .small-btn {
@@ -1314,9 +1322,10 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .recurring-income-info > .chart-track { width: 100%; margin: 4px 0; }
 
-/* The amount box and the Add savings / Take out buttons sit in one wrapping row. */
+/* The amount box and the Add savings / Take out buttons sit in one wrapping row on a line of their own. */
 
 .goal-save-row {
+  flex: 1 1 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1324,9 +1333,18 @@ input[type="date"]::-webkit-date-and-time-value {
   margin-top: 6px;
 }
 
-/* The savings amount box is narrow, so both buttons fit beside it on a phone. */
+/* The savings amount box is narrow, so both buttons fit beside it on a phone, and looks like the other form boxes
+   (it sits outside any form, so no form rule styles it). */
 
-.goal-save-row input { width: 110px; }
+.goal-save-row input {
+  width: 110px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
 
 /* The "Repeat every [6] weeks" row under a bill's frequency box. */
 
@@ -1341,9 +1359,12 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .custom-repeat[hidden] { display: none; }
 
-/* The number box is narrow: it only holds one or two digits. */
+/* The number box is narrow (it only holds one or two digits) and the weeks/months box fits its words; the form rules
+   that stretch every box to the full width are more specific, so these name the type. */
 
-.custom-repeat input { width: 72px; }
+.custom-repeat input[type="number"] { width: 72px; }
+
+.custom-repeat select { width: auto; }
 
 /* The Edit amounts and Show hidden amounts buttons sit in a row above the Quick Add amounts. */
 
@@ -1377,6 +1398,7 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .expense-filters select,
 .expense-filters input {
+  max-width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -1440,6 +1462,10 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .chart-value { color: var(--text); font-size: 0.8rem; text-align: right; }
 
+/* Over a weekly column the amount is smaller and centred, and may break, so eight of them fit side by side. */
+
+.chart-col .chart-value { font-size: 0.65rem; text-align: center; overflow-wrap: anywhere; }
+
 /* A chart's name or date text. */
 
 .chart-label { color: var(--muted); overflow-wrap: anywhere; }
@@ -1482,7 +1508,6 @@ input[type="date"]::-webkit-date-and-time-value {
 /* The filled part of a column. */
 
 .chart-vfill {
-  display: block;
   width: 100%;
   border-radius: 6px 6px 0 0;
   background: var(--accent);
@@ -1795,10 +1820,6 @@ input[type="date"]::-webkit-date-and-time-value {
   /* The "+2". */
 
   .budget-day-peek-more { flex: none; }
-
-  /* Once a day is open its full list is showing, so the short name goes. */
-
-  .budget-day-open .budget-day-peek { display: none; }
 
   /* In the open day sheet: a full-width button to start a bill on that day. */
 
@@ -2540,7 +2561,8 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* Finger-sized tap targets for the small buttons. */
 
-  .chip, .sync-change-btn, .reminder-banner-btn { min-height: 36px; }
+  .chip, .sync-change-btn, .reminder-banner-btn, .small-btn, .add-form .today-btn, .data-io-btn,
+  .undo-redo-panel button, .paid-history-nav, .sidebar-toggle, .quick-sync-btn:not([hidden]) { min-height: 40px; }
 
   /* iOS Safari zooms the page when a text control under 16px gets focus. Many more specific
      rules set their own smaller sizes (add and edit forms, the sync passphrase box), so this one needs !important to win everywhere. */

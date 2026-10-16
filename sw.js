@@ -4,7 +4,7 @@
 // cache when possible (so the app opens instantly with no network); otherwise it goes to the
 // network and a successful response is added to the cache for next time.
 // Everything else passes straight through untouched: other paths on this web address (the app
-// can share its origin with Second Memory), non-GET requests, and other origins such as the
+// can share its origin with other apps, for example Second Memory, which used to), non-GET requests, and other origins such as the
 // sync server. The cache is named budget-vN and only caches starting with budget- are ever
 // deleted, so another app's caches are never touched. Old budget- caches are deleted on activate.
 //
@@ -13,7 +13,7 @@
 // The browser only detects a Service Worker update when sw.js's bytes change —
 // if this string is left unchanged, sw.js is byte-identical after a deploy, the
 // browser never notices, and users silently stay on old code forever.
-const CACHE_NAME = 'budget-v33';
+const CACHE_NAME = 'budget-v34';
 
 // Files pre-cached at install time: everything needed to run with no network.
 const APP_SHELL = [
@@ -61,11 +61,13 @@ self.addEventListener('fetch', (event) => {
   if (!isShellFile) return;
 
   event.respondWith(
+    // ignoreSearch: a request like index.html?x=1 is answered by the cached index.html.
     caches.open(CACHE_NAME).then((cache) => cache.match(request, { ignoreSearch: true })).then((cached) => {
       if (cached) return cached;
       return fetch(request).then((response) => {
         if (response.ok) {
           const responseClone = response.clone();
+          // Saving to the cache is best effort: a failure must not break the response.
           caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone)).catch(() => {});
         }
         return response;

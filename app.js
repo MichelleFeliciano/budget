@@ -8,7 +8,8 @@
 // How this file is organised (top to bottom):
 //   Shared helpers, filter/sort helpers, keyboard-focus keeping, device identity & sync
 //   metadata, undo/redo, Budget (bills, income, projected income, recurring income, paid history,
-//   pay period, calendar, the Add bill sheet), the Spending Plan and Expenses tabs, backup reminders, the due/overdue bills banner, Device Sync
+//   pay period, calendar, the Add bill sheet), the Spending Plan, expected one-time costs, savings goals
+//   and Expenses tabs (Quick Add, Spent vs Plan, charts, filters), backup and sync reminders, the due/overdue bills banner, Device Sync
 //   (server address, sync client, undo/redo application, the undo bar), data export/import (and
 //   the calendar reminders file), day rollover, theme, text size and version, App lock, and Init
 //   (which wires the phone Menu button, the tabs, the calendar buttons, the folding parts and the
@@ -23,7 +24,7 @@
 // - version is the server's counter for the record; 0 means the server hasn't confirmed it yet.
 //
 // There are three lists: bills, income (income received, which also holds projected income, Spending Plan
-// categories and expenses) and recurringIncome. Syncing is
+// categories, expenses, expected one-time costs and savings goals and deposits) and recurringIncome. Syncing is
 // manual only (the user presses "Sync now"); nothing runs in the background.
 //
 // Every localStorage key starts with "budgetApp." so that, if another app is ever hosted at the same
@@ -97,8 +98,8 @@ function safeRender(fn) {
 // Missing values (null/undefined/empty string — never a falsy-but-real value
 // like 0) always sort last, regardless of `direction`. `direction` is 1 for
 // ascending, -1 for descending. By default, string values compare
-// case-insensitively via localeCompare (for genuine text fields like title/
-// author/name). Pass `{ text: false }` for ISO date/timestamp strings (and
+// case-insensitively via localeCompare (for genuine text fields like a bill's
+// name). Pass `{ text: false }` for ISO date/timestamp strings (and
 // numbers) so they compare directly with `<`/`>` instead — locale collation
 // is unnecessary for fixed-format dates and safer to avoid entirely. Sorts a
 // fresh, already-filtered array — never mutates it in a way that touches the
@@ -622,8 +623,9 @@ function amountDueInRange(startKey, endKey, allBills, unpaidOnly = false) {
 // An income entry's `id` is built from its date (and source), not a fresh makeId() UUID like bills and recurring
 // income use: two devices that each enter the same date and source then merge into one record across the normal
 // sync paths (see newEntryId).
-// The same list also holds projected income, Spending Plan categories and expenses (each told apart by its own
-// field, none with a `dateKey`), so they sync, undo and export with the server's three lists unchanged.
+// The same list also holds projected income, Spending Plan categories, expenses, expected one-time costs and
+// savings goals and deposits (each told apart by its own field, none with a `dateKey`), so they sync, undo and
+// export with the server's three lists unchanged.
 
 // localStorage key for the income list.
 const INCOME_KEY = 'budgetApp.income.v1';
@@ -871,6 +873,8 @@ function setProjectedForDate(dateKey, rawValue, source) {
   setTimeout(renderBudget, 0);
 }
 
+// allIncome must already be one entry per day and source (uniqueIncomeEntries, deleted ones dropped): duplicates
+// would be summed twice.
 // Deliberately NOT cumulative-through-date, unlike unpaidAmountThrough(). Each
 // income record is summed into exactly the one week (or month) whose range its dateKey falls
 // in — never carried into subsequent periods.
@@ -1119,9 +1123,9 @@ function restoreBill(id) {
   renderBudget();
 }
 
-// Marks one occurrence of a bill paid or unpaid (and remembers the amount paid). Snapshot before,
-// mutate, stampSync, save, recordUndo, re-render. paidDates is otherwise only moved by
-// updateBill when the schedule changes.
+// Marks one occurrence of a bill paid or unpaid. paidAmount (optional) is what was actually paid, and 0 means the
+// date was skipped; unmarking removes the recorded amount, so paidAmounts only keeps entries for dates still in
+// paidDates. paidDates is otherwise only moved by updateBill when the schedule changes.
 function toggleBillPaid(billId, dateKey, paid, paidAmount) {
   const bill = bills.find((b) => b.id === billId);
   if (!bill) return;
@@ -1521,15 +1525,20 @@ function formatDateKeyShort(dateKey) {
 }
 
 // The date a bill needs paying next: its oldest unpaid date up to today (so a late bill shows how late),
-// otherwise its next scheduled date within a year that is not already paid; null if there is none (a paid one-time bill).
+// otherwise its next scheduled date after today that is not already paid, however far away (a yearly bill, or one
+// every 24 months); null if there is none (a paid one-time bill or an unreadable schedule).
 function nextDueDateKey(bill, todayK) {
   if (unpaidAmountThrough(bill, todayK) > 0) {
     const unpaid = oldestUnpaidOccurrence(bill, todayK);
     if (unpaid) return unpaid;
   }
-  for (let i = 1; i <= 366; i += 1) {
-    const dateKey = shiftDateKey(todayK, i);
-    if (occursOnDate(bill, dateKey) && !(bill.paidDates || []).includes(dateKey)) return dateKey;
+  const paid = bill.paidDates || [];
+  // Occurrences are numbered from 0; the first one after today has the index that counts those up to today.
+  const first = occurrenceCountThrough(bill, todayK);
+  for (let n = first; n < first + 400; n += 1) { // 400 steps is a safety stop: advance payments are a handful
+    const dateKey = nthOccurrenceDate(bill, n);
+    if (!dateKey) return null;
+    if (dateKey > todayK && !paid.includes(dateKey)) return dateKey;
   }
   return null;
 }
@@ -1539,6 +1548,7 @@ function nextDueDateKey(bill, todayK) {
 function billDueInfo(bill, todayK) {
   const dateKey = nextDueDateKey(bill, todayK);
   if (!dateKey) {
+    // No date left to pay: a paid one-time bill, or a schedule that cannot be read (shown as its first date).
     const paidOff = bill.frequency === 'one_time' && (bill.paidDates || []).length;
     return { text: paidOff ? 'Paid' : `Due ${formatDateKeyShort(bill.dueDate)}`, late: false };
   }
@@ -1811,11 +1821,10 @@ function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecur
 }
 
 // Renders the 21-day rolling calendar into #budget-calendar (everything
-// after the static .budget-weekday-row) and the month/year header. Always
-// runs against the full live `bills` array, and unaffected by the Bills
-// list's search filter below — but the category chip filter DOES apply here
-// too (occurrence rendering only; every total stays unfiltered, see the
-// matchesBillCategory comment inside the render loop below).
+// after the static .budget-weekday-row), the month/year header, and this month's total, income, net and
+// left-after-plan lines. The Bills search box does not affect it. The category chip filter only chooses which
+// bills show in the day cells; every total uses all bills, so a filter never makes a total look smaller than what
+// is really owed (see the matchesBillCategory comment inside the render loop below).
 function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap) {
   const today = new Date();
   const todayK = todayKey();
@@ -2485,16 +2494,23 @@ function renderProjectedIncomeList() {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      // Closed before saving, so the redraw after a save does not reopen it; shown again with the problem on a failure.
+      editForm.hidden = true;
+      viewSection.hidden = false;
+      const fail = (message) => {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = message;
+        editError.hidden = false;
+      };
       const value = Number(editAmount.value);
       if (editAmount.value === '' || !Number.isFinite(value) || Math.abs(value) > MAX_MONEY) {
-        editError.textContent = 'Enter an amount up to $1,000,000,000.';
-        editError.hidden = false;
+        fail('Enter an amount up to $1,000,000,000.');
         return;
       }
       // A new source on the entry first (refused if that day already has one from it), then the amount.
       if (!setIncomeSource(record.id, editSource.value)) {
-        editError.textContent = 'That day already has a projected entry from that source.';
-        editError.hidden = false;
+        fail('That day already has a projected entry from that source.');
         return;
       }
       if (Math.round(value * 100) / 100 !== record.projected) setProjectedForDate(dateKey, editAmount.value, editSource.value);
@@ -2682,11 +2698,19 @@ function renderPlan() {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      // Closed before saving: a successful save redraws, and the redraw would reopen a form that is still showing.
+      editForm.hidden = true;
+      viewSection.hidden = false;
       const problem = savePlanCategory({
         name: nameBox.value, amountRaw: amountBox.value, frequency: frequencyBox.value,
         type: typeBox.value, altRaw: altBox.value, notes: notesBox.value,
       }, record.id);
-      if (problem) { editError.textContent = problem; editError.hidden = false; }
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = problem;
+        editError.hidden = false;
+      }
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
 
@@ -2744,7 +2768,7 @@ document.getElementById('plan-add-form').addEventListener('submit', (e) => {
 // Whether `value` is a month key like '2026-10' within the forms' year range.
 function isGuessMonth(value) {
   const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(typeof value === 'string' ? value : '');
-  return !!match && Number(match[1]) >= 1990 && Number(match[1]) <= 2100;
+  return !!match && Number(match[1]) >= DATE_YEAR_MIN && Number(match[1]) <= DATE_YEAR_MAX;
 }
 
 // The live guesses, soonest month first and then by name.
@@ -2848,8 +2872,15 @@ function renderGuesses() {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
+      viewSection.hidden = false;
       const problem = saveGuess({ name: nameBox.value, amountRaw: amountBox.value, month: monthBox.value, notes: notesBox.value }, record.id);
-      if (problem) { editError.textContent = problem; editError.hidden = false; }
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = problem;
+        editError.hidden = false;
+      }
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
 
@@ -3028,8 +3059,15 @@ function renderGoals() {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
+      viewSection.hidden = false;
       const problem = saveGoal({ name: nameBox.value, targetRaw: targetBox.value, date: dateBox.value, notes: notesBox.value }, record.id);
-      if (problem) { editError.textContent = problem; editError.hidden = false; }
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = problem;
+        editError.hidden = false;
+      }
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
 
@@ -3059,10 +3097,12 @@ document.getElementById('goal-add-form').addEventListener('submit', (e) => {
 // open form has to be captured first and put back after.
 const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list','expense-list', 'received-income-list', 'projected-income-list'];
 
-// Notes every open card edit form: which record, what is typed in each box, and which box had focus.
-function captureOpenCardForms() {
+// Notes every open card edit form (in the given lists, by default all of them): which record, what is typed in
+// each box, and which box had focus. The Bills and Recurring Income lists are not here: renderBudget captures
+// their forms itself.
+function captureOpenCardForms(listIds = EDIT_CARD_LIST_IDS) {
   const open = [];
-  EDIT_CARD_LIST_IDS.forEach((listId) => {
+  listIds.forEach((listId) => {
     document.querySelectorAll(`#${listId} li[data-record-id]`).forEach((card) => {
       const form = card.querySelector('.recurring-income-edit-form');
       if (!form || form.hidden) return;
@@ -3080,16 +3120,20 @@ function restoreOpenCardForms(open) {
     const card = [...document.querySelectorAll(`#${listId} li[data-record-id]`)].find((c) => c.dataset.recordId === recordId);
     const editBtn = card && card.querySelector('.edit-btn');
     if (!editBtn) return;
+    const typingElsewhere = document.activeElement;
     editBtn.click(); // opens the form and fills the choices a box needs, from the saved record
     const fields = [...card.querySelectorAll('.recurring-income-edit-form input, .recurring-income-edit-form select')];
     fields.forEach((field, i) => { if (values[i] !== undefined) field.value = values[i]; });
     if (focused >= 0 && fields[focused]) fields[focused].focus();
+    // The Edit button moves focus into the form; when the user was typing somewhere else, give focus back there.
+    else if (focused < 0 && typingElsewhere && typingElsewhere !== document.body && typingElsewhere.isConnected) typingElsewhere.focus({ preventScroll: true });
   });
 }
 
 // Redraws the whole screen from the live lists. A redraw wipes the DOM, so it first captures the
 // in-progress input it must put back: the open Bill edit form, the open Recurring Income edit form
-// (one of each can be open at once) and the open edit forms of the Plan, Expenses and Income cards.
+// (one of each can be open at once) and the open edit forms of the Plan, Expected costs, Savings goals, Expenses
+// and Income cards.
 function renderBudget() {
   const openCardForms = captureOpenCardForms();
   const nonDeleted = bills.filter((b) => !b.deleted);
@@ -3422,16 +3466,23 @@ function renderReceivedIncomeList() {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      // Closed before saving, so the redraw after a save does not reopen it; shown again with the problem on a failure.
+      editForm.hidden = true;
+      viewSection.hidden = false;
+      const fail = (message) => {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = message;
+        editError.hidden = false;
+      };
       const value = Number(editAmount.value);
       if (editAmount.value === '' || !Number.isFinite(value) || Math.abs(value) > MAX_MONEY) {
-        editError.textContent = 'Enter an amount up to $1,000,000,000.';
-        editError.hidden = false;
+        fail('Enter an amount up to $1,000,000,000.');
         return;
       }
       // A new source on the entry first (refused if that day already has one from it), then the amount.
       if (!setIncomeSource(record.id, editSource.value)) {
-        editError.textContent = 'That day already has an entry from that source.';
-        editError.hidden = false;
+        fail('That day already has an entry from that source.');
         return;
       }
       // Only a changed amount is a second change; an unchanged one would add an empty Undo step.
@@ -3511,7 +3562,7 @@ function expenseCategoryName(record) {
 // Fills a category dropdown with the Spending Plan categories, keeping the chosen one (and, for an expense whose
 // category was deleted, offering its saved name so editing does not silently change it).
 function fillExpenseCategorySelect(select, selectedId, savedName) {
-  const keep = selectedId !== undefined ? selectedId : select.value;
+  const keep = selectedId;
   select.innerHTML = '';
   const categories = planCategories();
   categories.forEach((plan) => {
@@ -3589,12 +3640,15 @@ function sumExpensesIn(records, start, end) {
   return records.filter((r) => r.spentOn >= start && r.spentOn <= end).reduce((sum, r) => sum + r.amount, 0);
 }
 
-// How spending reads against its plan: once it passes 80% a note says how much is used, once it is over the plan the
-// note says by how much; the class colours the line. Nothing when there is no plan or plenty is left.
+// How spending reads against its plan: from 80% of the plan (exactly 100% included) a note says how much is used,
+// once more than the plan is spent the note says by how much; the class colours the line. Nothing when there is no
+// plan or plenty is left. Compared in whole cents, because a weekly figure worked out from a monthly plan is not.
 function spendStatus(spent, planned) {
   if (!(planned > 0)) return { note: '', cls: '' };
-  if (spent > planned) return { note: ` · ${formatMoney(spent - planned)} over`, cls: 'spend-over' };
-  if (spent >= planned * 0.8) return { note: ` · ${Math.round((spent / planned) * 100)}% used`, cls: 'spend-near' };
+  const spentCents = Math.round(spent * 100);
+  const plannedCents = Math.round(planned * 100);
+  if (spentCents > plannedCents) return { note: ` · ${formatMoney((spentCents - plannedCents) / 100)} over`, cls: 'spend-over' };
+  if (spentCents >= plannedCents * 0.8) return { note: ` · ${Math.round((spentCents / plannedCents) * 100)}% used`, cls: 'spend-near' };
   return { note: '', cls: '' };
 }
 
@@ -3640,7 +3694,7 @@ function renderQuickAdd(expenses) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'expense-quick-btn';
-      button.id = `quick-add-${plan.id}-${String(amount).replace('.', '_')}`; // so keyboard focus can return to it after the redraw
+      button.id = `quick-add-${plan.id}-${String(amount).replace('.', '_')}`; // a stable handle for each amount's button
       if (quickEditMode) {
         button.textContent = `✕ ${formatMoney(amount)}`;
         button.setAttribute('aria-label', `Remove ${formatMoney(amount)} from ${plan.planName} quick amounts`);
@@ -3883,10 +3937,17 @@ function renderExpenseList(expenses) {
     });
     editForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
+      viewSection.hidden = false;
       const problem = saveExpense({
         dateKey: dateBox.value, amountRaw: amountBox.value, planId: categoryBox.value, notes: notesBox.value,
       }, record.id);
-      if (problem) { errorEl.textContent = problem; errorEl.hidden = false; }
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        errorEl.textContent = problem;
+        errorEl.hidden = false;
+      }
     });
     deleteBtn.addEventListener('click', () => deleteIncome(record.id));
     list.appendChild(node);
@@ -3904,6 +3965,7 @@ function renderExpenseList(expenses) {
 
 // Draws the whole Expenses tab: Quick Add, the log form's category list, Spent vs Plan, the charts and the recent list.
 function renderExpenses() {
+  const openForms = captureOpenCardForms(['expense-list']); // the list is rebuilt, so an open Edit form is kept
   const sel = document.getElementById('expense-category-input');
   fillExpenseCategorySelect(sel, sel.value || loadLastChoice(LAST_EXPENSE_CATEGORY_KEY));
   const expenses = expenseRecords();
@@ -3911,6 +3973,7 @@ function renderExpenses() {
   const rows = renderSpentVsPlan(expenses);
   renderExpenseCharts(expenses, rows);
   renderExpenseList(expenses);
+  restoreOpenCardForms(openForms);
 }
 
 // The Quick Add edit and reset buttons, and the filter boxes (they redraw only the Expenses tab, so typing in the
@@ -3963,12 +4026,12 @@ const EXPORT_AT_KEY = 'budgetApp.exportAt.v1';
 // Days after the last full export before the app reminds you to download another.
 const EXPORT_DUE_DAYS = 7;
 
-// Remembers that a backup file was just downloaded.
+// Remembers, under the given key, the moment a backup was made or a sync finished.
 function recordBackupTime(key) {
   try { localStorage.setItem(key, new Date().toISOString()); } catch { /* storage full: nothing to remember it in */ }
 }
 
-// Whole days since the last backup, or null if there has never been one.
+// Whole days since the time stored under this key (a backup or a sync), or null if none is stored.
 function daysSinceBackup(key) {
   try {
     const value = localStorage.getItem(key);
@@ -4000,12 +4063,14 @@ function renderBackupNotes() {
       action: CAN_SHARE_FILES ? shareBackup : exportData,
     });
   }
-  // Syncing is manual, so nudge when it has been a while (only on devices where sync is set up).
+  // Syncing is manual, so nudge when it has been a while (only on devices where sync is set up). Before the first
+  // sync the clock starts when sync was first noticed, kept under its own key: LAST_SYNC_AT_KEY must stay empty
+  // until a sync really happens, because the top bar reads it as "Synced ... ago".
   if (loadSyncConfig()) {
-    const syncDays = daysSinceBackup(LAST_SYNC_AT_KEY);
-    if (syncDays === null) {
-      recordBackupTime(LAST_SYNC_AT_KEY); // start the clock the first time we notice sync is on
-    } else if (syncDays >= SYNC_STALE_DAYS) {
+    const lastSyncDays = daysSinceBackup(LAST_SYNC_AT_KEY);
+    if (lastSyncDays === null && daysSinceBackup(SYNC_NOTICED_AT_KEY) === null) recordBackupTime(SYNC_NOTICED_AT_KEY);
+    const syncDays = lastSyncDays === null ? daysSinceBackup(SYNC_NOTICED_AT_KEY) : lastSyncDays;
+    if (syncDays !== null && syncDays >= SYNC_STALE_DAYS) {
       reminders.push({
         text: `You haven't synced in ${syncDays} days. Changes on this device are not on your other devices yet.`,
         label: 'Sync now',
@@ -4057,7 +4122,7 @@ function computeBillReminders(nonDeletedBills) {
     .filter((x) => x.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
-  // Due soon: unpaid occurrences on any of the next REMINDER_BANNER_DAYS days (today included).
+  // Due soon: unpaid occurrences today and on each of the next REMINDER_BANNER_DAYS days.
   const dueSoon = [];
   nonDeletedBills.filter((bill) => !bill.autopay).forEach((bill) => {
     for (let i = 0; i <= REMINDER_BANNER_DAYS; i++) {
@@ -4115,7 +4180,7 @@ function renderBannerPayButtons(overdueBills, soon) {
   const box = document.getElementById('reminder-banner-actions');
   if (!box) return;
   box.innerHTML = '';
-  const targets = soon.slice(0, BANNER_PAY_BUTTONS).map(({ bill, dateKey }) => ({ bill, dateKey }));
+  const targets = soon.slice(0, BANNER_PAY_BUTTONS);
   const yesterdayK = shiftDateKey(todayKey(), -1);
   for (const { bill } of overdueBills) {
     if (targets.length >= BANNER_PAY_BUTTONS) break;
@@ -4239,14 +4304,15 @@ function applyEntrySnapshot(entry, which) {
 
 // Steps back the most recent change and moves it onto the redo list.
 function undo() {
-  if (undoStack.length === 0) return;
-  const entry = undoStack.pop();
+  if (undoStack.length === 0) { hideUndoToast(); return; }
+  const entry = undoStack[undoStack.length - 1]; // only taken off the list once it has been applied
   isApplyingHistory = true;
   try {
     applyEntrySnapshot(entry, 'before');
   } finally {
     isApplyingHistory = false;
   }
+  undoStack.pop();
   redoStack.push(entry);
   if (redoStack.length > MAX_UNDO_DEPTH) redoStack.shift();
   updateUndoRedoButtons();
@@ -4256,20 +4322,23 @@ function undo() {
 // Re-applies the most recently undone change.
 function redo() {
   if (redoStack.length === 0) return;
-  const entry = redoStack.pop();
+  const entry = redoStack[redoStack.length - 1]; // only taken off the list once it has been applied
   isApplyingHistory = true;
   try {
     applyEntrySnapshot(entry, 'after');
   } finally {
     isApplyingHistory = false;
   }
+  redoStack.pop();
   undoStack.push(entry);
   if (undoStack.length > MAX_UNDO_DEPTH) undoStack.shift();
   updateUndoRedoButtons();
   hideUndoToast();
 }
 
-// Which field names a record in each collection, for the Undo/Redo tooltips.
+// The field that names a record in each list, for the Undo/Redo tooltips; describeEntry falls back to the
+// kind-specific name fields of the other records in the income list (projected date, plan, expected cost, goal,
+// savings, expense category or date).
 const RECORD_LABEL_FIELD = {
   bills: 'name', income: 'dateKey', recurringIncome: 'name',
 };
@@ -4304,8 +4373,9 @@ document.getElementById('undo-btn').addEventListener('click', undo);
 document.getElementById('redo-btn').addEventListener('click', redo);
 
 // ---- Undo toast ----
-// A short bar at the bottom of the screen after a delete, a Mark paid, a new bill or recurring income, or a logged
-// expense, with an Undo button, so a mis-tap (or a one-tap Quick Add) can be fixed without opening the Menu. Edits get no toast.
+// A short bar at the bottom of the screen after a delete, a Mark paid or unpaid, a new bill, recurring income,
+// expected cost, savings goal or savings entry, a logged expense, or a changed Spending Plan amount, with an Undo
+// button, so a mis-tap (or a one-tap Quick Add) can be fixed without opening the Menu. Other edits get no toast.
 
 // How long the toast stays before it hides itself.
 const UNDO_TOAST_MS = 6000;
@@ -4372,8 +4442,10 @@ document.getElementById('undo-toast-btn').addEventListener('click', undo);
 // ok/failed.
 let syncInFlight = false;
 let lastSyncedAt = null; // when the last sync finished (drives the "Synced Xm ago" label)
-// The last successful sync is also saved, so the backup notes can warn when it has been too long.
+// When the server last answered a sync, also saved so the backup notes can warn when it has been too long.
 const LAST_SYNC_AT_KEY = 'budgetApp.lastSyncAt.v1';
+// When this device first noticed sync was set up but never run, so the "you haven't synced" reminder can count days.
+const SYNC_NOTICED_AT_KEY = 'budgetApp.syncNoticedAt.v1';
 const SYNC_STALE_DAYS = 7; // days without a sync before the reminder shows
 const SYNC_NUDGE_DAYS = 3; // days without a sync before the top-bar Sync button is highlighted
 let lastSyncTone = null; // 'ok', 'failed' or null: the tone of the last status message
@@ -4542,6 +4614,7 @@ async function postSync(config, collections) {
     const response = await fetch(`${SYNC_SERVER_URL}/api/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Sync-Token': syncTokenHeader(config.token) },
+      // clientVersion is the sync protocol this app speaks; the server refuses clients older than it requires.
       body: JSON.stringify({ deviceId: getDeviceId(), clientVersion: 2, collections }),
       signal: controller.signal,
     });
@@ -4599,7 +4672,9 @@ function bootstrapSyncSnapshot(serverData) {
       const sameContent = contentMatchesIgnoringVersion(local, server, c.name);
       const wouldResurrect = server.deleted && !local.deleted;
       if (!sameContent && !wouldResurrect && (local.updatedAt || '') > (server.updatedAt || '')) {
-        merged.push(local);
+        // Kept as the newer edit, but built on the server's version: sent with an older one, the server would
+        // take it for a conflicting edit and keep both copies.
+        merged.push({ ...local, version: Math.max(local.version || 0, server.version || 0) });
         return;
       }
       merged.push(server);
@@ -4804,13 +4879,12 @@ async function runSync() {
     // Step 6: report the outcome (conflicts, an incomplete reply, edits made mid-sync, or success).
     lastSyncedAt = new Date();
     recordBackupTime(LAST_SYNC_AT_KEY); // the server was reached and answered, whatever the details below
-    const conflicts = collectedConflicts;
-    if (conflicts.length > 0) {
-      const collectionNames = [...new Set(conflicts.map((c) => c.collection))]
+    if (collectedConflicts.length > 0) {
+      const collectionNames = [...new Set(collectedConflicts.map((c) => c.collection))]
         .map((name) => SYNC_COLLECTIONS.find((c) => c.name === name)?.label || name);
-      const noun = conflicts.length === 1 ? 'conflict' : 'conflicts';
+      const noun = collectedConflicts.length === 1 ? 'conflict' : 'conflicts';
       setSyncStatus(
-        `Synced — ${conflicts.length} ${noun} merged as duplicates in ${collectionNames.join(', ')}. Review and remove any you don't need.`,
+        `Synced — ${collectedConflicts.length} ${noun} merged as duplicates in ${collectionNames.join(', ')}. Review and remove any you don't need.`,
         'failed'
       );
     } else if (incompleteReply) {
@@ -4891,7 +4965,10 @@ function initSyncUI() {
   // opening the app, or when the connection returns. Press Sync now.
   document.getElementById('sync-now-btn').addEventListener('click', runSync);
   document.getElementById('quick-sync-btn').addEventListener('click', runSync);
-  if (config) setSyncStatus('Not synced yet — tap Sync now', null);
+  if (config) {
+    const last = lastSyncTime();
+    setSyncStatus(last ? `Last synced ${formatAgo(last)}. Tap Sync now to sync again.` : 'Not synced yet — tap Sync now', null);
+  }
   updateSyncPending();
 }
 
@@ -4958,7 +5035,7 @@ function icsEscape(text) {
   return String(text).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
 }
 
-// Folds a long line the way calendar files require: lines of at most 75 bytes, each continuation starting
+// Folds a long line the way calendar files require: lines of at most 70 bytes of text (under the 75-byte limit), each continuation starting
 // with a space. It counts bytes (not characters) and never splits one character, so names with accents or
 // emoji survive.
 function icsFold(line) {
@@ -4980,9 +5057,12 @@ function icsFold(line) {
   return parts.join('\r\n');
 }
 
-// The repeat rule for a bill, or null for a one-time bill. A bill due on the 31st repeats on each month's last
-// day (like the calendar on screen); the 29th and 30th are skipped by calendars in months without them, and
-// a yearly bill due on February 29 only repeats in leap years.
+// The repeat rule for a bill, or null for a one-time bill (or an unreadable custom one). A custom bill repeats every
+// N weeks (FREQ=WEEKLY;INTERVAL=N) or N months (FREQ=MONTHLY;INTERVAL=N, with the same day-of-month rules as
+// monthly). A bill due on the 31st repeats on each month's last day (like the calendar on screen); the 29th and
+// 30th are skipped by calendars in months without them, and a yearly bill due on February 29 only repeats in
+// leap years. The file only holds each bill's next unpaid date within a year: a one-time bill or a custom
+// schedule further out than that is left out.
 function icsRepeatRule(bill) {
   const day = parseDateKey(bill.dueDate).d;
   if (bill.frequency === 'weekly') return 'FREQ=WEEKLY';
@@ -5017,7 +5097,7 @@ function buildCalendarFile() {
     const money = formatMoney(bill.amount);
     const lines = [
       'BEGIN:VEVENT',
-      `UID:${bill.id}@budget-app`,
+      `UID:${icsEscape(bill.id)}@budget-app`,
       `DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${start.replace(/-/g, '')}`,
     ];
@@ -5204,7 +5284,11 @@ function setDataIoStatus(text, tone) {
 }
 
 // Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
-// string "1200" instead of a number, or a date outside the forms' year range).
+// string "1200" instead of a number, or a date outside the forms' year range). Records in the income list come in
+// kinds, told apart by which field is present and checked in this order: spentOn (expense), planName (plan
+// category), goalName (savings goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
+// projectedFor (projected income), otherwise a plain income entry with a dateKey. A custom-repeat bill must
+// also have a readable every/unit (schedulePeriod). A name must not be empty: the app treats an empty one as absent.
 function isValidImportRecord(collectionName, rec) {
   if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !rec.id) return false;
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -5214,13 +5298,14 @@ function isValidImportRecord(collectionName, rec) {
   const isDate = (v) => isRealDateKey(v) && isReasonableDateKey(v); // the forms' year range, so a hand-edited year 0500 cannot make every redraw crawl
   const isText = (v) => typeof v === 'string';
   const textOrMissing = (v) => v === undefined || v === null || typeof v === 'string';
-  const listOrMissing = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
+  const nonEmptyText = (v) => typeof v === 'string' && v !== '';
+  const dateListOrMissing = (v) => v === undefined || (Array.isArray(v) && v.every(isDate));
   // Sync bookkeeping, when present, must have the right types: a text "deleted" would count as
   // true, and a non-number version or non-text updatedAt would break the merge comparisons.
   if (rec.version !== undefined && !isNum(rec.version)) return false;
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
+  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
@@ -5228,13 +5313,13 @@ function isValidImportRecord(collectionName, rec) {
       return isDate(rec.spentOn) && isPositiveMoney(rec.amount) && textOrMissing(rec.planId) && textOrMissing(rec.categoryName) && textOrMissing(rec.notes);
     }
     if (rec.planName !== undefined) {
-      return isText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
+      return nonEmptyText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
         && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
-    if (rec.goalName !== undefined) return isText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
-    if (rec.savedFor !== undefined) return isText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
-    if (rec.guessName !== undefined) return isText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
+    if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.savedFor !== undefined) return nonEmptyText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
+    if (rec.guessName !== undefined) return nonEmptyText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
     return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
   }
@@ -5280,7 +5365,7 @@ function importData(parsed) {
   const localPart = parsed && typeof parsed === 'object' && parsed.local && typeof parsed.local === 'object' ? parsed.local : null;
   if (localPart) {
     const saved = localPart.paydaySettings;
-    if (saved && isRealDateKey(saved.payDateKey) && PAY_PERIOD_FREQUENCIES.includes(saved.frequency) && !loadPaydaySettings().payDateKey) {
+    if (saved && isRealDateKey(saved.payDateKey) && isReasonableDateKey(saved.payDateKey) && PAY_PERIOD_FREQUENCIES.includes(saved.frequency) && !loadPaydaySettings().payDateKey) {
       // Only fills in settings this device doesn't have yet; it never overwrites your current ones.
       savePaydaySettings({ payDateKey: saved.payDateKey, frequency: saved.frequency });
       const dateInput = document.getElementById('payday-date-input');
@@ -5314,6 +5399,7 @@ function describeContents() {
     [income.filter((r) => r.planName && !r.deleted).length, 'plan category', 'plan categories'],
     [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
     [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
+    [income.filter((r) => r.savedFor && !r.deleted).length, 'savings deposit or withdrawal', 'savings deposits and withdrawals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
   ].filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
   if (!counts.length) return 'The app is empty.';
@@ -5382,7 +5468,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 33;
+const APP_VERSION = 34;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -5599,7 +5685,7 @@ document.getElementById('lock-form').addEventListener('submit', async (e) => {
     if (lockFailures >= LOCK_MAX_TRIES) {
       lockFailures = 0;
       lockBlockedUntil = Date.now() + LOCK_COOLDOWN_MS;
-      errorEl.textContent = 'Too many tries. Wait 30 seconds.';
+      errorEl.textContent = `Too many tries. Wait ${LOCK_COOLDOWN_MS / 1000} seconds.`;
     } else {
       errorEl.textContent = 'That PIN is not right.';
     }
@@ -5706,7 +5792,8 @@ if (sidebarToggleBtn) {
   });
 }
 
-// The Earlier / Today / Later buttons slide the calendar's three weeks (Today puts them back).
+// The Earlier / Today / Later buttons slide the calendar's three weeks (Today puts them back), limited to 520 weeks
+// (about 10 years) either way.
 function slideCalendar(weeks) {
   closeCalendarDay();
   calendarWeekOffset = weeks === 0 ? 0 : Math.max(-520, Math.min(520, calendarWeekOffset + weeks));

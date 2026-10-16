@@ -54,7 +54,7 @@ const erased = wipeDeviceData();
 check('forgot-PIN wipes only the app data, nothing else', erased >= 1 && localStorage.getItem('budgetApp.testKey.v1') === null && localStorage.getItem('unrelated') === 'keep');
 localStorage.removeItem('unrelated');
 
-// ---- app lock ----
+// ---- saved wrong-try pause ----
 localStorage.removeItem('budgetApp.lockTries.v1');
 await setAppLock('8642');
 lockNow();

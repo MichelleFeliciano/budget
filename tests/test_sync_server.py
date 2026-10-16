@@ -192,8 +192,24 @@ class MergeRules(unittest.TestCase):
         self.assertEqual(len(conflicts), 1)
 
     def test_other_lists_still_keep_both_sides_of_a_conflict(self):
-        items, c = self.merge([rec("a", 6, name="A")], [rec("a", 5, name="B")], "bills")
+        items, c = self.merge([rec("a", 6, name="A")], [rec("a", 5, name="B")], "recurringIncome")
         self.assertEqual((len(items), len(c)), (2, 1))
+
+    def test_expected_costs_goals_and_savings_merge_like_bills_not_like_date_income(self):
+        """Their ids are not date ids: an edit is a normal update and a delete always wins."""
+        for record_id in ("guess-1", "goal-1", "save-1"):
+            self.assertFalse(s._is_date_id("income", record_id))
+        items, c = self.merge([rec("guess-1", 3, guessName="Tyres", amount=100)], [rec("guess-1", 3, guessName="Tyres", amount=120)], "income")
+        self.assertEqual((items[0]["amount"], items[0]["version"], c), (120, 4, []))
+        items, _ = self.merge([rec("goal-1", 2, deleted=True, goalName="Laptop", target=900)], [rec("goal-1", 1, goalName="Laptop", target=900, name="edited")], "income")
+        self.assertTrue(items[0]["deleted"])
+
+    def test_a_custom_repeat_bill_keeps_its_number_and_unit_and_loses_them_when_switched(self):
+        items, _ = self.merge([], [rec("b1", 0, frequency="custom", every=6, unit="weeks")])
+        self.assertEqual((items[0]["every"], items[0]["unit"]), (6, "weeks"))
+        items, _ = self.merge(items, [rec("b1", 1, frequency="monthly")])
+        self.assertNotIn("every", items[0])
+        self.assertEqual(items[0]["frequency"], "monthly")
 
     def test_malformed_records_do_not_abort_the_sync(self):
         items, _ = self.merge([], [None, 5, "x", {"no": "id"}, {"id": ["list"]}, {"id": ""}, rec("ok", 0), rec("bad-version", version="abc")])
@@ -432,7 +448,9 @@ class Http(unittest.TestCase):
     def test_nan_and_infinity_are_refused_so_replies_stay_valid_json(self):
         """Python's json accepts NaN; stored, it would make every later reply unparseable in a browser."""
         for bad in (b'{"clientVersion": 2, "collections": {"bills": [{"id": "n1", "x": NaN}]}}',
-                    b'{"clientVersion": 2, "collections": {"bills": [{"id": "n2", "x": Infinity}]}}'):
+                    b'{"clientVersion": 2, "collections": {"bills": [{"id": "n2", "x": Infinity}]}}',
+                    b'{"clientVersion": 2, "collections": {"bills": [{"id": "n3", "x": 1e999}]}}',
+                    b'{"clientVersion": 2, "collections": {"bills": [{"id": "n4", "x": -1e999}]}}'):
             self.assertEqual(self.call(None, raw=bad)[0], 400)
         _, body, _ = self.call({"clientVersion": 2, "collections": {}})
         self.assertNotIn("n1", json.dumps(body))

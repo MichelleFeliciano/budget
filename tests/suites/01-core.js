@@ -73,7 +73,6 @@ for (const inp of document.querySelectorAll('input[type="search"]')) {
 }
 for (const chip of document.querySelectorAll('.chip')) chip.click();
 document.querySelector('#budget-category-filters .chip').click(); // back to All
-check('every sort option, search box and filter chip works', true);
 check('searching hides bills that do not match', (() => {
   const box = $('budget-search-input'); box.value = 'tooltip'; box.dispatchEvent(new Event('input', { bubbles: true }));
   const names = [...document.querySelectorAll('#budget-list .bill-name')].map((e) => e.textContent);

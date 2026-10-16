@@ -1,6 +1,5 @@
-// Regression tests for bugs found in the Second Memory code reviews that touch money: each check
-// fails if its bug comes back. (Ported from Second Memory's suites 11 and 12.)
-const stamp = new Date().toISOString();
+// Regression tests for money bugs found in code reviews: each check
+// fails if its bug comes back.
 const old = '2026-01-01T00:00:00.000Z';
 const rb = { dateAdded: old, updatedAt: old, deviceId: 'test', deleted: false, version: 0 };
 const tt = new Date().toISOString();
@@ -87,7 +86,7 @@ check('with a payday set the pay period shows bills or the usual empty message',
 check('the stale-sync clock is reset by any sync that reached the server', (() => {
   const src = runSync.toString();
   const beforeBranches = src.indexOf('recordBackupTime(LAST_SYNC_AT_KEY)');
-  return beforeBranches > -1 && beforeBranches < src.indexOf('const conflicts');
+  return beforeBranches > -1 && beforeBranches < src.indexOf('collectedConflicts.length > 0');
 })());
 
 

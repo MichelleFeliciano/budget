@@ -79,7 +79,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
     </div>
 
-    <!-- Menu footer: Theme (Auto / Light / Dark) and App lock buttons, and the app version; labels filled by app.js. -->
+    <!-- Menu footer: Theme (Auto / Light / Dark), Text size, App lock and Lock now buttons, and the app version; labels filled by app.js. -->
     <div class="data-io">
       <div class="data-io-buttons">
         <button type="button" id="theme-btn" class="data-io-btn">Theme: Auto</button>
@@ -102,9 +102,10 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <button type="button" class="tabbar-btn" data-tab="expenses">Expenses</button>
     </nav>
 
-    <!-- Budget, top to bottom: month calendar with totals (renderBudgetCalendar), current pay period
-         (renderPayPeriod), paid history (renderPaidHistory), bills (budget-card-template via renderBudgetList),
-         and recurring income (recurring-income-card-template via renderRecurringIncomeList). renderBudget runs them all. -->
+    <!-- The five tabs live in this section (Home, Income, Bills, Plan, Expenses); showTab shows one and hides the rest
+         with the hidden attribute. renderBudget redraws all of them (renderBudgetCalendar, renderPayPeriod,
+         renderPaidHistory, renderBudgetList, renderRecurringIncomeList, the income lists, renderPlan, renderGuesses,
+         renderGoals and renderExpenses); each tab shows its own part. -->
     <section class="collection" id="budget-collection">
       <!-- Shown when a newer copy of the app has been installed in the background; Update now reloads into it. -->
       <div class="reminder-banner update-banner" id="update-banner" role="status" hidden>
@@ -148,7 +149,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
       </div>
 
-      <!-- Income: the current pay period and the recurring income sources. -->
+      <!-- Income: the current pay period, income received, projected income, and the recurring income sources.
+           The Today buttons: data-date-input names the date box each one fills (wired in app.js). Date boxes accept
+           the years 1990-2100, so a mistyped year is refused (isReasonableDateKey). -->
       <div class="tab-panel" id="tab-income" hidden>
         <details class="fold" id="fold-pay-period" open>
           <summary class="fold-summary"><h2>Current Pay Period</h2></summary>
@@ -232,7 +235,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         </details>
       </div>
 
-      <!-- Plan: estimated spending per category (weekly or monthly, business or personal) with weekly and monthly totals. -->
+      <!-- Plan: estimated spending per category (weekly or monthly, business or personal) with weekly and monthly totals,
+           then expected one-time costs and savings goals. -->
       <div class="tab-panel" id="tab-plan" hidden>
         <details class="fold" id="fold-plan" open>
           <summary class="fold-summary"><h2>Spending Plan</h2></summary>
@@ -741,7 +745,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
   <button type="button" id="undo-toast-btn">Undo</button>
 </div>
 
-<!-- Opens the Add bill form (switching to the Bills tab first); hidden on the Income tab and while the form is on screen. -->
+<!-- Opens the Add bill form (switching to the Bills tab first); hidden on the Income, Plan and Expenses tabs and while the form is on screen. -->
 <button type="button" class="fab" id="add-bill-fab" aria-label="Add a bill" title="Add a bill">+</button>
 
 <!-- App lock screen: shown (by the data-locked attribute on <html>) until the right PIN is typed. -->
