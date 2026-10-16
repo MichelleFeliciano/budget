@@ -1346,6 +1346,29 @@ input[type="date"]::-webkit-date-and-time-value {
   font-family: inherit;
 }
 
+/* The name box of a goal's new cost is wider than the amount box beside it. */
+
+.goal-save-row .goal-cost-name-input { width: 170px; }
+
+/* A goal's cost parts: a plain list, one row per cost with its Remove button at the end. */
+
+.goal-costs {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  width: 100%;
+}
+
+/* One cost part: the name and amount on the left, Remove on the right. */
+
+.goal-costs li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
 /* The "Repeat every [6] weeks" row under a bill's frequency box. */
 
 .custom-repeat {

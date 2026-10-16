@@ -2915,7 +2915,7 @@ document.getElementById('guess-month-input').value = todayKey().slice(0, 7);
 
 // ---- Savings goals (saving up for a large purchase) ----
 // A goal is a record in the `income` list, { id: 'goal-<id>', goalName, target, goalDate (optional), notes, ...sync
-// fields }. What has been put aside is a separate record per deposit, { id: 'save-<id>', savedFor: <goal id>, savedOn,
+// fields }. It can be split into cost parts, one record each (see goalCosts); with parts, the target is their total. What has been put aside is a separate record per deposit, { id: 'save-<id>', savedFor: <goal id>, savedOn,
 // amount }, with a negative amount for money taken back out. Separate records mean two devices adding savings at the
 // same time both count, instead of one overwriting the other's total. Neither kind has a `dateKey`, so income totals
 // ignore them, and the sync server needs no change (their ids are not date ids, so they merge like bills).
@@ -2929,6 +2929,40 @@ function goalRecords() {
 function goalSaved(goalId) {
   const total = income.filter((r) => r.savedFor === goalId && !r.deleted).reduce((sum, r) => sum + r.amount, 0);
   return Math.round(total * 100) / 100;
+}
+
+// The cost parts listed under a goal ({ id: 'item-<id>', goalItemFor: <goal id>, itemName, amount }), oldest first.
+// They are records in the income list like the goal itself, so they sync and undo the same way.
+function goalCosts(goalId) {
+  return income.filter((r) => r.goalItemFor === goalId && !r.deleted)
+    .sort((a, b) => (a.dateAdded || '').localeCompare(b.dateAdded || ''));
+}
+
+// What a goal is saving toward: the total of its cost parts when it has any, otherwise its own target.
+function goalTarget(goal) {
+  const costs = goalCosts(goal.id);
+  return costs.length ? Math.round(costs.reduce((sum, r) => sum + r.amount, 0) * 100) / 100 : goal.target;
+}
+
+// Adds a cost part to a goal. Returns the problem as a sentence, or '' when it was saved.
+function addGoalCost(goalId, rawName, amountRaw) {
+  const goal = income.find((r) => r.id === goalId && r.goalName && !r.deleted);
+  if (!goal) return 'That goal is gone.';
+  const name = rawName.trim().slice(0, 60);
+  if (!name) return 'Enter what the cost is for.';
+  const amount = Number(amountRaw);
+  if (amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  const now = new Date().toISOString();
+  const record = {
+    id: `item-${makeId()}`, goalItemFor: goalId, itemName: name, amount: Math.round(amount * 100) / 100,
+    dateAdded: now, updatedAt: now,
+    deviceId: getDeviceId(), deleted: false, version: 0,
+  };
+  income.push(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', record.id, null, structuredClone(record));
+  renderBudget();
+  return '';
 }
 
 // Checks the Add / Edit goal fields and returns the first problem as a sentence ('' when they are fine).
@@ -3005,15 +3039,44 @@ function renderGoals() {
 
   records.forEach((record) => {
     const saved = goalSaved(record.id);
-    const left = Math.round((record.target - saved) * 100) / 100;
+    const costs = goalCosts(record.id);
+    const target = goalTarget(record);
+    const left = Math.round((target - saved) * 100) / 100;
     const node = template.content.cloneNode(true);
     node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
     const editForm = node.querySelector('.recurring-income-edit-form');
     const editError = node.querySelector('.goal-edit-error');
     node.querySelector('.recurring-income-name').textContent = record.goalName;
-    node.querySelector('.goal-amounts').textContent = `${formatMoney(saved)} of ${formatMoney(record.target)}`;
-    node.querySelector('.goal-fill').style.width = `${Math.max(0, Math.min(100, Math.round((saved / record.target) * 100)))}%`;
+    node.querySelector('.goal-amounts').textContent = `${formatMoney(saved)} of ${formatMoney(target)}`;
+    node.querySelector('.goal-fill').style.width = `${Math.max(0, Math.min(100, Math.round((saved / target) * 100)))}%`;
+
+    // The cost parts under the goal: each with a Remove button, then the boxes to add another.
+    const costList = node.querySelector('.goal-costs');
+    costs.forEach((cost) => {
+      const row = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${cost.itemName}: ${formatMoney(cost.amount)}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'small-btn';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Remove ${cost.itemName} from ${record.goalName}`);
+      remove.addEventListener('click', () => deleteIncome(cost.id));
+      row.append(label, remove);
+      costList.appendChild(row);
+    });
+    const costNote = node.querySelector('.goal-costs-note');
+    costNote.textContent = costs.length
+      ? `The target is the total of ${costs.length} cost${costs.length === 1 ? '' : 's'}.`
+      : 'Split the target into costs (for example flights and hotel) and it becomes their total.';
+    const costNameBox = node.querySelector('.goal-cost-name-input');
+    const costAmountBox = node.querySelector('.goal-cost-amount-input');
+    const costError = node.querySelector('.goal-cost-error');
+    node.querySelector('.goal-cost-add-btn').addEventListener('click', () => {
+      const problem = addGoalCost(record.id, costNameBox.value, costAmountBox.value);
+      if (problem) { costError.textContent = problem; costError.hidden = false; }
+    });
     let status;
     if (left <= 0) status = 'Goal reached!';
     else {
@@ -4347,7 +4410,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -4390,6 +4453,7 @@ function undoToastMessage(collectionName, before, after) {
     if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}`;
     if (after.guessName) return `Added expected cost ${after.guessName}`;
     if (after.goalName) return `Added goal ${after.goalName}`;
+    if (after.goalItemFor) return `Added cost ${after.itemName}`;
     if (after.savedFor) {
       const goal = income.find((r) => r.id === after.savedFor);
       return `${after.amount < 0 ? 'Took out' : 'Saved'} ${formatMoney(Math.abs(after.amount))}${goal ? ` ${after.amount < 0 ? 'from' : 'toward'} ${goal.goalName}` : ''}`;
@@ -4402,6 +4466,7 @@ function undoToastMessage(collectionName, before, after) {
   if (after.spentOn && after.deleted && !before.deleted) return 'Deleted expense';
   if (after.guessName && after.deleted && !before.deleted) return `Deleted ${after.guessName}`;
   if (after.goalName && after.deleted && !before.deleted) return `Deleted goal ${after.goalName}`;
+  if (after.goalItemFor && after.deleted && !before.deleted) return `Removed cost ${after.itemName}`;
   if (after.planName && !after.deleted && after.amount !== before.amount) {
     return `Changed ${after.planName} to ${formatMoney(after.amount)} per ${after.frequency === 'weekly' ? 'week' : 'month'}`;
   }
@@ -5286,7 +5351,7 @@ function setDataIoStatus(text, tone) {
 // Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
 // string "1200" instead of a number, or a date outside the forms' year range). Records in the income list come in
 // kinds, told apart by which field is present and checked in this order: spentOn (expense), planName (plan
-// category), goalName (savings goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
+// category), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
 // projectedFor (projected income), otherwise a plain income entry with a dateKey. A custom-repeat bill must
 // also have a readable every/unit (schedulePeriod). A name must not be empty: the app treats an empty one as absent.
 function isValidImportRecord(collectionName, rec) {
@@ -5318,6 +5383,7 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.goalItemFor !== undefined) return nonEmptyText(rec.goalItemFor) && nonEmptyText(rec.itemName) && isPositiveMoney(rec.amount);
     if (rec.savedFor !== undefined) return nonEmptyText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
     if (rec.guessName !== undefined) return nonEmptyText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
@@ -5399,6 +5465,7 @@ function describeContents() {
     [income.filter((r) => r.planName && !r.deleted).length, 'plan category', 'plan categories'],
     [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
     [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
+    [income.filter((r) => r.goalItemFor && !r.deleted).length, 'goal cost', 'goal costs'],
     [income.filter((r) => r.savedFor && !r.deleted).length, 'savings deposit or withdrawal', 'savings deposits and withdrawals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
   ].filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
@@ -5468,7 +5535,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 34;
+const APP_VERSION = 35;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

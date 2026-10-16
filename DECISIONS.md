@@ -209,3 +209,7 @@ A bill can repeat every N weeks or months (N a whole number from 1 to 99): `freq
 
 Found by reading every line of the code, CSS, HTML and server. Rules worth remembering: "last synced" and "first noticed sync was on" are two different clocks (`LAST_SYNC_AT_KEY` stays empty until a sync really happens, because the top bar reads it as "Synced ... ago"); a card's Edit form is closed before saving, because a redraw reopens any form still showing; the Expenses tab redraws on its own, so it keeps open Edit forms too; a bill's next due date is found from its occurrence numbers, so a yearly bill or one every 24 months shows the right date once paid; import refuses empty names and bad paid dates; the server also refuses a number such as 1e999, which would turn into `Infinity` in every reply. Not changed on purpose: the server still overwrites when a client version is ahead of its own, which only happens right after a server reset and is covered by the app reconciling first.
 
+## A savings goal can be split into costs
+
+Each cost is its own record in the `income` list (`goalItemFor` = the goal's id, `itemName`, `amount`, id `item-<id>`), like deposits, so two devices adding costs at once both count and the server needs no change (the id is not a date id). While a goal has any live costs its target is their total (`goalTarget`); with none it uses its own `target`, so older goals are untouched. Costs are added and removed (Undo works), not edited: remove one and add it again. Deleting a goal hides its costs and deposits together, and Undo brings them back.
+
