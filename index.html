@@ -260,6 +260,24 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <button type="submit">Add category</button>
           </form>
         </details>
+
+        <details class="fold" id="fold-guess" open>
+          <summary class="fold-summary"><h2>Expected One-Time Costs</h2></summary>
+          <p class="stats-line">Guesses for things you expect to pay in a certain month, like car maintenance. This month's guesses come off "left after plan" on Home. Replace a guess with the real number once you know it.</p>
+          <p class="stats-line" id="guess-total-line"></p>
+          <ul class="card-list flat-list" id="guess-list"></ul>
+          <p class="empty-state" id="guess-empty-state" hidden>No expected costs yet. Add one below.</p>
+          <form id="guess-add-form" class="add-form add-form-stacked">
+            <input type="text" id="guess-name-input" maxlength="60" placeholder="What for (e.g. Car maintenance)" required aria-label="What the cost is for">
+            <input type="number" inputmode="decimal" id="guess-amount-input" placeholder="Estimated amount" min="0.01" step="0.01" required aria-label="Estimated amount">
+            <label class="date-field">Month
+              <input type="month" id="guess-month-input" min="1990-01" max="2100-12" required aria-label="Month you expect it">
+            </label>
+            <input type="text" id="guess-notes-input" maxlength="500" placeholder="Notes (optional)" aria-label="Notes">
+            <p class="form-error" id="guess-form-error" hidden></p>
+            <button type="submit">Add expected cost</button>
+          </form>
+        </details>
       </div>
 
       <!-- Expenses: log what you actually spent, compared with the Spending Plan. -->
@@ -519,6 +537,35 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="number" inputmode="decimal" class="plan-edit-alt" placeholder="What-if amount (optional)" min="0" step="0.01" aria-label="Edit what-if amount">
       <input type="text" class="plan-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
       <p class="form-error plan-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One expected one-time cost (renderGuesses). It reuses the recurring income card's classes, so it looks the same. -->
+<template id="guess-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount guess-amount"></span>
+        <span class="recurring-income-frequency guess-month"></span>
+        <span class="recurring-income-start guess-notes" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="text" class="guess-edit-name" maxlength="60" placeholder="What for" required aria-label="Edit what the cost is for">
+      <input type="number" inputmode="decimal" class="guess-edit-amount" placeholder="Estimated amount" min="0.01" step="0.01" required aria-label="Edit estimated amount">
+      <input type="month" class="guess-edit-month" min="1990-01" max="2100-12" required aria-label="Edit month">
+      <input type="text" class="guess-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
+      <p class="form-error guess-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>

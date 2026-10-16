@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the five Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 11 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, the five Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 12 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -763,3 +763,20 @@ check('chart bars are hidden from screen readers (the numbers say it in text)', 
 check('formatAgo speaks in minutes, hours and days', formatAgo(new Date()) === 'just now' && formatAgo(new Date(Date.now() - 5 * 60000)) === '5m ago' && formatAgo(new Date(Date.now() - 3 * 3600000)) === '3h ago' && formatAgo(new Date(Date.now() - 2 * 86400000)) === '2 days ago' && formatAgo(new Date(Date.now() - 86400000)) === '1 day ago');
 check('the last sync time is read back from storage', (() => { localStorage.setItem(LAST_SYNC_AT_KEY, new Date(Date.now() - 4 * 86400000).toISOString()); return lastSyncTime() !== null && /^4 days ago$/.test(formatAgo(lastSyncTime())); })());
 hideUndoToast(); income.length = 0; bills.length = 0; localStorage.removeItem(LAST_SYNC_AT_KEY); showTab('home'); renderBudget();
+
+// ---- expected one-time costs (guesses) ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; hideUndoToast();
+const thisMonthKey = todayKey().slice(0, 7);
+check('a guess needs a name, an amount and a real month', guessFieldsError({ name: '', amountRaw: '5', month: thisMonthKey }) !== '' && guessFieldsError({ name: 'x', amountRaw: '0', month: thisMonthKey }) !== '' && guessFieldsError({ name: 'x', amountRaw: '5', month: '2026-13' }) !== '' && guessFieldsError({ name: 'x', amountRaw: '5', month: '' }) !== '' && guessFieldsError({ name: 'x', amountRaw: '5', month: thisMonthKey }) === '');
+check('saving a guess stores it in the income list with no date', (() => { const p = saveGuess({ name: 'Car maintenance', amountRaw: '350', month: thisMonthKey, notes: 'oil and tyres' }); const r = income.find((x) => x.guessName === 'Car maintenance'); return p === '' && !!r && r.amount === 350 && !r.dateKey && /^guess-/.test(r.id) && r.guessMonth === thisMonthKey; })());
+check('a guess is not counted as income received', uniqueIncomeEntries(income).length === 0);
+check('this month\'s guesses add up', saveGuess({ name: 'Tyres', amountRaw: '100.50', month: thisMonthKey, notes: '' }) === '' && guessTotalForMonth(thisMonthKey) === 450.5);
+check('a guess for another month is not in this month\'s total', saveGuess({ name: 'Insurance', amountRaw: '900', month: '2099-01', notes: '' }) === '' && guessTotalForMonth(thisMonthKey) === 450.5 && guessTotalForMonth('2099-01') === 900);
+renderBudget();
+check('the Plan tab lists the guesses, soonest month first', (() => { const names = [...document.querySelectorAll('#guess-list .recurring-income-name')].map((e) => e.textContent); return names.length === 3 && names[2] === 'Insurance'; })());
+check('Home takes this month\'s guesses off "left after plan", even with no plan', (() => { const el = $('budget-month-left-total'); return el.hidden === false && /left after plan/.test(el.textContent) && /expected one-time costs/.test(el.title); })());
+check('editing a guess changes it and keeps one record', (() => { const r = income.find((x) => x.guessName === 'Tyres'); const n = income.length; return saveGuess({ name: 'Tyres', amountRaw: '120', month: thisMonthKey, notes: '' }, r.id) === '' && income.length === n && guessTotalForMonth(thisMonthKey) === 470; })());
+check('deleting a guess can be undone', await (async () => { const r = income.find((x) => x.guessName === 'Tyres'); deleteIncome(r.id); await sleep(30); const gone = guessTotalForMonth(thisMonthKey) === 350 && /Deleted Tyres/.test($('undo-toast-text').textContent); $('undo-toast-btn').click(); await sleep(30); return gone && guessTotalForMonth(thisMonthKey) === 470; })());
+check('import accepts a good guess and rejects a bad month or amount', isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '2026-10' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '2026-1' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: '5', guessMonth: '2026-10' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '3000-01' }));
+check('describeContents counts expected costs', /3 expected costs/.test(describeContents()), describeContents());
+income.length = 0; hideUndoToast(); renderBudget();

@@ -1857,17 +1857,20 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       'Income entered or expected this month minus every bill due this month (paid or not)';
   }
 
-  // What is left once the Spending Plan is also set aside: the month's net minus the planned spending for a month.
+  // What is left once the Spending Plan and this month's expected one-time costs are also set aside: the month's net
+  // minus the planned spending for a month minus the guesses entered for this month.
   const monthLeftEl = document.getElementById('budget-month-left-total');
   if (monthLeftEl) {
     const plans = planCategories();
-    monthLeftEl.hidden = plans.length === 0;
-    if (plans.length) {
+    const expectedMonth = guessTotalForMonth(todayKey().slice(0, 7));
+    monthLeftEl.hidden = plans.length === 0 && expectedMonth === 0;
+    if (!monthLeftEl.hidden) {
       const plannedMonth = plans.reduce((sum, r) => sum + planMonthly(planAmount(r), r.frequency), 0);
-      const monthLeft = monthNet - plannedMonth;
+      const monthLeft = monthNet - plannedMonth - expectedMonth;
       monthLeftEl.innerHTML =
         `${MONTH_NAMES[today.getMonth()]} left after plan: <strong class="${signedAmountClass(monthLeft)}">${formatSignedCurrency(monthLeft)}</strong>`;
-      monthLeftEl.title = `The month's net minus the ${formatMoney(plannedMonth)} a month your Spending Plan sets aside`;
+      monthLeftEl.title = `The month's net minus the ${formatMoney(plannedMonth)} a month your Spending Plan sets aside` +
+        (expectedMonth ? ` and the ${formatMoney(expectedMonth)} of expected one-time costs this month` : '');
     }
   }
 
@@ -2719,9 +2722,156 @@ document.getElementById('plan-add-form').addEventListener('submit', (e) => {
   document.getElementById('plan-name-input').focus();
 });
 
+// ---- Expected one-time costs (guesses) ----
+// A guess is a one-off cost you expect in a certain month, e.g. car maintenance. It is a record in the `income` list,
+// { id: 'guess-<id>', guessName, amount, guessMonth: 'YYYY-MM', notes, ...sync fields }, so it syncs and undoes like a
+// plan category with no change to the sync server. It has no `dateKey`, so income totals ignore it. Only the current
+// month's guesses are subtracted in "left after plan"; guesses for other months wait on the Plan tab.
+
+// Whether `value` is a month key like '2026-10' within the forms' year range.
+function isGuessMonth(value) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(typeof value === 'string' ? value : '');
+  return !!match && Number(match[1]) >= 1990 && Number(match[1]) <= 2100;
+}
+
+// The live guesses, soonest month first and then by name.
+function guessRecords() {
+  return income.filter((r) => r.guessName && !r.deleted)
+    .sort((a, b) => a.guessMonth.localeCompare(b.guessMonth) || a.guessName.localeCompare(b.guessName));
+}
+
+// What the guesses for one month ('YYYY-MM') add up to.
+function guessTotalForMonth(monthKey) {
+  return guessRecords().filter((r) => r.guessMonth === monthKey).reduce((sum, r) => sum + r.amount, 0);
+}
+
+// 'October 2026' for a month key.
+function guessMonthLabel(monthKey) {
+  return `${MONTH_NAMES[Number(monthKey.slice(5, 7)) - 1]} ${monthKey.slice(0, 4)}`;
+}
+
+// Checks the Add / Edit expected-cost fields and returns the first problem as a sentence ('' when they are fine).
+function guessFieldsError(fields) {
+  if (!fields.name.trim()) return 'Enter what the cost is for.';
+  const amount = Number(fields.amountRaw);
+  if (fields.amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  if (!isGuessMonth(fields.month)) return 'Choose the month you expect it.';
+  return '';
+}
+
+// Adds an expected cost, or changes the one with `id`. Returns the problem as a sentence, or '' when it was saved.
+function saveGuess(fields, id) {
+  const error = guessFieldsError(fields);
+  if (error) return error;
+  const values = {
+    guessName: fields.name.trim().slice(0, 60),
+    amount: Math.round(Number(fields.amountRaw) * 100) / 100, // whole cents, like bills
+    guessMonth: fields.month,
+    notes: fields.notes.trim().slice(0, 500),
+  };
+  const existing = id ? income.find((r) => r.id === id && r.guessName) : null;
+  if (existing) {
+    const before = structuredClone(existing);
+    Object.assign(existing, values);
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `guess-${makeId()}`, ...values,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// Draws the expected one-time costs on the Plan tab, with what this month's come to.
+function renderGuesses() {
+  const list = document.getElementById('guess-list');
+  const template = document.getElementById('guess-card-template');
+  list.innerHTML = '';
+  const records = guessRecords();
+  const thisMonth = todayKey().slice(0, 7);
+
+  records.forEach((record) => {
+    const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editError = node.querySelector('.guess-edit-error');
+    node.querySelector('.recurring-income-name').textContent = record.guessName;
+    node.querySelector('.guess-amount').textContent = formatMoney(record.amount);
+    node.querySelector('.guess-month').textContent = record.guessMonth < thisMonth
+      ? `${guessMonthLabel(record.guessMonth)} (past)` : guessMonthLabel(record.guessMonth);
+    const notesEl = node.querySelector('.guess-notes');
+    if (record.notes) { notesEl.textContent = record.notes; notesEl.hidden = false; }
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${record.guessName}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${record.guessName}`);
+
+    // Elements are captured now: once the fragment is appended it is empty, so node.querySelector would find nothing.
+    const nameBox = node.querySelector('.guess-edit-name');
+    const amountBox = node.querySelector('.guess-edit-amount');
+    const monthBox = node.querySelector('.guess-edit-month');
+    const notesBox = node.querySelector('.guess-edit-notes');
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      nameBox.value = record.guessName;
+      amountBox.value = String(record.amount);
+      monthBox.value = record.guessMonth;
+      notesBox.value = record.notes || '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      nameBox.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const problem = saveGuess({ name: nameBox.value, amountRaw: amountBox.value, month: monthBox.value, notes: notesBox.value }, record.id);
+      if (problem) { editError.textContent = problem; editError.hidden = false; }
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
+
+    list.appendChild(node);
+  });
+
+  document.getElementById('guess-empty-state').hidden = records.length !== 0;
+  const monthTotal = guessTotalForMonth(thisMonth);
+  document.getElementById('guess-total-line').textContent = monthTotal
+    ? `${guessMonthLabel(thisMonth)}: ${formatMoney(monthTotal)} expected, taken off "left after plan" on Home.` : '';
+}
+
+// Add expected cost form: validate, save, and clear the boxes (keeping the month) when it worked.
+document.getElementById('guess-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('guess-form-error');
+  const monthInput = document.getElementById('guess-month-input');
+  const problem = saveGuess({
+    name: document.getElementById('guess-name-input').value,
+    amountRaw: document.getElementById('guess-amount-input').value,
+    month: monthInput.value,
+    notes: document.getElementById('guess-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  const keepMonth = monthInput.value;
+  e.target.reset();
+  monthInput.value = keepMonth;
+  document.getElementById('guess-name-input').focus();
+});
+document.getElementById('guess-month-input').value = todayKey().slice(0, 7);
+
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form: which record, what is typed in each box, and which box had focus.
 function captureOpenCardForms() {
@@ -2800,6 +2950,7 @@ function renderBudget() {
   renderReceivedIncomeList();
   renderProjectedIncomeList();
   renderPlan();
+  renderGuesses();
   renderExpenses();
   restoreOpenCardForms(openCardForms);
 
@@ -3922,7 +4073,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -3962,12 +4113,14 @@ function undoToastMessage(collectionName, before, after) {
   const name = after.name || 'item';
   if (!before) {
     if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}`;
+    if (after.guessName) return `Added expected cost ${after.guessName}`;
     return collectionName === 'income' ? null : `Added ${name}`;
   }
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
   if (after.dateKey && after.deleted && !before.deleted) return 'Deleted income';
   if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
   if (after.spentOn && after.deleted && !before.deleted) return 'Deleted expense';
+  if (after.guessName && after.deleted && !before.deleted) return `Deleted ${after.guessName}`;
   if (after.planName && !after.deleted && after.amount !== before.amount) {
     return `Changed ${after.planName} to ${formatMoney(after.amount)} per ${after.frequency === 'weekly' ? 'week' : 'month'}`;
   }
@@ -4862,6 +5015,7 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
+    if (rec.guessName !== undefined) return isText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
     return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
   }
@@ -4939,6 +5093,7 @@ function describeContents() {
     [income.filter((r) => r.dateKey && !r.deleted).length, 'income entry', 'income entries'],
     [income.filter((r) => r.projectedFor && !r.deleted).length, 'projected income entry', 'projected income entries'],
     [income.filter((r) => r.planName && !r.deleted).length, 'plan category', 'plan categories'],
+    [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
   ].filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
   if (!counts.length) return 'The app is empty.';
@@ -5007,7 +5162,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 30;
+const APP_VERSION = 31;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

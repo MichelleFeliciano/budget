@@ -192,3 +192,8 @@ so colour is never the only sign. The Home month line "left after plan" is the m
 The Expenses tab's average per week (14 days of entries or more) can be made the plan amount in one tap (in the category's own
 weekly or monthly frequency) with an Undo. Quick Add amounts can be removed per device (they are only hidden, not deleted), and
 the form remembers the last expense category and the last income source typed.
+
+## Expected one-time costs are guesses stored in the income list, by month
+
+A one-off cost you expect (car maintenance) is a record in the `income` list with `guessName`, `amount` and `guessMonth` ('YYYY-MM'), id `guess-<id>`. Like plan categories it needs no server change: the id is not a date id, so it merges like a bill (delete always wins). It has no `dateKey`, so income totals ignore it. Only the current month's guesses reduce "left after plan"; other months' stay listed on the Plan tab. A guess is a month, not a day, because the point is "roughly when", and it is not tied to the Expenses tab, so logging the real cost does not remove the guess: delete it or edit it to the real number.
+

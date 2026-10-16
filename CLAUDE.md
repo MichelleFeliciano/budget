@@ -1,4 +1,4 @@
-# Budget
+﻿# Budget
 
 Personal bills and income tracker. Vanilla HTML/CSS/JS, zero dependencies, no build step, no CDN. The only
 network call is the optional manual "Sync now" to `SYNC_SERVER_URL`, Budget's own server (`server/sync_server.py`,
@@ -31,7 +31,7 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 505/505).
+  about 15 seconds. The title ends `OK n/n` (currently 516/516).
 - Python: `python -m unittest discover -s tests` (app file checks plus the sync server tests).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:
