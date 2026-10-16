@@ -213,3 +213,7 @@ Found by reading every line of the code, CSS, HTML and server. Rules worth remem
 
 Each cost is its own record in the `income` list (`goalItemFor` = the goal's id, `itemName`, `amount`, id `item-<id>`), like deposits, so two devices adding costs at once both count and the server needs no change (the id is not a date id). While a goal has any live costs its target is their total (`goalTarget`); with none it uses its own `target`, so older goals are untouched. Costs are added and removed (Undo works), not edited: remove one and add it again. Deleting a goal hides its costs and deposits together, and Undo brings them back.
 
+## The rolled-forward number can be adjusted by week
+
+The Net carried into a week is worked out from bills and income, so it drifts when real spending differs. You type what you actually have carried into a week and the app stores the difference as an adjustment: a record in the `income` list (`adjustWeek` = that week's Monday, signed `amount`, `notes`, id `adjust-<id>`) added to the carry into that week and, by rolling, every week after. It adjusts the Net and the Projected net by the same amount. One adjustment per week: the newest live record counts, and typing the amount the app already works out removes it. It is a difference, not a fixed value, so a bill or income added to an earlier week later still moves the later weeks. Month totals do not roll forward and are unaffected. No server change: the id is not a date id.
+

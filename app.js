@@ -1784,6 +1784,125 @@ function carryTitle(base, carried) {
   return Math.abs(carried) < 0.005 ? base : `${base}. Includes ${formatSignedCurrency(carried)} from earlier weeks.`;
 }
 
+// ---- Carry-forward adjustments (correcting the rolled-forward number) ----
+// The Net rolled into a week is worked out from bills and income, so it drifts when real spending differs. An
+// adjustment is a record in the `income` list, { id: 'adjust-<id>', adjustWeek: <Monday of the week>, amount (signed),
+// notes, ...sync fields }, added to what is carried into that week and so into every week after it. There is one
+// per week (the newest live one counts), with no `dateKey`, so income totals ignore it, and its id is not a date id,
+// so the sync server needs no change. Month totals do not roll forward and are not affected.
+
+// The live adjustments by week: the Monday key to the newest record for that week.
+function weekAdjustments() {
+  const byWeek = new Map();
+  income.forEach((r) => {
+    if (!r.adjustWeek || r.deleted) return;
+    const current = byWeek.get(r.adjustWeek);
+    if (!current || (r.updatedAt || '') > (current.updatedAt || '')) byWeek.set(r.adjustWeek, r);
+  });
+  return byWeek;
+}
+
+// Sets what is carried into a week to the amount you actually have. calculatedCarry is what the app works out
+// without any adjustment for that week; the adjustment saved is the difference. Entering the calculated amount
+// removes the adjustment. Returns the problem as a sentence, or '' when it was saved.
+function setWeekCarry(weekKey, calculatedCarry, actualRaw, rawNote) {
+  const actual = Number(actualRaw);
+  if (actualRaw === '' || !Number.isFinite(actual) || Math.abs(actual) > MAX_MONEY) return 'Enter an amount up to $1,000,000,000 (it can be negative).';
+  const difference = Math.round((actual - calculatedCarry) * 100) / 100;
+  const existing = weekAdjustments().get(weekKey);
+  if (difference === 0) {
+    if (existing) deleteIncome(existing.id);
+    else renderBudget();
+    return '';
+  }
+  const notes = rawNote.trim().slice(0, 200);
+  if (existing) {
+    const before = structuredClone(existing);
+    existing.amount = difference;
+    existing.notes = notes;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `adjust-${makeId()}`, adjustWeek: weekKey, amount: difference, notes,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// The line under a week's Net: what it carried in was adjusted (if so, by how much and why), and an Adjust button
+// that opens a small form to type what you actually have carried in. shownCarry is the carried-in figure on screen,
+// calculatedCarry the same without this week's adjustment.
+function buildWeekAdjust(weekKey, calculatedCarry, shownCarry, adjustment) {
+  const wrap = document.createElement('div');
+  wrap.className = 'budget-week-adjust';
+  const summary = document.createElement('span');
+  summary.className = 'budget-week-adjusted';
+  if (adjustment) summary.textContent = `Carried in adjusted by ${formatSignedCurrency(adjustment.amount)}${adjustment.notes ? ` (${adjustment.notes})` : ''}`;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'small-btn';
+  button.textContent = adjustment ? 'Change' : 'Adjust carried in';
+  button.setAttribute('aria-label', `Adjust the amount carried into the week of ${formatDateKeyShort(weekKey)}`);
+
+  const form = document.createElement('form');
+  form.className = 'week-adjust-form';
+  form.hidden = true;
+  const amountBox = document.createElement('input');
+  amountBox.type = 'number';
+  amountBox.step = '0.01';
+  amountBox.inputMode = 'decimal';
+  amountBox.required = true;
+  amountBox.setAttribute('aria-label', 'What you actually have carried into this week');
+  const noteBox = document.createElement('input');
+  noteBox.type = 'text';
+  noteBox.maxLength = 200;
+  noteBox.placeholder = 'Why (optional, e.g. extra gas)';
+  noteBox.setAttribute('aria-label', 'Why the carried-in amount changed');
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'small-btn';
+  save.textContent = 'Save';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'small-btn';
+  cancel.textContent = 'Cancel';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'small-btn';
+  reset.textContent = 'Reset';
+  reset.hidden = !adjustment;
+  const error = document.createElement('span');
+  error.className = 'form-error';
+  error.hidden = true;
+  form.append(amountBox, noteBox, save, reset, cancel, error);
+
+  button.addEventListener('click', () => {
+    amountBox.value = String(Math.round(shownCarry * 100) / 100);
+    noteBox.value = adjustment ? adjustment.notes || '' : '';
+    error.hidden = true;
+    form.hidden = false;
+    amountBox.focus();
+  });
+  cancel.addEventListener('click', () => { form.hidden = true; });
+  reset.addEventListener('click', () => { if (adjustment) deleteIncome(adjustment.id); });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const problem = setWeekCarry(weekKey, calculatedCarry, amountBox.value, noteBox.value);
+    if (problem) { error.textContent = problem; error.hidden = false; }
+  });
+  wrap.append(summary, button, form);
+  return wrap;
+}
+
 // How many weeks back the running net is added up (older weeks are left out, so a very old income entry cannot
 // make every redraw slow).
 const MAX_ROLLOVER_WEEKS = 104;
@@ -1791,11 +1910,13 @@ const MAX_ROLLOVER_WEEKS = 104;
 // The Net and Projected net carried into the week that starts on thisWeekKey: every earlier week's income minus
 // its bills, added up from the Monday of the earliest income there is (a typed entry or a recurring source) so
 // money left over, or a shortfall, rolls forward. Projected net also counts the projected income of earlier days
-// that have no real income. Both are 0 when there is no earlier income to start from.
-function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates) {
+// that have no real income. Each earlier week's carry-forward adjustment (see weekAdjustments) is added at the start
+// of that week. Both are 0 when there is no earlier income to start from.
+function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates, adjustments = new Map()) {
   const firstDates = [
     ...nonDeletedIncome.map((r) => r.dateKey),
     ...nonDeletedRecurringIncome.map((r) => r.dueDate),
+    ...adjustments.keys(), // an adjusted week counts even when nothing earlier than it was ever entered
   ].filter(Boolean).sort();
   if (!firstDates.length) return { net: 0, projectedNet: 0 };
   const earliestStart = shiftDateKey(weekStartKey(todayKey()), -7 * MAX_ROLLOVER_WEEKS); // fixed to today, so sliding the calendar never changes a week's figure
@@ -1814,8 +1935,9 @@ function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecur
         projected += projectedMap.get(dateKey).reduce((sum, r) => sum + r.projected, 0);
       }
     }
-    net += weekIncome - due;
-    projectedNet += weekIncome + projected - due;
+    const adjustment = adjustments.has(ws) ? adjustments.get(ws).amount : 0;
+    net += adjustment + weekIncome - due;
+    projectedNet += adjustment + weekIncome + projected - due;
   }
   return { net, projectedNet };
 }
@@ -1892,7 +2014,8 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   calendarEl.querySelectorAll('.budget-week').forEach((el) => el.remove());
 
   // The Net and Projected net roll forward: each week starts from what the weeks before it left over.
-  const carry = netCarriedInto(windowDays[0], nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates);
+  const adjustments = weekAdjustments();
+  const carry = netCarriedInto(windowDays[0], nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates, adjustments);
   let rolledNet = carry.net;
   let rolledProjectedNet = carry.projectedNet;
   for (let weekIndex = 0; weekIndex < 3; weekIndex++) {
@@ -2109,6 +2232,10 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     incomeTotalEl.innerHTML = `Income: <strong>${formatSignedCurrency(weekIncome)}</strong>`;
     weekEl.appendChild(incomeTotalEl);
 
+    // This week's adjustment (if any) changes what is carried in, for the Net and the Projected net alike.
+    const calculatedCarry = rolledNet;
+    const adjustment = adjustments.get(weekDays[0]);
+    if (adjustment) { rolledNet += adjustment.amount; rolledProjectedNet += adjustment.amount; }
     const carriedNet = rolledNet;
     const weekNet = carriedNet + weekIncome - weekTotalDue;
     rolledNet = weekNet;
@@ -2118,6 +2245,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     netTotalEl.title = carryTitle(
       'Income entered or expected this week minus every bill due this week (paid or not), plus what the weeks before it left over', carriedNet);
     weekEl.appendChild(netTotalEl);
+    weekEl.appendChild(buildWeekAdjust(weekDays[0], calculatedCarry, carriedNet, adjustment));
 
     // What is left to pay this week: bills due in it that are not ticked paid yet.
     const weekLeft = amountDueInRange(weekDays[0], weekEndKey, nonDeletedBills, true);
@@ -4410,7 +4538,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -4454,6 +4582,7 @@ function undoToastMessage(collectionName, before, after) {
     if (after.guessName) return `Added expected cost ${after.guessName}`;
     if (after.goalName) return `Added goal ${after.goalName}`;
     if (after.goalItemFor) return `Added cost ${after.itemName}`;
+    if (after.adjustWeek) return 'Adjusted the amount carried forward';
     if (after.savedFor) {
       const goal = income.find((r) => r.id === after.savedFor);
       return `${after.amount < 0 ? 'Took out' : 'Saved'} ${formatMoney(Math.abs(after.amount))}${goal ? ` ${after.amount < 0 ? 'from' : 'toward'} ${goal.goalName}` : ''}`;
@@ -4467,6 +4596,8 @@ function undoToastMessage(collectionName, before, after) {
   if (after.guessName && after.deleted && !before.deleted) return `Deleted ${after.guessName}`;
   if (after.goalName && after.deleted && !before.deleted) return `Deleted goal ${after.goalName}`;
   if (after.goalItemFor && after.deleted && !before.deleted) return `Removed cost ${after.itemName}`;
+  if (after.adjustWeek && after.deleted && !before.deleted) return 'Removed the carry-forward adjustment';
+  if (after.adjustWeek && !after.deleted && after.amount !== before.amount) return 'Changed the carry-forward adjustment';
   if (after.planName && !after.deleted && after.amount !== before.amount) {
     return `Changed ${after.planName} to ${formatMoney(after.amount)} per ${after.frequency === 'weekly' ? 'week' : 'month'}`;
   }
@@ -5351,7 +5482,7 @@ function setDataIoStatus(text, tone) {
 // Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
 // string "1200" instead of a number, or a date outside the forms' year range). Records in the income list come in
 // kinds, told apart by which field is present and checked in this order: spentOn (expense), planName (plan
-// category), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
+// category), adjustWeek (a carry-forward adjustment), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
 // projectedFor (projected income), otherwise a plain income entry with a dateKey. A custom-repeat bill must
 // also have a readable every/unit (schedulePeriod). A name must not be empty: the app treats an empty one as absent.
 function isValidImportRecord(collectionName, rec) {
@@ -5383,6 +5514,7 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.adjustWeek !== undefined) return isDate(rec.adjustWeek) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY && textOrMissing(rec.notes);
     if (rec.goalItemFor !== undefined) return nonEmptyText(rec.goalItemFor) && nonEmptyText(rec.itemName) && isPositiveMoney(rec.amount);
     if (rec.savedFor !== undefined) return nonEmptyText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
     if (rec.guessName !== undefined) return nonEmptyText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
@@ -5466,6 +5598,7 @@ function describeContents() {
     [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
     [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
     [income.filter((r) => r.goalItemFor && !r.deleted).length, 'goal cost', 'goal costs'],
+    [income.filter((r) => r.adjustWeek && !r.deleted).length, 'carry-forward adjustment', 'carry-forward adjustments'],
     [income.filter((r) => r.savedFor && !r.deleted).length, 'savings deposit or withdrawal', 'savings deposits and withdrawals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
   ].filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
@@ -5535,7 +5668,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 35;
+const APP_VERSION = 36;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

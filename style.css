@@ -1574,6 +1574,56 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.85rem;
 }
 
+/* Under a week's Net: what it carried in was adjusted by (if so) and the button to adjust it. */
+
+.budget-week-adjust {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+
+/* The note saying the carried-in amount was adjusted. */
+
+.budget-week-adjusted {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+/* The small form that opens under the button: the amount you have, why, and Save / Reset / Cancel. */
+
+.week-adjust-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Hidden until Adjust is pressed (the flex display above would otherwise show it). */
+
+.week-adjust-form[hidden] { display: none; }
+
+/* The boxes in that form look like the other form boxes (they sit outside any .add-form). */
+
+.week-adjust-form input {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* The error line takes a row of its own. */
+
+.week-adjust-form .form-error { flex: 1 1 100%; }
+
 /* The Earlier / Today / Later buttons above the calendar. */
 
 .calendar-nav {
@@ -2242,7 +2292,7 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* The seven days take the whole width of the week box. */
 
-  .budget-week-cells { grid-column: 1 / -1; }
+  .budget-week-cells, .budget-week-adjust { grid-column: 1 / -1; }
 
   /* Each total reads from the left, under its own column. */
 

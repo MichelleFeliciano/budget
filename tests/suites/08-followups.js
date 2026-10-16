@@ -853,3 +853,28 @@ check('Remove takes a cost off and the target follows', await (async () => { con
 check('removing every cost goes back to the goal\'s own target', (() => { goalCosts(tripId).forEach((c) => deleteIncome(c.id)); return goalTarget(income.find((r) => r.id === tripId)) === 1000; })());
 check('import accepts a good cost and rejects a bad one, and describeContents counts them', isValidImportRecord('income', { id: 'item-1', goalItemFor: 'goal-1', itemName: 'a', amount: 5 }) && !isValidImportRecord('income', { id: 'item-1', goalItemFor: 'goal-1', itemName: '', amount: 5 }) && !isValidImportRecord('income', { id: 'item-1', goalItemFor: 'goal-1', itemName: 'a', amount: 0 }) && (() => { addGoalCost(tripId, 'One', '5'); return /1 goal cost/.test(describeContents()); })());
 income.length = 0; hideUndoToast(); renderBudget();
+
+// ---- adjusting the rolled-forward number ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; showTab('home'); calendarWeekOffset = 0; hideUndoToast();
+const wsA = weekStartKey(shiftDateKey(todayKey(), -7));
+setIncomeForDate(shiftDateKey(wsA, 1), '500'); addBill({ name: 'Adj rent', amount: '120', dueDate: shiftDateKey(wsA, 2), frequency: 'one_time', category: '', autopay: false });
+renderBudget();
+const adjNets = () => [...document.querySelectorAll('.budget-week-net-total')].map((el) => el.textContent.replace(/\s+/g, ' ').trim());
+const adjustWeekForm = (index) => document.querySelectorAll('.budget-week')[index].querySelector('.week-adjust-form');
+const submitAdjust = async (index, actual, note) => { const week = document.querySelectorAll('.budget-week')[index]; week.querySelector('.budget-week-adjust > button').click(); const form = week.querySelector('.week-adjust-form'); form.querySelector('input[type="number"]').value = actual; form.querySelector('input[type="text"]').value = note; form.requestSubmit(); await sleep(30); };
+check('every week offers an Adjust button, and its box starts at the carried-in amount', (() => { const week = document.querySelectorAll('.budget-week')[1]; week.querySelector('.budget-week-adjust > button').click(); return document.querySelectorAll('.budget-week-adjust > button').length === 3 && adjustWeekForm(1).querySelector('input[type="number"]').value === '380'; })());
+await submitAdjust(1, '300', 'extra gas');
+check('typing what you really have changes that week and the weeks after it, not the one before', adjNets().join('|') === 'Net: $380.00|Net: $300.00|Net: $300.00', adjNets().join('|'));
+check('the adjustment is one record that says why, and the week says it was adjusted', income.filter((r) => r.adjustWeek).length === 1 && income.find((r) => r.adjustWeek).amount === -80 && !income.find((r) => r.adjustWeek).dateKey && /adjusted by -\$80\.00 \(extra gas\)/.test(document.querySelectorAll('.budget-week')[1].querySelector('.budget-week-adjusted').textContent));
+check('the hover text counts the adjusted carry', /Includes \$300\.00 from earlier weeks/.test(document.querySelectorAll('.budget-week-net-total')[1].title) || /Includes/.test(document.querySelectorAll('.budget-week-net-total')[2].title));
+await submitAdjust(1, '350', 'less gas');
+check('adjusting the same week again updates the one record', income.filter((r) => r.adjustWeek && !r.deleted).length === 1 && adjNets().join('|') === 'Net: $380.00|Net: $350.00|Net: $350.00', adjNets().join('|'));
+check('an adjustment is not income received, and month totals are untouched', uniqueIncomeEntries(income).length === 1 && /net:/i.test(document.querySelector('#budget-month-net-total').textContent));
+await submitAdjust(2, '350', '');
+check('typing the amount the app already works out adds nothing', income.filter((r) => r.adjustWeek && !r.deleted).length === 1);
+document.querySelectorAll('.budget-week')[1].querySelector('.budget-week-adjust > button').click();
+document.querySelectorAll('.budget-week')[1].querySelector('.week-adjust-form button:nth-of-type(2)').click(); await sleep(30);
+check('Reset removes the adjustment and Undo brings it back', await (async () => { const gone = adjNets().join('|') === 'Net: $380.00|Net: $380.00|Net: $380.00' && /Removed the carry-forward adjustment/.test($('undo-toast-text').textContent); $('undo-toast-btn').click(); await sleep(30); return gone && adjNets()[1] === 'Net: $350.00'; })(), adjNets().join('|'));
+check('a bad amount is refused with a message', setWeekCarry(wsA, 0, '', '') !== '' && setWeekCarry(wsA, 0, '9999999999', '') !== '');
+check('import accepts a good adjustment and rejects a bad one, and describeContents counts them', isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-10-05', amount: -80, notes: 'x' }) && !isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-13-05', amount: -80 }) && !isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-10-05', amount: 0 }) && /1 carry-forward adjustment/.test(describeContents()), describeContents());
+income.length = 0; bills.length = 0; hideUndoToast(); renderBudget();
