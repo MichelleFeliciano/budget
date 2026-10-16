@@ -392,8 +392,17 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <option value="weekly">Weekly</option>
             <option value="biweekly">Biweekly</option>
             <option value="yearly">Yearly</option>
+            <option value="custom">Custom (every X weeks or months)</option>
             <option value="one_time">One-time (no recurrence)</option>
           </select>
+          <!-- Shown only while Custom is chosen (see syncCustomRepeat). -->
+          <div class="custom-repeat" hidden>
+            <label>Repeat every <input type="number" inputmode="numeric" id="budget-every-input" min="1" max="99" step="1" value="6" aria-label="Repeat every how many"></label>
+            <select id="budget-unit-input" aria-label="Weeks or months">
+              <option value="weeks">weeks</option>
+              <option value="months">months</option>
+            </select>
+          </div>
           <input type="text" id="budget-category-input" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Bill category">
           <label class="check-field"><input type="checkbox" id="budget-autopay-input"> Pays automatically (autopay)</label>
           <!-- Offered only for a repeating bill with a due date in the past (see updateCaughtUpOption). -->
@@ -472,8 +481,17 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <option value="weekly">Weekly</option>
         <option value="biweekly">Biweekly</option>
         <option value="yearly">Yearly</option>
+        <option value="custom">Custom (every X weeks or months)</option>
         <option value="one_time">One-time (no recurrence)</option>
       </select>
+      <!-- Shown only while Custom is chosen (see syncCustomRepeat). -->
+      <div class="custom-repeat" hidden>
+        <label>Repeat every <input type="number" inputmode="numeric" class="bill-edit-every" min="1" max="99" step="1" value="6" aria-label="Edit: repeat every how many"></label>
+        <select class="bill-edit-unit" aria-label="Edit: weeks or months">
+          <option value="weeks">weeks</option>
+          <option value="months">months</option>
+        </select>
+      </div>
       <input type="text" class="bill-edit-category" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Edit bill category">
       <label class="check-field"><input type="checkbox" class="bill-edit-autopay"> Pays automatically (autopay)</label>
       <p class="form-error bill-edit-error" hidden></p>

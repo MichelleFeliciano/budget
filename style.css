@@ -1328,6 +1328,23 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .goal-save-row input { width: 110px; }
 
+/* The "Repeat every [6] weeks" row under a bill's frequency box. */
+
+.custom-repeat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Hidden unless Custom is chosen (the flex display above would otherwise show it). */
+
+.custom-repeat[hidden] { display: none; }
+
+/* The number box is narrow: it only holds one or two digits. */
+
+.custom-repeat input { width: 72px; }
+
 /* The Edit amounts and Show hidden amounts buttons sit in a row above the Quick Add amounts. */
 
 .expense-quick-tools {

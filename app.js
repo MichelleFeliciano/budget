@@ -376,11 +376,37 @@ function recordUndo(collectionName, id, before, after) {
 // localStorage key for the bills list.
 const BILLS_KEY = 'budgetApp.bills.v1';
 // How often a bill repeats, and the label shown for each option.
-const BILL_FREQUENCIES = ['one_time', 'weekly', 'biweekly', 'monthly', 'yearly'];
+const BILL_FREQUENCIES = ['one_time', 'weekly', 'biweekly', 'monthly', 'yearly', 'custom'];
 // Display text for each bill repeat option.
 const BILL_FREQUENCY_LABELS = {
-  one_time: 'One-time', weekly: 'Weekly', biweekly: 'Biweekly', monthly: 'Monthly', yearly: 'Yearly',
+  one_time: 'One-time', weekly: 'Weekly', biweekly: 'Biweekly', monthly: 'Monthly', yearly: 'Yearly', custom: 'Custom',
 };
+// A custom bill repeats every `every` weeks or months: a whole number from 1 up to this.
+const MAX_REPEAT_EVERY = 99;
+
+// How often a bill repeats, in words: "Monthly", or "Every 6 weeks" for a custom one.
+function billFrequencyLabel(bill) {
+  if (bill.frequency !== 'custom') return BILL_FREQUENCY_LABELS[bill.frequency] || bill.frequency;
+  const unit = bill.unit === 'weeks' ? 'week' : 'month';
+  return bill.every === 1 ? `Every ${unit}` : `Every ${bill.every} ${unit}s`;
+}
+
+// The repeat step of a schedule: { unit: 'days', step } or { unit: 'months', step }, or null for a one-time schedule
+// or a custom one whose number or unit is unreadable (such a schedule never comes due).
+function schedulePeriod(bill) {
+  switch (bill.frequency) {
+    case 'weekly': return { unit: 'days', step: 7 };
+    case 'biweekly': return { unit: 'days', step: 14 };
+    case 'monthly': return { unit: 'months', step: 1 };
+    case 'yearly': return { unit: 'months', step: 12 };
+    case 'custom':
+      if (!Number.isInteger(bill.every) || bill.every < 1 || bill.every > MAX_REPEAT_EVERY) return null;
+      if (bill.unit === 'weeks') return { unit: 'days', step: bill.every * 7 };
+      if (bill.unit === 'months') return { unit: 'months', step: bill.every };
+      return null;
+    default: return null;
+  }
+}
 
 // Every bill, including deleted ones (kept as tombstones), loaded and upgraded at startup.
 let bills = migrateSyncFields(loadCollection(BILLS_KEY), BILLS_KEY, getDeviceId());
@@ -452,30 +478,20 @@ function shiftDateKey(key, deltaDays) {
 function occursOnDate(bill, dateKey) {
   if (bill.frequency === 'one_time') return dateKey === bill.dueDate;
 
+  const period = schedulePeriod(bill);
+  if (!period) return false;
+
+  if (period.unit === 'days') {
+    const dayDiff = utcDayDiff(bill.dueDate, dateKey);
+    return dayDiff >= 0 && dayDiff % period.step === 0;
+  }
+
+  // Whole months from the first date; a day the month does not have (the 31st) falls on the month's last day.
   const anchor = parseDateKey(bill.dueDate);
   const candidate = parseDateKey(dateKey);
-
-  if (bill.frequency === 'weekly' || bill.frequency === 'biweekly') {
-    const period = bill.frequency === 'weekly' ? 7 : 14;
-    const dayDiff = utcDayDiff(bill.dueDate, dateKey);
-    return dayDiff >= 0 && dayDiff % period === 0;
-  }
-
-  if (bill.frequency === 'monthly') {
-    const monthOffset = (candidate.y - anchor.y) * 12 + (candidate.m - anchor.m);
-    if (monthOffset < 0) return false;
-    const expectedDay = Math.min(anchor.d, daysInMonth(candidate.y, candidate.m));
-    return candidate.d === expectedDay;
-  }
-
-  if (bill.frequency === 'yearly') {
-    const yearOffset = candidate.y - anchor.y;
-    if (yearOffset < 0 || candidate.m !== anchor.m) return false;
-    const expectedDay = Math.min(anchor.d, daysInMonth(candidate.y, candidate.m));
-    return candidate.d === expectedDay;
-  }
-
-  return false;
+  const monthOffset = (candidate.y - anchor.y) * 12 + (candidate.m - anchor.m);
+  if (monthOffset < 0 || monthOffset % period.step !== 0) return false;
+  return candidate.d === Math.min(anchor.d, daysInMonth(candidate.y, candidate.m));
 }
 
 // Closed-form occurrence count through a date, no day-by-day loop: "how many times has this bill (or
@@ -485,31 +501,17 @@ function occurrenceCountThrough(bill, throughKey) {
   if (throughKey < bill.dueDate) return 0;
   if (bill.frequency === 'one_time') return 1;
 
+  const period = schedulePeriod(bill);
+  if (!period) return 0;
+
+  if (period.unit === 'days') return Math.floor(utcDayDiff(bill.dueDate, throughKey) / period.step) + 1;
+
+  // The last whole step that fits, counted only once its own date has arrived.
   const anchor = parseDateKey(bill.dueDate);
   const through = parseDateKey(throughKey);
-
-  if (bill.frequency === 'weekly' || bill.frequency === 'biweekly') {
-    const period = bill.frequency === 'weekly' ? 7 : 14;
-    const dayDiff = utcDayDiff(bill.dueDate, throughKey);
-    return Math.floor(dayDiff / period) + 1;
-  }
-
-  if (bill.frequency === 'monthly') {
-    const monthOffsetMax = (through.y - anchor.y) * 12 + (through.m - anchor.m);
-    const expectedDay = Math.min(anchor.d, daysInMonth(through.y, through.m));
-    const lastOccurrenceKey = dateKeyFromParts(through.y, through.m, expectedDay);
-    // If this month's occurrence hasn't happened yet as of throughKey, don't count it.
-    return lastOccurrenceKey <= throughKey ? monthOffsetMax + 1 : monthOffsetMax;
-  }
-
-  if (bill.frequency === 'yearly') {
-    const yearOffsetMax = through.y - anchor.y;
-    const expectedDay = Math.min(anchor.d, daysInMonth(anchor.y + yearOffsetMax, anchor.m));
-    const lastOccurrenceKey = dateKeyFromParts(anchor.y + yearOffsetMax, anchor.m, expectedDay);
-    return lastOccurrenceKey <= throughKey ? yearOffsetMax + 1 : yearOffsetMax;
-  }
-
-  return 0;
+  const monthOffset = (through.y - anchor.y) * 12 + (through.m - anchor.m);
+  const lastIndex = Math.floor(monthOffset / period.step);
+  return nthOccurrenceDate(bill, lastIndex) <= throughKey ? lastIndex + 1 : lastIndex;
 }
 
 // A payment is worth what was paid when it was marked paid, not whatever the bill's amount is
@@ -933,7 +935,12 @@ function validateBillFields(fields) {
   if (!dueDate) return { ok: false, error: 'Due date is required.' };
   if (!isReasonableDateKey(dueDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
   const frequency = BILL_FREQUENCIES.includes(fields.frequency) ? fields.frequency : 'monthly';
-  return { ok: true, name: trimmedName, amount, dueDate, frequency, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
+  const every = frequency === 'custom' ? Number(fields.every) : undefined;
+  const unit = frequency === 'custom' ? fields.unit : undefined;
+  if (frequency === 'custom' && !schedulePeriod({ frequency, every, unit })) {
+    return { ok: false, error: `Repeat every needs a whole number from 1 to ${MAX_REPEAT_EVERY}, in weeks or months.` };
+  }
+  return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
 }
 
 // A category typed in another case ("utilities") takes the spelling already in use ("Utilities"), so the
@@ -977,6 +984,7 @@ function addBill(fields) {
     deleted: false,
     version: 0,
   };
+  if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; }
   // "I'm caught up": every date up to paidThrough starts out paid (one undo still removes the whole bill).
   if (fields.paidThrough) {
     const dates = occurrenceDatesThrough(bill, fields.paidThrough);
@@ -992,22 +1000,15 @@ function addBill(fields) {
 
 // The date of a schedule's nth (0-based) occurrence, or null if it has none.
 function nthOccurrenceDate(bill, n) {
-  const anchor = parseDateKey(bill.dueDate);
   if (bill.frequency === 'one_time') return n === 0 ? bill.dueDate : null;
-  if (bill.frequency === 'weekly' || bill.frequency === 'biweekly') {
-    return shiftDateKey(bill.dueDate, n * (bill.frequency === 'weekly' ? 7 : 14));
-  }
-  if (bill.frequency === 'monthly') {
-    const total = anchor.y * 12 + anchor.m + n;
-    const y = Math.floor(total / 12);
-    const m = total % 12;
-    return dateKeyFromParts(y, m, Math.min(anchor.d, daysInMonth(y, m)));
-  }
-  if (bill.frequency === 'yearly') {
-    const y = anchor.y + n;
-    return dateKeyFromParts(y, anchor.m, Math.min(anchor.d, daysInMonth(y, anchor.m)));
-  }
-  return null;
+  const period = schedulePeriod(bill);
+  if (!period) return null;
+  if (period.unit === 'days') return shiftDateKey(bill.dueDate, n * period.step);
+  const anchor = parseDateKey(bill.dueDate);
+  const total = anchor.y * 12 + anchor.m + n * period.step;
+  const y = Math.floor(total / 12);
+  const m = total % 12;
+  return dateKeyFromParts(y, m, Math.min(anchor.d, daysInMonth(y, m)));
 }
 
 // Every date a bill is due on, from its first one up to and including throughKey (5000 at most, as a safety stop).
@@ -1048,7 +1049,7 @@ function updateBill(id, fields) {
   const result = validateBillFields(fields);
   if (!result.ok) return result;
   const before = structuredClone(bill);
-  const oldSchedule = { dueDate: bill.dueDate, frequency: bill.frequency };
+  const oldSchedule = { dueDate: bill.dueDate, frequency: bill.frequency, every: bill.every, unit: bill.unit };
   // Changing the amount must not rewrite money that was already paid: record each existing
   // payment at the amount it was actually paid before the new amount takes effect.
   if (result.amount !== bill.amount) {
@@ -1062,12 +1063,14 @@ function updateBill(id, fields) {
   bill.amount = result.amount;
   bill.dueDate = result.dueDate;
   bill.frequency = result.frequency;
+  if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; } else { delete bill.every; delete bill.unit; }
   bill.category = result.category;
   bill.autopay = result.autopay;
   // Changing when a bill is due must not orphan the payments already marked
   // paid: each paid occurrence moves to the same-numbered occurrence of the
   // new schedule (the 3rd payment stays the 3rd payment), so totals don't jump.
-  if (oldSchedule.dueDate !== bill.dueDate || oldSchedule.frequency !== bill.frequency) {
+  if (oldSchedule.dueDate !== bill.dueDate || oldSchedule.frequency !== bill.frequency
+    || oldSchedule.every !== bill.every || oldSchedule.unit !== bill.unit) {
     const moved = [];
     const movedAmounts = {};
     (bill.paidDates || []).forEach((d) => {
@@ -2195,7 +2198,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const dueEl = node.querySelector('.bill-due');
     dueEl.textContent = due.text;
     dueEl.classList.toggle('bill-due-late', due.late);
-    node.querySelector('.bill-frequency').textContent = BILL_FREQUENCY_LABELS[bill.frequency] || bill.frequency;
+    node.querySelector('.bill-frequency').textContent = billFrequencyLabel(bill);
 
     const categoryEl = node.querySelector('.bill-category');
     if (bill.category) {
@@ -2254,6 +2257,8 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const editAmountInput = node.querySelector('.bill-edit-amount');
     const editDueDateInput = node.querySelector('.bill-edit-duedate');
     const editFrequencyInput = node.querySelector('.bill-edit-frequency');
+    const editEveryInput = node.querySelector('.bill-edit-every');
+    const editUnitInput = node.querySelector('.bill-edit-unit');
     const editCategoryInput = node.querySelector('.bill-edit-category');
     const editAutopayInput = node.querySelector('.bill-edit-autopay');
     const editError = node.querySelector('.bill-edit-error');
@@ -2269,6 +2274,9 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       editAmountInput.value = String(bill.amount);
       editDueDateInput.value = bill.dueDate;
       editFrequencyInput.value = bill.frequency;
+      editEveryInput.value = String(bill.every || 6);
+      editUnitInput.value = bill.unit || 'weeks';
+      syncCustomRepeat(editFrequencyInput);
       editCategoryInput.value = bill.category || '';
       editAutopayInput.checked = !!bill.autopay;
       editError.hidden = true;
@@ -2293,6 +2301,8 @@ function renderBudgetList(nonDeletedBills, openEdit) {
         amount: editAmountInput.value,
         dueDate: editDueDateInput.value,
         frequency: editFrequencyInput.value,
+        every: editEveryInput.value,
+        unit: editUnitInput.value,
         category: editCategoryInput.value,
         autopay: editAutopayInput.checked,
       });
@@ -2312,6 +2322,9 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       editAmountInput.value = openEdit.amount;
       editDueDateInput.value = openEdit.dueDate;
       editFrequencyInput.value = openEdit.frequency;
+      editEveryInput.value = openEdit.every;
+      editUnitInput.value = openEdit.unit;
+      syncCustomRepeat(editFrequencyInput);
       editCategoryInput.value = openEdit.category;
       editAutopayInput.checked = openEdit.autopay;
       viewSection.hidden = true;
@@ -3093,6 +3106,8 @@ function renderBudget() {
         amount: openForm.querySelector('.bill-edit-amount').value,
         dueDate: openForm.querySelector('.bill-edit-duedate').value,
         frequency: openForm.querySelector('.bill-edit-frequency').value,
+        every: openForm.querySelector('.bill-edit-every').value,
+        unit: openForm.querySelector('.bill-edit-unit').value,
         category: openForm.querySelector('.bill-edit-category').value,
         autopay: openForm.querySelector('.bill-edit-autopay').checked,
       }
@@ -3157,6 +3172,17 @@ function renderBudget() {
   });
 })();
 
+// Shows the "repeat every X weeks or months" row under a bill's frequency box only while Custom is chosen.
+function syncCustomRepeat(select) {
+  const row = select.nextElementSibling;
+  if (row && row.classList.contains('custom-repeat')) row.hidden = select.value !== 'custom';
+}
+
+// Any bill frequency box (the Add form's or a card's Edit form) shows or hides its custom row when changed.
+document.addEventListener('change', (e) => {
+  if (e.target.matches('#budget-frequency-input, .bill-edit-frequency')) syncCustomRepeat(e.target);
+});
+
 // Add-bill form: validate, add the bill, and clear the form when it worked.
 document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -3172,6 +3198,8 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
     amount: amountInput.value,
     dueDate: dueDateInput.value,
     frequency: frequencyInput.value,
+    every: document.getElementById('budget-every-input').value,
+    unit: document.getElementById('budget-unit-input').value,
     category: categoryInput.value,
     autopay: document.getElementById('budget-autopay-input').checked,
     // When the "I'm caught up" box is showing and ticked, every date before today starts out paid.
@@ -3192,6 +3220,9 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   amountInput.value = '';
   dueDateInput.value = todayKey();
   frequencyInput.value = 'monthly';
+  document.getElementById('budget-every-input').value = '6';
+  document.getElementById('budget-unit-input').value = 'weeks';
+  syncCustomRepeat(frequencyInput);
   categoryInput.value = '';
   updateCaughtUpOption();
   closeAddBillSheet();
@@ -4956,6 +4987,12 @@ function icsRepeatRule(bill) {
   const day = parseDateKey(bill.dueDate).d;
   if (bill.frequency === 'weekly') return 'FREQ=WEEKLY';
   if (bill.frequency === 'biweekly') return 'FREQ=WEEKLY;INTERVAL=2';
+  if (bill.frequency === 'custom') {
+    if (!schedulePeriod(bill)) return null;
+    if (bill.unit === 'weeks') return `FREQ=WEEKLY;INTERVAL=${bill.every}`;
+    if (day <= 28) return `FREQ=MONTHLY;INTERVAL=${bill.every}`;
+    return `FREQ=MONTHLY;INTERVAL=${bill.every};BYMONTHDAY=${day === 31 ? -1 : day}`;
+  }
   if (bill.frequency === 'yearly') return 'FREQ=YEARLY';
   if (bill.frequency === 'monthly') {
     if (day <= 28) return 'FREQ=MONTHLY';
@@ -5183,7 +5220,7 @@ function isValidImportRecord(collectionName, rec) {
   if (rec.version !== undefined && !isNum(rec.version)) return false;
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
+  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && listOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
@@ -5345,7 +5382,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 32;
+const APP_VERSION = 33;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
