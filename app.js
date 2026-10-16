@@ -2869,9 +2869,182 @@ document.getElementById('guess-add-form').addEventListener('submit', (e) => {
 });
 document.getElementById('guess-month-input').value = todayKey().slice(0, 7);
 
+// ---- Savings goals (saving up for a large purchase) ----
+// A goal is a record in the `income` list, { id: 'goal-<id>', goalName, target, goalDate (optional), notes, ...sync
+// fields }. What has been put aside is a separate record per deposit, { id: 'save-<id>', savedFor: <goal id>, savedOn,
+// amount }, with a negative amount for money taken back out. Separate records mean two devices adding savings at the
+// same time both count, instead of one overwriting the other's total. Neither kind has a `dateKey`, so income totals
+// ignore them, and the sync server needs no change (their ids are not date ids, so they merge like bills).
+
+// The live goals, by name.
+function goalRecords() {
+  return income.filter((r) => r.goalName && !r.deleted).sort((a, b) => a.goalName.localeCompare(b.goalName));
+}
+
+// How much has been put aside for a goal: its deposits minus its withdrawals.
+function goalSaved(goalId) {
+  const total = income.filter((r) => r.savedFor === goalId && !r.deleted).reduce((sum, r) => sum + r.amount, 0);
+  return Math.round(total * 100) / 100;
+}
+
+// Checks the Add / Edit goal fields and returns the first problem as a sentence ('' when they are fine).
+function goalFieldsError(fields) {
+  if (!fields.name.trim()) return 'Enter what you are saving for.';
+  const target = Number(fields.targetRaw);
+  if (fields.targetRaw === '' || !Number.isFinite(target) || target < 0.01 || target > MAX_MONEY) return 'Enter a target of at least $0.01 and up to $1,000,000,000.';
+  if (fields.date && !(isRealDateKey(fields.date) && isReasonableDateKey(fields.date))) return 'Choose a real target date, or leave it empty.';
+  return '';
+}
+
+// Adds a goal, or changes the one with `id`. Returns the problem as a sentence, or '' when it was saved.
+function saveGoal(fields, id) {
+  const error = goalFieldsError(fields);
+  if (error) return error;
+  const values = {
+    goalName: fields.name.trim().slice(0, 60),
+    target: Math.round(Number(fields.targetRaw) * 100) / 100, // whole cents, like bills
+    notes: fields.notes.trim().slice(0, 500),
+  };
+  const existing = id ? income.find((r) => r.id === id && r.goalName) : null;
+  if (existing) {
+    const before = structuredClone(existing);
+    Object.assign(existing, values);
+    if (fields.date) existing.goalDate = fields.date; else delete existing.goalDate;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `goal-${makeId()}`, ...values,
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    if (fields.date) record.goalDate = fields.date;
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// Puts money toward a goal (sign +1) or takes it back out (sign -1), dated today. Returns the problem as a
+// sentence, or '' when it was saved. You cannot take out more than is saved.
+function addSavings(goalId, amountRaw, sign) {
+  const goal = income.find((r) => r.id === goalId && r.goalName && !r.deleted);
+  if (!goal) return 'That goal is gone.';
+  const amount = Number(amountRaw);
+  if (amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  const cents = Math.round(amount * 100) / 100;
+  if (sign < 0 && cents > goalSaved(goalId)) return `Only ${formatMoney(goalSaved(goalId))} is saved for this goal.`;
+  const now = new Date().toISOString();
+  const record = {
+    id: `save-${makeId()}`, savedFor: goalId, savedOn: todayKey(), amount: sign < 0 ? -cents : cents,
+    dateAdded: now, updatedAt: now,
+    deviceId: getDeviceId(), deleted: false, version: 0,
+  };
+  income.push(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', record.id, null, structuredClone(record));
+  renderBudget();
+  return '';
+}
+
+// Draws the Savings Goals on the Plan tab: each goal with a progress bar, what is left, and (when it has a target
+// date) what to put aside each month to get there.
+function renderGoals() {
+  const list = document.getElementById('goal-list');
+  const template = document.getElementById('goal-card-template');
+  list.innerHTML = '';
+  const records = goalRecords();
+
+  records.forEach((record) => {
+    const saved = goalSaved(record.id);
+    const left = Math.round((record.target - saved) * 100) / 100;
+    const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = record.id;
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editError = node.querySelector('.goal-edit-error');
+    node.querySelector('.recurring-income-name').textContent = record.goalName;
+    node.querySelector('.goal-amounts').textContent = `${formatMoney(saved)} of ${formatMoney(record.target)}`;
+    node.querySelector('.goal-fill').style.width = `${Math.max(0, Math.min(100, Math.round((saved / record.target) * 100)))}%`;
+    let status;
+    if (left <= 0) status = 'Goal reached!';
+    else {
+      status = `${formatMoney(left)} to go`;
+      if (record.goalDate) {
+        const days = daysUntilDateKey(record.goalDate);
+        if (days < 0) status += ` · target date ${formatDateKeyLong(record.goalDate)} has passed`;
+        else status += ` · ${formatMoney(left / Math.max(1, days / (365 / 12)))} per month to reach it by ${formatDateKeyLong(record.goalDate)}`;
+      }
+    }
+    node.querySelector('.goal-status').textContent = status;
+    const notesEl = node.querySelector('.goal-notes');
+    if (record.notes) { notesEl.textContent = record.notes; notesEl.hidden = false; }
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${record.goalName}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${record.goalName}`);
+
+    // Elements are captured now: once the fragment is appended it is empty, so node.querySelector would find nothing.
+    const amountBox = node.querySelector('.goal-amount-input');
+    const saveError = node.querySelector('.goal-save-error');
+    const deposit = (sign) => {
+      const problem = addSavings(record.id, amountBox.value, sign);
+      if (problem) { saveError.textContent = problem; saveError.hidden = false; }
+    };
+    node.querySelector('.goal-add-btn').addEventListener('click', () => deposit(1));
+    node.querySelector('.goal-take-btn').addEventListener('click', () => deposit(-1));
+    const nameBox = node.querySelector('.goal-edit-name');
+    const targetBox = node.querySelector('.goal-edit-target');
+    const dateBox = node.querySelector('.goal-edit-date');
+    const notesBox = node.querySelector('.goal-edit-notes');
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      nameBox.value = record.goalName;
+      targetBox.value = String(record.target);
+      dateBox.value = record.goalDate || '';
+      notesBox.value = record.notes || '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      nameBox.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const problem = saveGoal({ name: nameBox.value, targetRaw: targetBox.value, date: dateBox.value, notes: notesBox.value }, record.id);
+      if (problem) { editError.textContent = problem; editError.hidden = false; }
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
+
+    list.appendChild(node);
+  });
+
+  document.getElementById('goal-empty-state').hidden = records.length !== 0;
+}
+
+// Add goal form: validate, save, and clear the boxes when it worked.
+document.getElementById('goal-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('goal-form-error');
+  const problem = saveGoal({
+    name: document.getElementById('goal-name-input').value,
+    targetRaw: document.getElementById('goal-target-input').value,
+    date: document.getElementById('goal-date-input').value,
+    notes: document.getElementById('goal-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  e.target.reset();
+  document.getElementById('goal-name-input').focus();
+});
+
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list','expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form: which record, what is typed in each box, and which box had focus.
 function captureOpenCardForms() {
@@ -2951,6 +3124,7 @@ function renderBudget() {
   renderProjectedIncomeList();
   renderPlan();
   renderGuesses();
+  renderGoals();
   renderExpenses();
   restoreOpenCardForms(openCardForms);
 
@@ -4073,7 +4247,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -4114,6 +4288,11 @@ function undoToastMessage(collectionName, before, after) {
   if (!before) {
     if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}`;
     if (after.guessName) return `Added expected cost ${after.guessName}`;
+    if (after.goalName) return `Added goal ${after.goalName}`;
+    if (after.savedFor) {
+      const goal = income.find((r) => r.id === after.savedFor);
+      return `${after.amount < 0 ? 'Took out' : 'Saved'} ${formatMoney(Math.abs(after.amount))}${goal ? ` ${after.amount < 0 ? 'from' : 'toward'} ${goal.goalName}` : ''}`;
+    }
     return collectionName === 'income' ? null : `Added ${name}`;
   }
   if (after.projectedFor && after.deleted && !before.deleted) return 'Deleted projected income';
@@ -4121,6 +4300,7 @@ function undoToastMessage(collectionName, before, after) {
   if (after.planName && after.deleted && !before.deleted) return `Deleted ${after.planName}`;
   if (after.spentOn && after.deleted && !before.deleted) return 'Deleted expense';
   if (after.guessName && after.deleted && !before.deleted) return `Deleted ${after.guessName}`;
+  if (after.goalName && after.deleted && !before.deleted) return `Deleted goal ${after.goalName}`;
   if (after.planName && !after.deleted && after.amount !== before.amount) {
     return `Changed ${after.planName} to ${formatMoney(after.amount)} per ${after.frequency === 'weekly' ? 'week' : 'month'}`;
   }
@@ -5015,6 +5195,8 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
+    if (rec.goalName !== undefined) return isText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.savedFor !== undefined) return isText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
     if (rec.guessName !== undefined) return isText(rec.guessName) && isPositiveMoney(rec.amount) && isGuessMonth(rec.guessMonth) && textOrMissing(rec.notes);
     if (rec.projectedFor !== undefined) return isDate(rec.projectedFor) && isNum(rec.projected) && Math.abs(rec.projected) <= MAX_MONEY;
     return isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && isDate(rec.dateKey);
@@ -5094,6 +5276,7 @@ function describeContents() {
     [income.filter((r) => r.projectedFor && !r.deleted).length, 'projected income entry', 'projected income entries'],
     [income.filter((r) => r.planName && !r.deleted).length, 'plan category', 'plan categories'],
     [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
+    [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
   ].filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
   if (!counts.length) return 'The app is empty.';
@@ -5162,7 +5345,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 31;
+const APP_VERSION = 32;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

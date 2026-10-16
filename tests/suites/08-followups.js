@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, the five Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 12 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, Savings Goals, the five Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 13 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -779,4 +779,21 @@ check('editing a guess changes it and keeps one record', (() => { const r = inco
 check('deleting a guess can be undone', await (async () => { const r = income.find((x) => x.guessName === 'Tyres'); deleteIncome(r.id); await sleep(30); const gone = guessTotalForMonth(thisMonthKey) === 350 && /Deleted Tyres/.test($('undo-toast-text').textContent); $('undo-toast-btn').click(); await sleep(30); return gone && guessTotalForMonth(thisMonthKey) === 470; })());
 check('import accepts a good guess and rejects a bad month or amount', isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '2026-10' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '2026-1' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: '5', guessMonth: '2026-10' }) && !isValidImportRecord('income', { id: 'guess-1', guessName: 'a', amount: 5, guessMonth: '3000-01' }));
 check('describeContents counts expected costs', /3 expected costs/.test(describeContents()), describeContents());
+income.length = 0; hideUndoToast(); renderBudget();
+
+// ---- savings goals ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; hideUndoToast();
+check('a goal needs a name, a target and (if given) a real date', goalFieldsError({ name: '', targetRaw: '5', date: '' }) !== '' && goalFieldsError({ name: 'x', targetRaw: '0', date: '' }) !== '' && goalFieldsError({ name: 'x', targetRaw: '5', date: '2026-02-30' }) !== '' && goalFieldsError({ name: 'x', targetRaw: '5', date: '' }) === '' && goalFieldsError({ name: 'x', targetRaw: '5', date: dk(30) }) === '');
+check('saving a goal stores it with no income date', (() => { const p = saveGoal({ name: 'Laptop', targetRaw: '1200', date: shiftDateKey(todayKey(), 120), notes: '' }); const g = income.find((r) => r.goalName === 'Laptop'); return p === '' && !!g && g.target === 1200 && !g.dateKey && /^goal-/.test(g.id); })());
+const laptopId = income.find((r) => r.goalName === 'Laptop').id;
+check('savings add up and a withdrawal is subtracted', addSavings(laptopId, '300', 1) === '' && addSavings(laptopId, '100.25', 1) === '' && addSavings(laptopId, '50', -1) === '' && goalSaved(laptopId) === 350.25);
+check('you cannot take out more than is saved, nor save nothing', /Only \$350\.25/.test(addSavings(laptopId, '400', -1)) && addSavings(laptopId, '', 1) !== '' && addSavings(laptopId, '0', 1) !== '' && goalSaved(laptopId) === 350.25);
+check('savings and goals are not income received', uniqueIncomeEntries(income).length === 0);
+renderBudget();
+check('the card shows progress, what is left and a monthly pace for the date', (() => { const li = document.querySelector('#goal-list li'); return /\$350\.25 of \$1,200\.00/.test(li.textContent) && /\$849\.75 to go/.test(li.textContent) && /per month/.test(li.textContent) && li.querySelector('.goal-fill').style.width === '29%'; })(), document.querySelector('#goal-list li').textContent);
+check('the Add savings button on the card works and offers Undo', await (async () => { const li = document.querySelector('#goal-list li'); li.querySelector('.goal-amount-input').value = '49.75'; li.querySelector('.goal-add-btn').click(); await sleep(30); const ok = goalSaved(laptopId) === 400 && /Saved \$49\.75 toward Laptop/.test($('undo-toast-text').textContent); $('undo-toast-btn').click(); await sleep(30); return ok && goalSaved(laptopId) === 350.25; })(), $('undo-toast-text').textContent);
+check('a goal that is fully saved says so', (() => { addSavings(laptopId, '900', 1); renderBudget(); return /Goal reached/.test(document.querySelector('#goal-list li').textContent); })());
+check('deleting a goal hides it and its savings, and Undo brings them back', await (async () => { deleteIncome(laptopId); await sleep(30); const gone = document.querySelectorAll('#goal-list li').length === 0 && /Deleted goal Laptop/.test($('undo-toast-text').textContent); $('undo-toast-btn').click(); await sleep(30); return gone && goalSaved(laptopId) === 1250.25 && document.querySelectorAll('#goal-list li').length === 1; })());
+check('import accepts good goals and savings and rejects bad ones', isValidImportRecord('income', { id: 'goal-1', goalName: 'a', target: 10 }) && isValidImportRecord('income', { id: 'save-1', savedFor: 'goal-1', savedOn: '2026-10-01', amount: -5 }) && !isValidImportRecord('income', { id: 'save-1', savedFor: 'goal-1', savedOn: '2026-10-01', amount: 0 }) && !isValidImportRecord('income', { id: 'goal-1', goalName: 'a', target: -1 }) && !isValidImportRecord('income', { id: 'goal-1', goalName: 'a', target: 10, goalDate: 'soon' }));
+check('describeContents counts goals', /1 savings goal/.test(describeContents()), describeContents());
 income.length = 0; hideUndoToast(); renderBudget();

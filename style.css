@@ -1310,6 +1310,24 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .small-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* A savings goal's progress bar takes the card's full width. */
+
+.recurring-income-info > .chart-track { width: 100%; margin: 4px 0; }
+
+/* The amount box and the Add savings / Take out buttons sit in one wrapping row. */
+
+.goal-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* The savings amount box is narrow, so both buttons fit beside it on a phone. */
+
+.goal-save-row input { width: 110px; }
+
 /* The Edit amounts and Show hidden amounts buttons sit in a row above the Quick Add amounts. */
 
 .expense-quick-tools {
