@@ -1359,10 +1359,11 @@ input[type="date"]::-webkit-date-and-time-value {
   width: 100%;
 }
 
-/* One cost part: the name and amount on the left, Remove on the right. */
+/* One cost part: the name and amount on the left, Edit and Remove on the right (its edit form takes a row). */
 
 .goal-costs li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -1593,9 +1594,11 @@ input[type="date"]::-webkit-date-and-time-value {
   overflow-wrap: anywhere;
 }
 
-/* The small form that opens under the button: the amount you have, why, and Save / Reset / Cancel. */
+/* The small forms that open in place: a week's carried-in amount (with why, and Save / Reset / Cancel) and a goal's
+   cost (name, amount, Save / Cancel). */
 
-.week-adjust-form {
+.week-adjust-form,
+.goal-cost-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1603,13 +1606,15 @@ input[type="date"]::-webkit-date-and-time-value {
   width: 100%;
 }
 
-/* Hidden until Adjust is pressed (the flex display above would otherwise show it). */
+/* Hidden until opened (the flex display above would otherwise show it). */
 
-.week-adjust-form[hidden] { display: none; }
+.week-adjust-form[hidden],
+.goal-cost-form[hidden] { display: none; }
 
-/* The boxes in that form look like the other form boxes (they sit outside any .add-form). */
+/* The boxes in those forms look like the other form boxes (they sit outside any .add-form). */
 
-.week-adjust-form input {
+.week-adjust-form input,
+.goal-cost-form input {
   flex: 1 1 120px;
   min-width: 0;
   padding: 9px 12px;
@@ -1622,7 +1627,8 @@ input[type="date"]::-webkit-date-and-time-value {
 
 /* The error line takes a row of its own. */
 
-.week-adjust-form .form-error { flex: 1 1 100%; }
+.week-adjust-form .form-error,
+.goal-cost-form .form-error { flex: 1 1 100%; }
 
 /* The Earlier / Today / Later buttons above the calendar. */
 

@@ -3093,6 +3093,28 @@ function addGoalCost(goalId, rawName, amountRaw) {
   return '';
 }
 
+// Changes the name and amount of a goal's cost part. Returns the problem as a sentence, or '' when it was saved
+// (nothing is recorded, and no Undo step added, when neither changed).
+function saveGoalCost(id, rawName, amountRaw) {
+  const cost = income.find((r) => r.id === id && r.goalItemFor && !r.deleted);
+  if (!cost) return 'That cost is gone.';
+  const name = rawName.trim().slice(0, 60);
+  if (!name) return 'Enter what the cost is for.';
+  const amount = Number(amountRaw);
+  if (amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  const cents = Math.round(amount * 100) / 100;
+  if (name !== cost.itemName || cents !== cost.amount) {
+    const before = structuredClone(cost);
+    cost.itemName = name;
+    cost.amount = cents;
+    stampSync(cost);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', cost.id, before, structuredClone(cost));
+  }
+  renderBudget();
+  return '';
+}
+
 // Checks the Add / Edit goal fields and returns the first problem as a sentence ('' when they are fine).
 function goalFieldsError(fields) {
   if (!fields.name.trim()) return 'Enter what you are saving for.';
@@ -3185,13 +3207,68 @@ function renderGoals() {
       const row = document.createElement('li');
       const label = document.createElement('span');
       label.textContent = `${cost.itemName}: ${formatMoney(cost.amount)}`;
+      const actions = document.createElement('span');
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'small-btn';
+      edit.textContent = 'Edit';
+      edit.setAttribute('aria-label', `Edit ${cost.itemName} in ${record.goalName}`);
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'small-btn';
       remove.textContent = 'Remove';
       remove.setAttribute('aria-label', `Remove ${cost.itemName} from ${record.goalName}`);
       remove.addEventListener('click', () => deleteIncome(cost.id));
-      row.append(label, remove);
+      actions.append(edit, remove);
+
+      // The form that replaces the row's text while the cost is being edited.
+      const form = document.createElement('form');
+      form.className = 'goal-cost-form';
+      form.hidden = true;
+      const nameBox = document.createElement('input');
+      nameBox.type = 'text';
+      nameBox.maxLength = 60;
+      nameBox.required = true;
+      nameBox.setAttribute('aria-label', `Edit the name of ${cost.itemName}`);
+      const amountBox = document.createElement('input');
+      amountBox.type = 'number';
+      amountBox.inputMode = 'decimal';
+      amountBox.min = '0.01';
+      amountBox.step = '0.01';
+      amountBox.required = true;
+      amountBox.setAttribute('aria-label', `Edit the amount of ${cost.itemName}`);
+      const save = document.createElement('button');
+      save.type = 'submit';
+      save.className = 'small-btn';
+      save.textContent = 'Save';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'small-btn';
+      cancel.textContent = 'Cancel';
+      const error = document.createElement('span');
+      error.className = 'form-error';
+      error.hidden = true;
+      form.append(nameBox, amountBox, save, cancel, error);
+      edit.addEventListener('click', () => {
+        nameBox.value = cost.itemName;
+        amountBox.value = String(cost.amount);
+        error.hidden = true;
+        label.hidden = true;
+        actions.hidden = true;
+        form.hidden = false;
+        nameBox.focus();
+      });
+      cancel.addEventListener('click', () => {
+        form.hidden = true;
+        label.hidden = false;
+        actions.hidden = false;
+      });
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const problem = saveGoalCost(cost.id, nameBox.value, amountBox.value);
+        if (problem) { error.textContent = problem; error.hidden = false; }
+      });
+      row.append(label, actions, form);
       costList.appendChild(row);
     });
     const costNote = node.querySelector('.goal-costs-note');
@@ -5668,7 +5745,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 36;
+const APP_VERSION = 37;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

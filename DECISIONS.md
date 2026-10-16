@@ -211,7 +211,7 @@ Found by reading every line of the code, CSS, HTML and server. Rules worth remem
 
 ## A savings goal can be split into costs
 
-Each cost is its own record in the `income` list (`goalItemFor` = the goal's id, `itemName`, `amount`, id `item-<id>`), like deposits, so two devices adding costs at once both count and the server needs no change (the id is not a date id). While a goal has any live costs its target is their total (`goalTarget`); with none it uses its own `target`, so older goals are untouched. Costs are added and removed (Undo works), not edited: remove one and add it again. Deleting a goal hides its costs and deposits together, and Undo brings them back.
+Each cost is its own record in the `income` list (`goalItemFor` = the goal's id, `itemName`, `amount`, id `item-<id>`), like deposits, so two devices adding costs at once both count and the server needs no change (the id is not a date id). While a goal has any live costs its target is their total (`goalTarget`); with none it uses its own `target`, so older goals are untouched. Costs can be added, edited (name and amount, in place on the card) and removed, and Undo works for each; saving a cost with nothing changed records nothing. Deleting a goal hides its costs and deposits together, and Undo brings them back.
 
 ## The rolled-forward number can be adjusted by week
 

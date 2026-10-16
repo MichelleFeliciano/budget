@@ -878,3 +878,16 @@ check('Reset removes the adjustment and Undo brings it back', await (async () =>
 check('a bad amount is refused with a message', setWeekCarry(wsA, 0, '', '') !== '' && setWeekCarry(wsA, 0, '9999999999', '') !== '');
 check('import accepts a good adjustment and rejects a bad one, and describeContents counts them', isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-10-05', amount: -80, notes: 'x' }) && !isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-13-05', amount: -80 }) && !isValidImportRecord('income', { id: 'adjust-1', adjustWeek: '2026-10-05', amount: 0 }) && /1 carry-forward adjustment/.test(describeContents()), describeContents());
 income.length = 0; bills.length = 0; hideUndoToast(); renderBudget();
+
+// ---- editing a goal's costs ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; hideUndoToast(); showTab('plan');
+saveGoal({ name: 'Edit trip', targetRaw: '100', date: '', notes: '' });
+const etId = income.find((r) => r.goalName === 'Edit trip').id;
+addGoalCost(etId, 'Flights', '400'); addGoalCost(etId, 'Hotel', '600'); renderBudget();
+const etCostId = () => goalCosts(etId).find((r) => r.itemName === 'Flights' || r.itemName === 'Airfare').id;
+check('a cost refuses an empty name or a bad amount when edited', saveGoalCost(etCostId(), '', '5') !== '' && saveGoalCost(etCostId(), 'x', '0') !== '' && saveGoalCost(etCostId(), 'x', '') !== '' && saveGoalCost('nope', 'x', '5') !== '' && goalTarget(income.find((r) => r.id === etId)) === 1000);
+check('editing a cost changes its name and amount and the goal target follows', saveGoalCost(etCostId(), 'Airfare', '450.50') === '' && goalCosts(etId).some((r) => r.itemName === 'Airfare' && r.amount === 450.5) && goalTarget(income.find((r) => r.id === etId)) === 1050.5 && goalCosts(etId).length === 2);
+check('saving a cost with nothing changed adds no Undo step', (() => { const before = undoStack.length; saveGoalCost(etCostId(), 'Airfare', '450.5'); return undoStack.length === before; })());
+check('the Edit button on a cost opens a form that saves and closes', await (async () => { const row = document.querySelector('#goal-list .goal-costs li'); row.querySelector('button').click(); const form = row.querySelector('.goal-cost-form'); const opened = !form.hidden && form.querySelector('input[type="number"]').value === '450.5'; form.querySelector('input[type="number"]').value = '500'; form.requestSubmit(); await sleep(30); const again = document.querySelector('#goal-list .goal-costs li'); return opened && goalTarget(income.find((r) => r.id === etId)) === 1100 && again.querySelector('.goal-cost-form').hidden === true && /\$500\.00/.test(again.textContent); })());
+check('Undo puts the old cost back', (() => { undo(); return goalTarget(income.find((r) => r.id === etId)) === 1050.5; })());
+income.length = 0; hideUndoToast(); renderBudget();
