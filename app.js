@@ -3608,7 +3608,7 @@ function captureOpenCardForms(listIds = EDIT_CARD_LIST_IDS) {
       const form = card.querySelector('.recurring-income-edit-form');
       if (!form || form.hidden) return;
       const fields = [...form.querySelectorAll('input, select')];
-      open.push({ listId, recordId: card.dataset.recordId, values: fields.map((f) => f.value), focused: fields.indexOf(document.activeElement) });
+      open.push({ listId, recordId: card.dataset.recordId, values: fields.map((f) => (f.type === 'checkbox' ? f.checked : f.value)), focused: fields.indexOf(document.activeElement) });
     });
   });
   return open;
@@ -3624,7 +3624,10 @@ function restoreOpenCardForms(open) {
     const typingElsewhere = document.activeElement;
     editBtn.click(); // opens the form and fills the choices a box needs, from the saved record
     const fields = [...card.querySelectorAll('.recurring-income-edit-form input, .recurring-income-edit-form select')];
-    fields.forEach((field, i) => { if (values[i] !== undefined) field.value = values[i]; });
+    fields.forEach((field, i) => {
+      if (values[i] === undefined) return;
+      if (field.type === 'checkbox') field.checked = !!values[i]; else field.value = values[i];
+    });
     if (focused >= 0 && fields[focused]) fields[focused].focus();
     // The Edit button moves focus into the form; when the user was typing somewhere else, give focus back there.
     else if (focused < 0 && typingElsewhere && typingElsewhere !== document.body && typingElsewhere.isConnected) typingElsewhere.focus({ preventScroll: true });
@@ -4054,10 +4057,16 @@ const MAX_QUICK_AMOUNTS = 3;
 // Days of entries a category needs before its average per week is worked out (less is too noisy to trust).
 const MIN_AVERAGE_DAYS = 14;
 
-// The live expenses, newest day first.
-function expenseRecords() {
+// Every live expense, newest day first, including the ones Mom paid (only the Recent Expenses list shows those).
+function allExpenseRecords() {
   return income.filter((r) => r.spentOn && !r.deleted)
     .sort((a, b) => (a.spentOn < b.spentOn ? 1 : a.spentOn > b.spentOn ? -1 : (b.dateAdded || '').localeCompare(a.dateAdded || '')));
+}
+
+// The live expenses that came out of your own money, newest day first. An expense marked "Paid by Mom" is left out, so
+// it counts toward no plan, total, chart, forecast or report: every figure that adds up spending starts from this list.
+function expenseRecords() {
+  return allExpenseRecords().filter((r) => !r.paidByMom);
 }
 
 // The Monday on or before a date key (the calendar's weeks start on Monday).
@@ -4126,6 +4135,7 @@ function saveExpense(fields, id) {
   if (existing) {
     const before = structuredClone(existing);
     Object.assign(existing, values);
+    if (fields.paidByMom) existing.paidByMom = true; else delete existing.paidByMom;
     stampSync(existing);
     saveCollection(INCOME_KEY, income);
     recordUndo('income', existing.id, before, structuredClone(existing));
@@ -4137,6 +4147,7 @@ function saveExpense(fields, id) {
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
     if (fields.recurId) { record.recurId = fields.recurId; record.recurDate = fields.recurDate; } // which repeating expense and date it logs
+    if (fields.paidByMom) record.paidByMom = true; // someone else paid: it does not come out of your money
     income.push(record);
     saveCollection(INCOME_KEY, income);
     recordUndo('income', record.id, null, structuredClone(record));
@@ -4422,10 +4433,12 @@ function renderExpenseList(expenses) {
   appendExpenseCards(list, shown.slice(0, MAX_EXPENSES_SHOWN));
 
   document.getElementById('expense-empty-state').hidden = expenses.length !== 0;
-  const total = shown.reduce((sum, r) => sum + r.amount, 0);
+  const total = shown.filter((r) => !r.paidByMom).reduce((sum, r) => sum + r.amount, 0);
+  const momTotal = shown.filter((r) => r.paidByMom).reduce((sum, r) => sum + r.amount, 0);
+  const momNote = momTotal > 0 ? ` ${formatMoney(momTotal)} more was paid by Mom and is not counted.` : '';
   document.getElementById('expense-filter-total').textContent = !expenses.length ? ''
-    : filtering ? `Showing ${shown.length} of ${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`
-      : `${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`;
+    : filtering ? `Showing ${shown.length} of ${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.${momNote}`
+      : `${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.${momNote}`;
   const noteLine = document.getElementById('expense-list-note');
   noteLine.hidden = shown.length <= MAX_EXPENSES_SHOWN;
   noteLine.textContent = `Showing the newest ${MAX_EXPENSES_SHOWN} of ${shown.length} expenses.`;
@@ -4451,6 +4464,8 @@ function appendExpenseCards(list, records) {
     const categoryName = expenseCategoryName(record);
 
     node.querySelector('.recurring-income-name').textContent = `${formatDateKeyShort(record.spentOn)} · ${categoryName}`;
+    node.querySelector('.expense-mom').hidden = !record.paidByMom;
+    const momBox = node.querySelector('.expense-edit-mom');
     node.querySelector('.recurring-income-amount').textContent = formatMoney(record.amount);
     const noteEl = node.querySelector('.expense-note');
     if (record.notes) { noteEl.textContent = record.notes; noteEl.hidden = false; }
@@ -4462,6 +4477,7 @@ function appendExpenseCards(list, records) {
       amountBox.value = String(record.amount);
       fillExpenseCategorySelect(categoryBox, record.planId, record.categoryName);
       notesBox.value = record.notes || '';
+      momBox.checked = !!record.paidByMom;
       errorEl.hidden = true;
       viewSection.hidden = true;
       editForm.hidden = false;
@@ -4476,7 +4492,7 @@ function appendExpenseCards(list, records) {
       editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
       viewSection.hidden = false;
       const problem = saveExpense({
-        dateKey: dateBox.value, amountRaw: amountBox.value, planId: categoryBox.value, notes: notesBox.value,
+        dateKey: dateBox.value, amountRaw: amountBox.value, planId: categoryBox.value, notes: notesBox.value, paidByMom: momBox.checked,
       }, record.id);
       if (problem) {
         viewSection.hidden = true;
@@ -4579,7 +4595,12 @@ function renderExpenses() {
   renderQuickAdd(expenses);
   const rows = renderSpentVsPlan(expenses);
   renderExpenseCharts(expenses, rows);
-  renderExpenseList(expenses);
+  renderExpenseList(allExpenseRecords());
+  const [momStart, momEnd] = monthBounds(todayKey());
+  const momMonth = sumExpensesIn(allExpenseRecords().filter((r) => r.paidByMom), momStart, momEnd);
+  const momLine = document.getElementById('mom-line');
+  momLine.hidden = momMonth === 0;
+  momLine.textContent = `Paid by Mom this month: ${formatMoney(momMonth)} (not counted against your plan).`;
   renderRepeats();
   renderBankRows();
   renderBankRules();
@@ -4609,9 +4630,11 @@ document.getElementById('expense-add-form').addEventListener('submit', (e) => {
     amountRaw: document.getElementById('expense-amount-input').value,
     planId: document.getElementById('expense-category-input').value,
     notes: document.getElementById('expense-notes-input').value,
+    paidByMom: document.getElementById('expense-mom-input').checked,
   });
   if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
   errorEl.hidden = true;
+  document.getElementById('expense-mom-input').checked = false; // each expense is asked afresh
   saveLastChoice(LAST_EXPENSE_CATEGORY_KEY, document.getElementById('expense-category-input').value);
   document.getElementById('expense-amount-input').value = '';
   document.getElementById('expense-notes-input').value = '';
@@ -7094,7 +7117,7 @@ function undoToastMessage(collectionName, before, after) {
   if (!after) return null;
   const name = after.name || 'item';
   if (!before) {
-    if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}`;
+    if (after.spentOn) return `Logged ${formatMoney(after.amount)} for ${after.categoryName || 'expense'}${after.paidByMom ? ' (paid by Mom)' : ''}`;
     if (after.guessName) return `Added expected cost ${after.guessName}`;
     if (after.goalName) return `Added goal ${after.goalName}`;
     if (after.goalItemFor) return `Added cost ${after.itemName}`;
@@ -8035,7 +8058,7 @@ function isValidImportRecord(collectionName, rec) {
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
     if (rec.spentOn !== undefined) {
-      return isDate(rec.spentOn) && isPositiveMoney(rec.amount) && textOrMissing(rec.planId) && textOrMissing(rec.categoryName) && textOrMissing(rec.notes);
+      return isDate(rec.spentOn) && isPositiveMoney(rec.amount) && textOrMissing(rec.planId) && textOrMissing(rec.categoryName) && textOrMissing(rec.notes) && (rec.paidByMom === undefined || typeof rec.paidByMom === 'boolean');
     }
     if (rec.planName !== undefined) {
       return nonEmptyText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
@@ -8205,7 +8228,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 49;
+const APP_VERSION = 50;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

@@ -367,6 +367,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <input type="number" inputmode="decimal" id="expense-amount-input" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Amount spent">
             <select id="expense-category-input" aria-label="Spending Plan category"></select>
             <input type="text" id="expense-notes-input" maxlength="200" placeholder="Note (optional, e.g. where)" aria-label="Note">
+            <label class="check-field"><input type="checkbox" id="expense-mom-input"> Paid by Mom (it does not come out of my money)</label>
             <p class="form-error" id="expense-form-error" hidden></p>
             <button type="submit">Add expense</button>
           </form>
@@ -451,6 +452,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <details class="fold" id="fold-expense-summary" open>
           <summary class="fold-summary"><h2>Spent vs Plan</h2></summary>
           <p class="stats-line" id="expense-total-line"></p>
+          <p class="stats-line" id="mom-line" hidden></p>
           <ul class="card-list flat-list" id="expense-summary-list"></ul>
           <p class="empty-state" id="expense-summary-empty" hidden>Add categories on the Plan tab, then log expenses against them.</p>
         </details>
@@ -997,6 +999,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <strong class="recurring-income-name"></strong>
         <span class="recurring-income-amount"></span>
         <span class="recurring-income-start expense-note" hidden></span>
+        <span class="badge expense-mom" hidden>Paid by Mom</span>
       </div>
       <div class="recurring-income-actions">
         <button type="button" class="edit-btn">Edit</button>
@@ -1010,6 +1013,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="number" inputmode="decimal" class="expense-edit-amount" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Edit amount spent">
       <select class="expense-edit-category" aria-label="Edit Spending Plan category"></select>
       <input type="text" class="expense-edit-notes" maxlength="200" placeholder="Note (optional)" aria-label="Edit note">
+      <label class="check-field"><input type="checkbox" class="expense-edit-mom"> Paid by Mom</label>
       <p class="form-error expense-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
