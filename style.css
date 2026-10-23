@@ -1396,6 +1396,21 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.9rem;
 }
 
+/* A repeating expense that is due: what it is, then Log it and Skip. */
+
+.repeat-due {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* The sentence takes the space the two buttons leave. */
+
+.repeat-due span { flex: 1 1 180px; overflow-wrap: anywhere; }
+
 /* The "Repeat every [6] weeks" row under a bill's frequency box. */
 
 .custom-repeat {

@@ -197,7 +197,7 @@ class MergeRules(unittest.TestCase):
 
     def test_expected_costs_goals_and_savings_merge_like_bills_not_like_date_income(self):
         """Their ids are not date ids: an edit is a normal update and a delete always wins."""
-        for record_id in ("guess-1", "goal-1", "save-1", "item-1", "adjust-1"):
+        for record_id in ("guess-1", "goal-1", "save-1", "item-1", "adjust-1", "rexp-1"):
             self.assertFalse(s._is_date_id("income", record_id))
         items, c = self.merge([rec("guess-1", 3, guessName="Tyres", amount=100)], [rec("guess-1", 3, guessName="Tyres", amount=120)], "income")
         self.assertEqual((items[0]["amount"], items[0]["version"], c), (120, 4, []))

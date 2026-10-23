@@ -221,3 +221,7 @@ The Net carried into a week is worked out from bills and income, so it drifts wh
 
 Mark as spent is two ordinary changes, not a new record kind: the expense is logged (dated today, the guess's name as its note, in the chosen Spending Plan category, because every expense needs one) and the guess is deleted as a tombstone. They are two Undo steps; nothing is changed if the expense would be refused. The savings history only lists the deposit records that already existed and lets one be deleted, so a wrong entry no longer needs a matching Take out.
 
+## Repeating expenses are offered, never logged automatically
+
+A repeating expense is a record in the `income` list (`recurPlanId`, `amount`, `frequency`, `recurStart`, `skippedDates`, id `rexp-<id>`), with no server change. Each due date is offered on the Expenses tab (Log it / Skip) instead of being logged when the app opens, because two devices opening the app would both log it and create duplicates. A logged date is an ordinary expense carrying `recurId` and `recurDate`, which is how it stops being offered; deleting that expense offers the date again. Only the last 45 days are offered so an old repeat does not bury you in dates. If two devices both tap Log it for the same date before syncing there are two expenses; the Recent Expenses list lets you delete one. The schedule reuses `occursOnDate`, so month-end days behave like a monthly bill.
+

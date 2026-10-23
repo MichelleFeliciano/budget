@@ -329,6 +329,30 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
         </details>
 
+        <details class="fold" id="fold-expense-repeat" open>
+          <summary class="fold-summary"><h2>Repeating Expenses</h2></summary>
+          <p class="stats-line">Costs that come around again, like a weekly coffee run or a monthly top-up. When one is due, tap Log it to record it (or Skip), so nothing logs itself by mistake.</p>
+          <ul class="card-list flat-list" id="repeat-due-list"></ul>
+          <ul class="card-list flat-list" id="repeat-list"></ul>
+          <p class="empty-state" id="repeat-empty-state" hidden>No repeating expenses yet. Add one below.</p>
+          <form id="repeat-add-form" class="add-form add-form-stacked">
+            <select id="repeat-category-input" aria-label="Spending Plan category"></select>
+            <input type="number" inputmode="decimal" id="repeat-amount-input" placeholder="Amount each time" min="0.01" step="0.01" required aria-label="Amount each time">
+            <select id="repeat-frequency-input" aria-label="How often">
+              <option value="weekly">Every week</option>
+              <option value="biweekly">Every 2 weeks</option>
+              <option value="monthly">Every month</option>
+            </select>
+            <label class="date-field">First date
+              <input type="date" id="repeat-start-input" min="1990-01-01" max="2100-12-31" required aria-label="First date it comes due">
+            </label>
+            <button type="button" class="today-btn" data-date-input="repeat-start-input">Today</button>
+            <input type="text" id="repeat-notes-input" maxlength="200" placeholder="Note (optional)" aria-label="Note">
+            <p class="form-error" id="repeat-form-error" hidden></p>
+            <button type="submit">Add repeating expense</button>
+          </form>
+        </details>
+
         <details class="fold" id="fold-expense-summary" open>
           <summary class="fold-summary"><h2>Spent vs Plan</h2></summary>
           <p class="stats-line" id="expense-total-line"></p>
@@ -666,6 +690,40 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="date" class="goal-edit-date" min="1990-01-01" max="2100-12-31" aria-label="Edit target date">
       <input type="text" class="goal-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
       <p class="form-error goal-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One repeating expense (renderRepeats). It reuses the recurring income card's classes, so it looks the same. -->
+<template id="repeat-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-amount repeat-amount"></span>
+        <span class="recurring-income-frequency repeat-when"></span>
+        <span class="recurring-income-start repeat-notes" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <select class="repeat-edit-category" aria-label="Edit Spending Plan category"></select>
+      <input type="number" inputmode="decimal" class="repeat-edit-amount" placeholder="Amount each time" min="0.01" step="0.01" required aria-label="Edit amount each time">
+      <select class="repeat-edit-frequency" aria-label="Edit how often">
+        <option value="weekly">Every week</option>
+        <option value="biweekly">Every 2 weeks</option>
+        <option value="monthly">Every month</option>
+      </select>
+      <input type="date" class="repeat-edit-start" min="1990-01-01" max="2100-12-31" required aria-label="Edit first date">
+      <input type="text" class="repeat-edit-notes" maxlength="200" placeholder="Note (optional)" aria-label="Edit note">
+      <p class="form-error repeat-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>

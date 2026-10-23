@@ -3420,7 +3420,7 @@ document.getElementById('goal-add-form').addEventListener('submit', (e) => {
 
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list','expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form (in the given lists, by default all of them): which record, what is typed in
 // each box, and which box had focus. The Bills and Recurring Income lists are not here: renderBudget captures
@@ -3947,6 +3947,7 @@ function saveExpense(fields, id) {
       dateAdded: now, updatedAt: now,
       deviceId: getDeviceId(), deleted: false, version: 0,
     };
+    if (fields.recurId) { record.recurId = fields.recurId; record.recurDate = fields.recurDate; } // which repeating expense and date it logs
     income.push(record);
     saveCollection(INCOME_KEY, income);
     recordUndo('income', record.id, null, structuredClone(record));
@@ -4290,7 +4291,7 @@ function renderExpenseList(expenses) {
 
 // Draws the whole Expenses tab: Quick Add, the log form's category list, Spent vs Plan, the charts and the recent list.
 function renderExpenses() {
-  const openForms = captureOpenCardForms(['expense-list']); // the list is rebuilt, so an open Edit form is kept
+  const openForms = captureOpenCardForms(['expense-list', 'repeat-list']); // the list is rebuilt, so an open Edit form is kept
   const sel = document.getElementById('expense-category-input');
   fillExpenseCategorySelect(sel, sel.value || loadLastChoice(LAST_EXPENSE_CATEGORY_KEY));
   const expenses = expenseRecords();
@@ -4298,6 +4299,7 @@ function renderExpenses() {
   const rows = renderSpentVsPlan(expenses);
   renderExpenseCharts(expenses, rows);
   renderExpenseList(expenses);
+  renderRepeats();
   restoreOpenCardForms(openForms);
 }
 
@@ -4331,6 +4333,219 @@ document.getElementById('expense-add-form').addEventListener('submit', (e) => {
   document.getElementById('expense-notes-input').value = '';
   document.getElementById('expense-amount-input').focus();
 });
+
+// ---- Repeating expenses (costs that come around again; logged with one tap when due) ----
+// A repeating expense is a record in the `income` list, { id: 'rexp-<id>', recurPlanId (a Spending Plan category),
+// amount, frequency, recurStart (the first date), notes, skippedDates, ...sync fields }, so it syncs and undoes like
+// the other kinds with no change to the sync server. Nothing logs itself: each due date is offered on the Expenses
+// tab, and Log it records an ordinary expense carrying { recurId, recurDate } so that date is not offered again;
+// Skip remembers the date in skippedDates. Only the last REPEAT_LOOKBACK_DAYS days are offered, so a repeat left
+// alone for months does not bury you in old dates. Two devices that both log the same date before syncing make two
+// expenses, which the Recent Expenses list lets you delete.
+
+// The ways a repeating expense can come around.
+const REPEAT_FREQUENCIES = ['weekly', 'biweekly', 'monthly'];
+// How far back an unlogged date is still offered.
+const REPEAT_LOOKBACK_DAYS = 45;
+
+// The live repeating expenses, by category name.
+function repeatRecords() {
+  return income.filter((r) => r.recurPlanId && !r.deleted)
+    .sort((a, b) => expenseCategoryName({ planId: a.recurPlanId, categoryName: '' }).localeCompare(expenseCategoryName({ planId: b.recurPlanId, categoryName: '' })));
+}
+
+// Checks the Add / Edit repeating expense fields and returns the first problem as a sentence ('' when they are fine).
+function repeatFieldsError(fields) {
+  if (!fields.planId || !income.some((r) => r.id === fields.planId && r.planName && !r.deleted)) return 'Choose a category (add one on the Plan tab first).';
+  const amount = Number(fields.amountRaw);
+  if (fields.amountRaw === '' || !Number.isFinite(amount) || amount < 0.01 || amount > MAX_MONEY) return 'Enter an amount of at least $0.01 and up to $1,000,000,000.';
+  if (!REPEAT_FREQUENCIES.includes(fields.frequency)) return 'Choose how often it repeats.';
+  if (!fields.start) return 'Pick the first date.';
+  if (!isRealDateKey(fields.start) || !isReasonableDateKey(fields.start)) return DATE_RANGE_MESSAGE;
+  return '';
+}
+
+// Adds a repeating expense, or changes the one with `id`. Returns the problem as a sentence, or '' when it was saved.
+function saveRepeat(fields, id) {
+  const error = repeatFieldsError(fields);
+  if (error) return error;
+  const values = {
+    recurPlanId: fields.planId,
+    amount: Math.round(Number(fields.amountRaw) * 100) / 100, // whole cents, like bills
+    frequency: fields.frequency,
+    recurStart: fields.start,
+    notes: fields.notes.trim().slice(0, 200),
+  };
+  const existing = id ? income.find((r) => r.id === id && r.recurPlanId) : null;
+  if (existing) {
+    const before = structuredClone(existing);
+    Object.assign(existing, values);
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `rexp-${makeId()}`, ...values, skippedDates: [],
+      dateAdded: now, updatedAt: now,
+      deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// The dates a repeating expense has come due in the last REPEAT_LOOKBACK_DAYS days (today included) that have not
+// been logged or skipped, oldest first, as { repeat, dateKey }.
+function dueRepeats() {
+  const todayK = todayKey();
+  const due = [];
+  repeatRecords().forEach((repeat) => {
+    // Only a live plan category can be logged against: a repeat whose category was deleted waits (and can be edited).
+    if (!income.some((r) => r.id === repeat.recurPlanId && r.planName && !r.deleted)) return;
+    const schedule = { dueDate: repeat.recurStart, frequency: repeat.frequency };
+    const logged = new Set(income.filter((r) => r.recurId === repeat.id && !r.deleted).map((r) => r.recurDate));
+    for (let back = REPEAT_LOOKBACK_DAYS; back >= 0; back -= 1) {
+      const dateKey = shiftDateKey(todayK, -back);
+      if (occursOnDate(schedule, dateKey) && !logged.has(dateKey) && !(repeat.skippedDates || []).includes(dateKey)) due.push({ repeat, dateKey });
+    }
+  });
+  return due.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+}
+
+// Logs one due date of a repeating expense as an expense dated that day. Returns the problem as a sentence, or ''.
+function logRepeat(repeatId, dateKey) {
+  const repeat = income.find((r) => r.id === repeatId && r.recurPlanId && !r.deleted);
+  if (!repeat) return 'That repeating expense is gone.';
+  return saveExpense({ dateKey, amountRaw: String(repeat.amount), planId: repeat.recurPlanId, notes: repeat.notes, recurId: repeat.id, recurDate: dateKey });
+}
+
+// Skips one due date of a repeating expense (it is not offered again), as one Undo step.
+function skipRepeat(repeatId, dateKey) {
+  const repeat = income.find((r) => r.id === repeatId && r.recurPlanId && !r.deleted);
+  if (!repeat) return;
+  const before = structuredClone(repeat);
+  repeat.skippedDates = [...new Set([...(repeat.skippedDates || []), dateKey])].sort();
+  stampSync(repeat);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', repeat.id, before, structuredClone(repeat));
+  renderBudget();
+}
+
+// How often a repeating expense comes around, in words.
+function repeatWhen(repeat) {
+  const label = { weekly: 'Every week', biweekly: 'Every 2 weeks', monthly: 'Every month' }[repeat.frequency];
+  return `${label}, from ${formatDateKeyShort(repeat.recurStart)}`;
+}
+
+// Draws the Repeating Expenses fold: the dates due now (Log it / Skip) and the repeating expenses themselves.
+function renderRepeats() {
+  const dueList = document.getElementById('repeat-due-list');
+  dueList.innerHTML = '';
+  dueRepeats().forEach(({ repeat, dateKey }) => {
+    const name = expenseCategoryName({ planId: repeat.recurPlanId, categoryName: '' });
+    const row = document.createElement('li');
+    row.className = 'repeat-due';
+    const label = document.createElement('span');
+    label.textContent = `${name} · ${formatDateKeyShort(dateKey)} · ${formatMoney(repeat.amount)} due`;
+    const logBtn = document.createElement('button');
+    logBtn.type = 'button';
+    logBtn.className = 'small-btn';
+    logBtn.textContent = 'Log it';
+    logBtn.setAttribute('aria-label', `Log ${formatMoney(repeat.amount)} for ${name} on ${formatDateKeyShort(dateKey)}`);
+    logBtn.addEventListener('click', () => logRepeat(repeat.id, dateKey));
+    const skipBtn = document.createElement('button');
+    skipBtn.type = 'button';
+    skipBtn.className = 'small-btn';
+    skipBtn.textContent = 'Skip';
+    skipBtn.setAttribute('aria-label', `Skip ${name} on ${formatDateKeyShort(dateKey)}`);
+    skipBtn.addEventListener('click', () => skipRepeat(repeat.id, dateKey));
+    row.append(label, logBtn, skipBtn);
+    dueList.appendChild(row);
+  });
+
+  const list = document.getElementById('repeat-list');
+  const template = document.getElementById('repeat-card-template');
+  list.innerHTML = '';
+  const records = repeatRecords();
+  records.forEach((repeat) => {
+    const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = repeat.id;
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editError = node.querySelector('.repeat-edit-error');
+    const name = expenseCategoryName({ planId: repeat.recurPlanId, categoryName: '' });
+    node.querySelector('.recurring-income-name').textContent = name;
+    node.querySelector('.repeat-amount').textContent = formatMoney(repeat.amount);
+    node.querySelector('.repeat-when').textContent = repeatWhen(repeat);
+    const notesEl = node.querySelector('.repeat-notes');
+    if (repeat.notes) { notesEl.textContent = repeat.notes; notesEl.hidden = false; }
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit repeating ${name}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete repeating ${name}`);
+
+    // Elements are captured now: once the fragment is appended it is empty, so node.querySelector would find nothing.
+    const categoryBox = node.querySelector('.repeat-edit-category');
+    const amountBox = node.querySelector('.repeat-edit-amount');
+    const frequencyBox = node.querySelector('.repeat-edit-frequency');
+    const startBox = node.querySelector('.repeat-edit-start');
+    const notesBox = node.querySelector('.repeat-edit-notes');
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      fillExpenseCategorySelect(categoryBox, repeat.recurPlanId, '');
+      amountBox.value = String(repeat.amount);
+      frequencyBox.value = repeat.frequency;
+      startBox.value = repeat.recurStart;
+      notesBox.value = repeat.notes || '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      amountBox.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
+      viewSection.hidden = false;
+      const problem = saveRepeat({ planId: categoryBox.value, amountRaw: amountBox.value, frequency: frequencyBox.value, start: startBox.value, notes: notesBox.value }, repeat.id);
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = problem;
+        editError.hidden = false;
+      }
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(repeat.id));
+    list.appendChild(node);
+  });
+  document.getElementById('repeat-empty-state').hidden = records.length !== 0;
+  const addCategory = document.getElementById('repeat-category-input');
+  fillExpenseCategorySelect(addCategory, addCategory.value, '');
+}
+
+// Add repeating expense form: validate, save, and clear the amount and note when it worked.
+document.getElementById('repeat-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('repeat-form-error');
+  const problem = saveRepeat({
+    planId: document.getElementById('repeat-category-input').value,
+    amountRaw: document.getElementById('repeat-amount-input').value,
+    frequency: document.getElementById('repeat-frequency-input').value,
+    start: document.getElementById('repeat-start-input').value,
+    notes: document.getElementById('repeat-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  document.getElementById('repeat-amount-input').value = '';
+  document.getElementById('repeat-notes-input').value = '';
+});
+
+// The first date of a new repeating expense starts on today.
+document.getElementById('repeat-start-input').value = todayKey();
 
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
@@ -4672,7 +4887,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.recurPlanId ? 'repeating expense' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -4717,6 +4932,7 @@ function undoToastMessage(collectionName, before, after) {
     if (after.goalName) return `Added goal ${after.goalName}`;
     if (after.goalItemFor) return `Added cost ${after.itemName}`;
     if (after.adjustWeek) return 'Adjusted the amount carried forward';
+    if (after.recurPlanId) return 'Added a repeating expense';
     if (after.savedFor) {
       const goal = income.find((r) => r.id === after.savedFor);
       return `${after.amount < 0 ? 'Took out' : 'Saved'} ${formatMoney(Math.abs(after.amount))}${goal ? ` ${after.amount < 0 ? 'from' : 'toward'} ${goal.goalName}` : ''}`;
@@ -4732,6 +4948,8 @@ function undoToastMessage(collectionName, before, after) {
   if (after.goalItemFor && after.deleted && !before.deleted) return `Removed cost ${after.itemName}`;
   if (after.savedFor && after.deleted && !before.deleted) return 'Removed a savings entry';
   if (after.adjustWeek && after.deleted && !before.deleted) return 'Removed the carry-forward adjustment';
+  if (after.recurPlanId && after.deleted && !before.deleted) return 'Deleted a repeating expense';
+  if (after.recurPlanId && (after.skippedDates || []).length > (before.skippedDates || []).length) return 'Skipped a repeating expense';
   if (after.adjustWeek && !after.deleted && after.amount !== before.amount) return 'Changed the carry-forward adjustment';
   if (after.planName && !after.deleted && after.amount !== before.amount) {
     return `Changed ${after.planName} to ${formatMoney(after.amount)} per ${after.frequency === 'weekly' ? 'week' : 'month'}`;
@@ -5617,7 +5835,7 @@ function setDataIoStatus(text, tone) {
 // Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
 // string "1200" instead of a number, or a date outside the forms' year range). Records in the income list come in
 // kinds, told apart by which field is present and checked in this order: spentOn (expense), planName (plan
-// category), adjustWeek (a carry-forward adjustment), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
+// category), recurPlanId (a repeating expense), adjustWeek (a carry-forward adjustment), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
 // projectedFor (projected income), otherwise a plain income entry with a dateKey. A custom-repeat bill must
 // also have a readable every/unit (schedulePeriod). A name must not be empty: the app treats an empty one as absent.
 function isValidImportRecord(collectionName, rec) {
@@ -5649,6 +5867,7 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.recurPlanId !== undefined) return nonEmptyText(rec.recurPlanId) && isPositiveMoney(rec.amount) && REPEAT_FREQUENCIES.includes(rec.frequency) && isDate(rec.recurStart) && dateListOrMissing(rec.skippedDates) && textOrMissing(rec.notes);
     if (rec.adjustWeek !== undefined) return isDate(rec.adjustWeek) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY && textOrMissing(rec.notes);
     if (rec.goalItemFor !== undefined) return nonEmptyText(rec.goalItemFor) && nonEmptyText(rec.itemName) && isPositiveMoney(rec.amount);
     if (rec.savedFor !== undefined) return nonEmptyText(rec.savedFor) && isDate(rec.savedOn) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY;
@@ -5733,6 +5952,7 @@ function describeContents() {
     [income.filter((r) => r.guessName && !r.deleted).length, 'expected cost', 'expected costs'],
     [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
     [income.filter((r) => r.goalItemFor && !r.deleted).length, 'goal cost', 'goal costs'],
+    [income.filter((r) => r.recurPlanId && !r.deleted).length, 'repeating expense', 'repeating expenses'],
     [income.filter((r) => r.adjustWeek && !r.deleted).length, 'carry-forward adjustment', 'carry-forward adjustments'],
     [income.filter((r) => r.savedFor && !r.deleted).length, 'savings deposit or withdrawal', 'savings deposits and withdrawals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
@@ -5803,7 +6023,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 38;
+const APP_VERSION = 39;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
