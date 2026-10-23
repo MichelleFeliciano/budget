@@ -237,3 +237,7 @@ There is no live connection to Chase: that would mean handing a bank login or an
 
 A deposit or withdrawal can change its date and amount (a negative amount is money taken out), but never so far that the goal would have less than nothing saved.
 
+## Business has its own tab (v45)
+
+The Business Summary moved off the Expenses tab onto a sixth tab, with a form that logs expenses against Business categories only and a list of the period's business expenses (the same cards as Recent Expenses, so they edit and delete the same way). A business expense is still an ordinary expense: nothing new is stored, and the Business or Personal split still comes from the category's flag. The CSV is now business expenses only.
+

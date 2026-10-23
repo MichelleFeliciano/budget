@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, Savings Goals, the eight Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 16 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, Savings Goals, the seven Expenses sections, the three Business sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 18 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -489,7 +489,7 @@ hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
 
 // ---- the Plan tab (estimated spending per category) ----
 bills.length = 0; income.length = 0; recurringIncome.length = 0; planScenarioOn = false; showTab('plan'); renderBudget(); hideUndoToast();
-check('the Plan tab is the fourth tab and starts empty', TABS.length === 5 && $('tab-plan').hidden === false && $('tab-home').hidden === true && $('plan-empty-state').hidden === false && $('plan-total-line').textContent === '');
+check('the Plan tab is the fourth tab and starts empty', TABS.length === 6 && $('tab-plan').hidden === false && $('tab-home').hidden === true && $('plan-empty-state').hidden === false && $('plan-total-line').textContent === '');
 check('weekly to monthly multiplies by 52 and divides by 12, not by 4', Math.abs(planMonthly(60, 'weekly') - 260) < 1e-9 && planMonthly(100, 'monthly') === 100);
 check('monthly to weekly multiplies by 12 and divides by 52', Math.abs(planWeekly(260, 'monthly') - 60) < 1e-9 && planWeekly(60, 'weekly') === 60);
 const planCards = () => [...document.querySelectorAll('#plan-list .recurring-income-card')];
@@ -653,7 +653,7 @@ $('projected-income-date-input').value = '2026-01-01'; document.querySelector('[
 check('the Today button fills the Projected Income date', $('projected-income-date-input').value === todayKey());
 $('expense-date-input').value = '2026-01-01'; document.querySelector('[data-date-input="expense-date-input"]').click();
 check('the Today button fills the Expenses date', $('expense-date-input').value === todayKey());
-check('every Today button has a visible name and a target', [...document.querySelectorAll('.today-btn')].length === 4 && [...document.querySelectorAll('.today-btn')].every((b) => b.textContent === 'Today' && document.getElementById(b.dataset.dateInput)));
+check('every Today button has a visible name and a target', [...document.querySelectorAll('.today-btn')].length === 5 && [...document.querySelectorAll('.today-btn')].every((b) => b.textContent === 'Today' && document.getElementById(b.dataset.dateInput)));
 hideUndoToast(); income.length = 0; showTab('home'); renderBudget();
 
 // ---- fixes from the line-by-line review ----
@@ -951,7 +951,7 @@ check('the summary adds up Business, Personal and the total for the period', (()
 check('changing the period changes the figures, and an empty period disables the button', (() => { $('business-period-input').value = 'lastYear'; $('business-period-input').dispatchEvent(new Event('change')); const last = /Business: \$99\.00 · Personal: \$0\.00 · Total: \$99\.00 \(1 expense\)/.test($('business-total-line').textContent); $('business-period-input').value = 'lastMonth'; $('business-period-input').dispatchEvent(new Event('change')); const empty = $('business-empty').hidden === false || /Total/.test($('business-total-line').textContent); return last && empty; })(), $('business-total-line').textContent);
 check('a CSV cell is quoted, its quotes doubled and a formula made harmless', csvCell('a "b", c') === '"a ""b"", c"' && csvCell('=SUM(A1)') === '"\'=SUM(A1)"' && csvCell('-5 off') === '"\'-5 off"' && csvCell('plain') === '"plain"' && csvCell(12.5) === '"12.5"');
 check('the CSV has a header and one line per expense with its type and amount', (() => { const lines = buildExpenseCsv(expensesInSummaryPeriod('month')).split('\r\n'); return lines.length === 3 && lines[0] === '"Date","Category","Type","Amount","Note"' && lines.some((l) => l === `"${todayKey()}","Fuel","Business","40.00","diesel"`) && lines.some((l) => l === `"${todayKey()}","Snacks","Personal","15.50","'=SUM(A1)"`); })());
-check('the Download CSV button hands a file to the browser', await (async () => { $('business-period-input').value = 'month'; renderBusinessSummary(); let seen = null; const saved = URL.createObjectURL; let blobSeen = null; URL.createObjectURL = (b) => { blobSeen = b; return 'blob:test'; }; const clickSaved = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { seen = this.download; }; $('business-csv-btn').click(); URL.createObjectURL = saved; HTMLAnchorElement.prototype.click = clickSaved; return /^budget-expenses-this-month-\d{4}-\d{2}-\d{2}\.csv$/.test(seen || '') && !!blobSeen && blobSeen.type === 'text/csv'; })());
+check('the Download CSV button hands a file to the browser', await (async () => { $('business-period-input').value = 'month'; renderBusinessSummary(); let seen = null; const saved = URL.createObjectURL; let blobSeen = null; URL.createObjectURL = (b) => { blobSeen = b; return 'blob:test'; }; const clickSaved = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { seen = this.download; }; $('business-csv-btn').click(); URL.createObjectURL = saved; HTMLAnchorElement.prototype.click = clickSaved; return /^budget-business-expenses-this-month-\d{4}-\d{2}-\d{2}\.csv$/.test(seen || '') && !!blobSeen && blobSeen.type === 'text/csv'; })());
 income.length = 0; hideUndoToast(); renderBudget();
 
 // ---- this month's carry-forward corrections on Home ----
@@ -1031,3 +1031,20 @@ check('Undo this import clears the entries it created and lets the rows be impor
 check('a deposit entry cleared by hand is not brought back by importing again', (() => { setIncomeForDate('2026-10-20', '', 'Paycheck'); loadBankText(inCsv); return inRowsNow().filter((r) => /PAYROLL/.test(r.desc)).every((r) => r.imported); })());
 check('a spending row and a deposit of the same size and day never share a key', (() => { const rows = parseChaseCsv('Details,Posting Date,Description,Amount\nDEBIT,10/20/2026,"THING",-5.00\nCREDIT,10/20/2026,"THING",5.00\n').rows; return rows.length === 2 && rows[0].key !== rows[1].key; })());
 income.length = 0; lastBankImportIds = []; lastBankIncome = []; bankRows = []; try { localStorage.removeItem(BANK_CATEGORIES_KEY); localStorage.removeItem(BANK_SOURCES_KEY); } catch {} hideUndoToast(); renderBudget();
+
+// ---- the Business tab ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; hideUndoToast(); showTab('business');
+savePlanCategory({ name: 'Tab supplies', amountRaw: '30', frequency: 'weekly', type: 'business', altRaw: '', notes: '' });
+savePlanCategory({ name: 'Tab lunch', amountRaw: '30', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const tabBizId = income.find((r) => r.planName === 'Tab supplies').id, tabPersonalId = income.find((r) => r.planName === 'Tab lunch').id;
+check('Business is a sixth tab with its own button, and the + button is hidden on it', document.querySelectorAll('.tabbar-btn').length === 6 && !!document.querySelector('.tabbar-btn[data-tab="business"]') && $('tab-business').hidden === false && $('tab-expenses').hidden === true && $('add-bill-fab').hidden === true);
+check('the Log form offers only the categories marked Business', (() => { const options = [...$('business-category-input').options].map((o) => o.textContent); return options.length === 1 && options[0] === 'Tab supplies'; })());
+check('logging a business expense saves it under that category and clears the amount', (() => { $('business-date-input').value = todayKey(); $('business-amount-input').value = '19.99'; $('business-category-input').value = tabBizId; $('business-notes-input').value = 'paper'; $('business-add-form').requestSubmit(); const e = income.find((r) => r.spentOn && r.notes === 'paper'); return !!e && e.amount === 19.99 && e.categoryName === 'Tab supplies' && $('business-amount-input').value === ''; })());
+saveExpense({ dateKey: todayKey(), amountRaw: '8', planId: tabPersonalId, notes: 'sandwich' }); renderBudget();
+check('the list shows only business expenses for the period, each editable and deletable', (() => { const rows = document.querySelectorAll('#business-expense-list > li'); return rows.length === 1 && /Tab supplies/.test(rows[0].textContent) && /\$19\.99/.test(rows[0].textContent) && !!rows[0].querySelector('.edit-btn') && !!rows[0].querySelector('.delete-btn') && !/sandwich/.test($('business-expense-list').textContent); })());
+check('the summary and CSV moved to this tab and the Expenses tab no longer has them', !!$('tab-business').querySelector('#business-csv-btn') && !$('tab-expenses').querySelector('#business-csv-btn') && /Business: \$19\.99 · Personal: \$8\.00 · Total: \$27\.99/.test($('business-total-line').textContent), $('business-total-line').textContent);
+check('the CSV holds only the business expenses', (() => { const lines = buildExpenseCsv(expensesInSummaryPeriod('month').filter(isBusinessExpense)).split('\r\n'); return lines.length === 2 && /"Business"/.test(lines[1]) && !/sandwich/.test(lines.join('')); })());
+check('editing in the list saves and the form closes, and the list follows the period choice', await (async () => { const li = document.querySelector('#business-expense-list > li'); li.querySelector('.edit-btn').click(); const form = li.querySelector('.recurring-income-edit-form'); form.querySelector('.expense-edit-amount').value = '25'; form.requestSubmit(); await sleep(40); const saved = income.find((r) => r.notes === 'paper').amount === 25 && document.querySelector('#business-expense-list > li .recurring-income-edit-form').hidden === true; $('business-period-input').value = 'lastYear'; $('business-period-input').dispatchEvent(new Event('change')); return saved && document.querySelectorAll('#business-expense-list > li').length === 0 && $('business-empty').hidden === false; })());
+check('with no Business category the Log form says what to do', (() => { income.find((r) => r.id === tabBizId).business = false; renderBudget(); const t = $('business-category-input').options[0].textContent; income.find((r) => r.id === tabBizId).business = true; return /Mark a Plan category as Business/.test(t); })());
+income.length = 0; hideUndoToast(); showTab('home'); renderBudget();

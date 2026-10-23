@@ -3514,7 +3514,7 @@ document.getElementById('goal-add-form').addEventListener('submit', (e) => {
 
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'expense-list', 'business-expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form (in the given lists, by default all of them): which record, what is typed in
 // each box, and which box had focus. The Bills and Recurring Income lists are not here: renderBudget captures
@@ -3604,6 +3604,7 @@ function renderBudget() {
   renderGuesses();
   renderGoals();
   renderExpenses();
+  renderBusiness();
   restoreOpenCardForms(openCardForms);
 
   renderBackupNotes();
@@ -4317,9 +4318,24 @@ function renderExpenseList(expenses) {
     && (!search || (r.notes || '').toLowerCase().includes(search) || expenseCategoryName(r).toLowerCase().includes(search)));
 
   const list = document.getElementById('expense-list');
-  const template = document.getElementById('expense-card-template');
   list.innerHTML = '';
-  shown.slice(0, MAX_EXPENSES_SHOWN).forEach((record) => {
+  appendExpenseCards(list, shown.slice(0, MAX_EXPENSES_SHOWN));
+
+  document.getElementById('expense-empty-state').hidden = expenses.length !== 0;
+  const total = shown.reduce((sum, r) => sum + r.amount, 0);
+  document.getElementById('expense-filter-total').textContent = !expenses.length ? ''
+    : filtering ? `Showing ${shown.length} of ${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`
+      : `${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`;
+  const noteLine = document.getElementById('expense-list-note');
+  noteLine.hidden = shown.length <= MAX_EXPENSES_SHOWN;
+  noteLine.textContent = `Showing the newest ${MAX_EXPENSES_SHOWN} of ${shown.length} expenses.`;
+}
+
+// Appends one card per expense to a list: its date, category, amount and note, with Edit (date, amount, category, note)
+// and Delete. Used by the Recent Expenses list and the Business tab's list.
+function appendExpenseCards(list, records) {
+  const template = document.getElementById('expense-card-template');
+  records.forEach((record) => {
     const node = template.content.cloneNode(true);
     node.firstElementChild.dataset.recordId = record.id;
     const viewSection = node.querySelector('.recurring-income-view');
@@ -4372,15 +4388,6 @@ function renderExpenseList(expenses) {
     deleteBtn.addEventListener('click', () => deleteIncome(record.id));
     list.appendChild(node);
   });
-
-  document.getElementById('expense-empty-state').hidden = expenses.length !== 0;
-  const total = shown.reduce((sum, r) => sum + r.amount, 0);
-  document.getElementById('expense-filter-total').textContent = !expenses.length ? ''
-    : filtering ? `Showing ${shown.length} of ${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`
-      : `${expenses.length} expense${expenses.length === 1 ? '' : 's'}, ${formatMoney(total)} in total.`;
-  const noteLine = document.getElementById('expense-list-note');
-  noteLine.hidden = shown.length <= MAX_EXPENSES_SHOWN;
-  noteLine.textContent = `Showing the newest ${MAX_EXPENSES_SHOWN} of ${shown.length} expenses.`;
 }
 
 // Draws the whole Expenses tab: Quick Add, the log form's category list, Spent vs Plan, the charts and the recent list.
@@ -4394,7 +4401,6 @@ function renderExpenses() {
   renderExpenseCharts(expenses, rows);
   renderExpenseList(expenses);
   renderRepeats();
-  renderBusinessSummary();
   renderBankRows();
   restoreOpenCardForms(openForms);
 }
@@ -4717,18 +4723,65 @@ function renderBusinessSummary() {
     row.textContent = `${name}: ${formatMoney(amount)}`;
     list.appendChild(row);
   });
-  document.getElementById('business-empty').hidden = expenses.length !== 0;
-  document.getElementById('business-csv-btn').disabled = expenses.length === 0;
+  document.getElementById('business-empty').hidden = business.length !== 0;
+  document.getElementById('business-csv-btn').disabled = business.length === 0;
 }
 
-// Downloads the expenses of the chosen period as a CSV file.
+// Downloads the business expenses of the chosen period as a CSV file.
 function downloadExpenseCsv() {
   const select = document.getElementById('business-period-input');
-  const expenses = expensesInSummaryPeriod(select.value || 'month');
+  const expenses = expensesInSummaryPeriod(select.value || 'month').filter(isBusinessExpense);
   if (!expenses.length) return;
   const label = SUMMARY_PERIODS.find((p) => p.value === select.value);
-  downloadBlob(new Blob([buildExpenseCsv(expenses)], { type: 'text/csv' }), `budget-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
+  downloadBlob(new Blob([buildExpenseCsv(expenses)], { type: 'text/csv' }), `budget-business-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
 }
+
+// Draws the Business tab: the Log form's categories (the ones marked Business), the summary and the business expenses
+// of the chosen period, newest first. Open Edit forms in the list are kept.
+function renderBusiness() {
+  const openForms = captureOpenCardForms(['business-expense-list']);
+  const select = document.getElementById('business-category-input');
+  const keep = select.value;
+  select.innerHTML = '';
+  const categories = planCategories().filter((plan) => plan.business);
+  categories.forEach((plan) => {
+    const option = document.createElement('option');
+    option.value = plan.id;
+    option.textContent = plan.planName;
+    select.appendChild(option);
+  });
+  if (!categories.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Mark a Plan category as Business first';
+    select.appendChild(option);
+  }
+  if (keep && categories.some((plan) => plan.id === keep)) select.value = keep;
+  renderBusinessSummary();
+  const list = document.getElementById('business-expense-list');
+  list.innerHTML = '';
+  const rows = expensesInSummaryPeriod(document.getElementById('business-period-input').value || 'month').filter(isBusinessExpense).reverse();
+  appendExpenseCards(list, rows.slice(0, MAX_EXPENSES_SHOWN));
+  restoreOpenCardForms(openForms);
+}
+
+// Log a business expense form: validate, save, and clear the amount and note when it worked.
+document.getElementById('business-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('business-form-error');
+  const problem = saveExpense({
+    dateKey: document.getElementById('business-date-input').value,
+    amountRaw: document.getElementById('business-amount-input').value,
+    planId: document.getElementById('business-category-input').value,
+    notes: document.getElementById('business-notes-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  document.getElementById('business-amount-input').value = '';
+  document.getElementById('business-notes-input').value = '';
+  document.getElementById('business-amount-input').focus();
+});
+document.getElementById('business-date-input').value = todayKey();
 
 // The period choices, filled once, and the summary redrawing when the choice changes or the button is pressed.
 (function initBusinessSummary() {
@@ -4739,7 +4792,7 @@ function downloadExpenseCsv() {
     option.textContent = p.label;
     select.appendChild(option);
   });
-  select.addEventListener('change', renderBusinessSummary);
+  select.addEventListener('change', renderBusiness);
   document.getElementById('business-csv-btn').addEventListener('click', downloadExpenseCsv);
 })();
 
@@ -6618,7 +6671,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 44;
+const APP_VERSION = 45;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -6981,7 +7034,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 
 // localStorage key for the last tab used, and the tabs in order.
 const TAB_KEY = 'budgetApp.tab.v1';
-const TABS = ['home', 'income', 'bills', 'plan', 'expenses'];
+const TABS = ['home', 'income', 'bills', 'plan', 'expenses', 'business'];
 // The tab on screen.
 let currentTab = 'home';
 
@@ -7019,14 +7072,14 @@ document.querySelectorAll('.tabbar-btn').forEach((button) => {
 });
 
 // The floating + button opens the Add bill form (switching to the Bills tab first). It is hidden on the
-// Income, Plan and Expenses tabs, and on the Bills tab while that form is already on screen.
+// Income, Plan, Expenses and Business tabs, and on the Bills tab while that form is already on screen.
 const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
 let addFormOnScreen = false;
 
 // Shows or hides the + button for the current tab.
 function updateAddFab() {
-  addBillFab.hidden = currentTab === 'income' || currentTab === 'plan' || currentTab === 'expenses' || (currentTab === 'bills' && addFormOnScreen);
+  addBillFab.hidden = ['income', 'plan', 'expenses', 'business'].includes(currentTab) || (currentTab === 'bills' && addFormOnScreen);
 }
 
 if (addBillFab && addBillForm) {
