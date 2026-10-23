@@ -2033,6 +2033,26 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
   const carry = netCarriedInto(windowDays[0], nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates, adjustments);
   let rolledNet = carry.net;
   let rolledProjectedNet = carry.projectedNet;
+
+  // This week in one sentence: what is left after the bills due this week and what is planned or already spent,
+  // whichever is more (the week's Net does not count expenses, so they come off here).
+  const weekLineEl = document.getElementById('home-week-line');
+  if (weekLineEl) {
+    const thisWeek = weekStartKey(todayK);
+    const thisWeekEnd = shiftDateKey(thisWeek, 6);
+    const thisWeekCarry = thisWeek === windowDays[0] ? carry : netCarriedInto(thisWeek, nonDeletedBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates, adjustments);
+    const adjustedNow = adjustments.has(thisWeek) ? adjustments.get(thisWeek).amount : 0;
+    const weekNow = thisWeekCarry.net + adjustedNow + totalIncomeInRange(thisWeek, thisWeekEnd, nonDeletedIncome, nonDeletedRecurringIncome) - amountDueInRange(thisWeek, thisWeekEnd, nonDeletedBills);
+    const plannedWeek = planCategories().reduce((sum, r) => sum + planWeekly(planAmount(r), r.frequency), 0);
+    const spentWeek = sumExpensesIn(expenseRecords(), thisWeek, thisWeekEnd);
+    const hasAnything = nonDeletedBills.length > 0 || nonDeletedIncome.length > 0 || nonDeletedRecurringIncome.length > 0 || plannedWeek > 0;
+    weekLineEl.hidden = !hasAnything;
+    if (hasAnything) {
+      const left = weekNow - Math.max(plannedWeek, spentWeek);
+      weekLineEl.innerHTML = `This week: <strong class="${signedAmountClass(left)}">${formatSignedCurrency(left)}</strong> left after bills and spending (${formatMoney(plannedWeek)} planned, ${formatMoney(spentWeek)} spent so far).`;
+      weekLineEl.title = 'This week\'s Net (what is carried in plus income minus the bills due this week) minus whichever is more: your weekly Spending Plan or what you have already spent this week';
+    }
+  }
   for (let weekIndex = 0; weekIndex < 3; weekIndex++) {
     const weekDays = windowDays.slice(weekIndex * 7, weekIndex * 7 + 7);
     const weekEndKey = weekDays[6];
@@ -3605,6 +3625,8 @@ function renderBudget() {
   renderGoals();
   renderExpenses();
   renderBusiness();
+  renderGoalsOnHome();
+  renderIncomeQuickAdd();
   restoreOpenCardForms(openCardForms);
 
   renderBackupNotes();
@@ -4387,6 +4409,86 @@ function appendExpenseCards(list, records) {
     });
     deleteBtn.addEventListener('click', () => deleteIncome(record.id));
     list.appendChild(node);
+  });
+}
+
+// Draws the Savings goals strip on Home: each goal's progress and a box to add savings straight away. Hidden when
+// there are no goals. The full goal (costs, history, editing) stays on the Plan tab.
+function renderGoalsOnHome() {
+  const box = document.getElementById('home-goals');
+  const list = document.getElementById('home-goal-list');
+  list.innerHTML = '';
+  const goals = goalRecords();
+  box.hidden = goals.length === 0;
+  goals.forEach((goal) => {
+    const saved = goalSaved(goal.id);
+    const target = goalTarget(goal);
+    const item = document.createElement('li');
+    item.className = 'home-goal';
+    const name = document.createElement('strong');
+    name.textContent = goal.goalName;
+    const amounts = document.createElement('span');
+    amounts.className = 'home-goal-amounts';
+    amounts.textContent = saved >= target ? `${formatMoney(saved)} of ${formatMoney(target)} \u00b7 reached!` : `${formatMoney(saved)} of ${formatMoney(target)} \u00b7 ${formatMoney(target - saved)} to go`;
+    const track = document.createElement('span');
+    track.className = 'chart-track';
+    track.setAttribute('aria-hidden', 'true');
+    const fill = document.createElement('span');
+    fill.className = 'chart-fill';
+    fill.style.width = `${Math.max(0, Math.min(100, Math.round((saved / target) * 100)))}%`;
+    track.appendChild(fill);
+    const row = document.createElement('span');
+    row.className = 'goal-save-row';
+    const amountBox = document.createElement('input');
+    amountBox.type = 'number';
+    amountBox.inputMode = 'decimal';
+    amountBox.min = '0.01';
+    amountBox.step = '0.01';
+    amountBox.placeholder = 'Amount';
+    amountBox.setAttribute('aria-label', `Amount to put toward ${goal.goalName}`);
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'small-btn';
+    addBtn.textContent = 'Add savings';
+    const error = document.createElement('span');
+    error.className = 'form-error';
+    error.hidden = true;
+    addBtn.addEventListener('click', () => {
+      const problem = addSavings(goal.id, amountBox.value, 1);
+      if (problem) { error.textContent = problem; error.hidden = false; }
+    });
+    row.append(amountBox, addBtn);
+    item.append(name, amounts, track, row, error);
+    list.appendChild(item);
+  });
+}
+
+// Draws the Quick Add buttons on the Income tab: the last few different amounts (with their source) you received,
+// each adding that amount for today in one tap. Hidden until there is income to copy from.
+function renderIncomeQuickAdd() {
+  const box = document.getElementById('income-quick');
+  const list = document.getElementById('income-quick-list');
+  list.innerHTML = '';
+  const seen = new Set();
+  const choices = [];
+  uniqueIncomeEntries(income).filter((r) => !r.deleted && r.amount > 0)
+    .sort((a, b) => b.dateKey.localeCompare(a.dateKey) || (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+    .forEach((r) => {
+      const key = `${cleanSource(r.source).toLowerCase()}|${r.amount}`;
+      if (!seen.has(key) && choices.length < MAX_QUICK_AMOUNTS) { seen.add(key); choices.push({ source: cleanSource(r.source), amount: r.amount }); }
+    });
+  box.hidden = choices.length === 0;
+  choices.forEach((choice) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'expense-quick-btn';
+    button.textContent = `${choice.source ? `${choice.source} ` : ''}${formatMoney(choice.amount)}`;
+    button.setAttribute('aria-label', `Add ${formatMoney(choice.amount)}${choice.source ? ` from ${choice.source}` : ''} for today`);
+    button.addEventListener('click', () => {
+      setIncomeForDate(todayKey(), String(choice.amount), choice.source);
+      showUndoToast(`Added ${formatMoney(choice.amount)}${choice.source ? ` from ${choice.source}` : ''} for today`);
+    });
+    list.appendChild(button);
   });
 }
 
@@ -6671,7 +6773,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 45;
+const APP_VERSION = 46;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

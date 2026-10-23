@@ -133,6 +133,13 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="budget-month-net-total" id="budget-month-net-total"></p>
           <p class="budget-month-left-total" id="budget-month-left-total" hidden></p>
           <p class="budget-month-adjusted" id="budget-month-adjusted" hidden></p>
+          <p class="budget-month-adjusted" id="home-week-line" hidden></p>
+        </div>
+
+        <!-- Savings goals on Home: each with its progress and a box to add savings in one step (renderGoalsOnHome); the full goal (costs, history, edit) is on the Plan tab. -->
+        <div class="home-goals" id="home-goals" hidden>
+          <h3 class="chart-title">Savings goals</h3>
+          <ul class="card-list flat-list" id="home-goal-list"></ul>
         </div>
 
         <!-- Slide the three weeks shown earlier or later; Today brings them back (the totals above stay this month's). -->
@@ -182,6 +189,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <details class="fold" id="fold-received-income" open>
           <summary class="fold-summary"><h2>Income Received</h2></summary>
           <p class="stats-line">Extra income you actually received (a refund, a side payment); regular paychecks go in Recurring Income below. Each day holds one entry per source. It counts in that week's and month's Income and Net, and replaces any projection for the same day.</p>
+          <!-- One tap adds a repeat amount from a source for today (renderIncomeQuickAdd). -->
+          <div class="income-quick" id="income-quick" hidden>
+            <p class="stats-line">Quick Add for today:</p>
+            <div id="income-quick-list"></div>
+          </div>
           <form id="received-income-add-form" class="add-form add-form-stacked">
             <label class="date-field">Date
               <input type="date" id="received-income-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date the income was received">
@@ -383,7 +395,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="empty-state" id="expense-summary-empty" hidden>Add categories on the Plan tab, then log expenses against them.</p>
         </details>
 
-        <details class="fold" id="fold-expense-charts" open>
+        <details class="fold" id="fold-expense-charts">
           <summary class="fold-summary"><h2>Charts</h2></summary>
           <h3 class="chart-title">This month by category</h3>
           <ul class="chart-rows" id="expense-month-chart"></ul>
@@ -506,7 +518,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <p class="empty-state" id="budget-empty-state" hidden>No bills yet — add your first one above.</p>
         <p class="empty-state" id="budget-filter-empty" hidden>No bills are overdue or due in the next two weeks.</p>
 
-        <details class="fold" id="fold-paid-history" open>
+        <details class="fold" id="fold-paid-history">
           <summary class="fold-summary"><h2>Paid History</h2></summary>
           <div class="collection-toolbar">
             <button type="button" class="paid-history-nav" id="paid-history-prev" aria-label="Previous month">&lsaquo;</button>

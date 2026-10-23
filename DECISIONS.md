@@ -241,3 +241,7 @@ A deposit or withdrawal can change its date and amount (a negative amount is mon
 
 The Business Summary moved off the Expenses tab onto a sixth tab, with a form that logs expenses against Business categories only and a list of the period's business expenses (the same cards as Recent Expenses, so they edit and delete the same way). A business expense is still an ordinary expense: nothing new is stored, and the Business or Personal split still comes from the category's flag. The CSV is now business expenses only.
 
+## Home shows the week and the savings goals (v46)
+
+The week line is the current week's Net (what is carried in, with any adjustment, plus income, minus the bills due that week) minus whichever is more of the weekly plan or what has been spent so far this week: the Net does not count expenses, so spending comes off here, and the larger of plan and actual is used so a week that has gone over the plan is not shown as better than it is. The Home goals strip only adds savings (to take money out or edit a goal, use the Plan tab). Income Quick Add sets today's entry for that source to the chosen amount (it does not add to an amount already there). The bills-due banner with Mark paid buttons already sits above the tabs, so no second bills strip was added.
+

@@ -1323,6 +1323,28 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .small-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* A Home savings goal: the name, how far along it is, its bar, and the box to add savings. */
+
+.home-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* How much is saved and what is left, under the goal's name. */
+
+.home-goal-amounts { display: block; color: var(--muted); font-size: 0.85rem; }
+
+/* The goal's name has a line of its own, whatever the list item's own layout is. */
+
+.home-goal strong { display: block; }
+
+/* The Home goal's bar spans the row like the one on the Plan tab. */
+
+.home-goal > .chart-track { width: 100%; }
+
 /* A savings goal's progress bar takes the card's full width. */
 
 .recurring-income-info > .chart-track { width: 100%; margin: 4px 0; }
