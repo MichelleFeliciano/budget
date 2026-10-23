@@ -3534,7 +3534,7 @@ document.getElementById('goal-add-form').addEventListener('submit', (e) => {
 
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'expense-list', 'business-expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'account-list', 'expense-list', 'business-expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form (in the given lists, by default all of them): which record, what is typed in
 // each box, and which box had focus. The Bills and Recurring Income lists are not here: renderBudget captures
@@ -3625,6 +3625,7 @@ function renderBudget() {
   renderGoals();
   renderExpenses();
   renderBusiness();
+  renderMoney();
   renderGoalsOnHome();
   renderIncomeQuickAdd();
   restoreOpenCardForms(openCardForms);
@@ -4504,6 +4505,7 @@ function renderExpenses() {
   renderExpenseList(expenses);
   renderRepeats();
   renderBankRows();
+  renderBankRules();
   restoreOpenCardForms(openForms);
 }
 
@@ -4761,6 +4763,8 @@ document.getElementById('repeat-start-input').value = todayKey();
 const SUMMARY_PERIODS = [
   { value: 'month', label: 'This month' },
   { value: 'lastMonth', label: 'Last month' },
+  { value: 'quarter', label: 'This quarter' },
+  { value: 'lastQuarter', label: 'Last quarter' },
   { value: 'year', label: 'This year' },
   { value: 'lastYear', label: 'Last year' },
 ];
@@ -4768,6 +4772,12 @@ const SUMMARY_PERIODS = [
 // The first and last day keys of a summary period (see SUMMARY_PERIODS), counted from today.
 function summaryPeriodBounds(kind) {
   const today = parseDateKey(todayKey());
+  if (kind === 'quarter' || kind === 'lastQuarter') {
+    // Quarters are Jan-Mar, Apr-Jun, Jul-Sep and Oct-Dec; a Date rolls the first quarter back into last year.
+    const first = new Date(today.y, Math.floor(today.m / 3) * 3 - (kind === 'lastQuarter' ? 3 : 0), 1);
+    const last = new Date(first.getFullYear(), first.getMonth() + 2, 1);
+    return [dateKeyFromLocalDate(first), monthBounds(dateKeyFromLocalDate(last))[1]];
+  }
   if (kind === 'year') return [`${today.y}-01-01`, `${today.y}-12-31`];
   if (kind === 'lastYear') return [`${today.y - 1}-01-01`, `${today.y - 1}-12-31`];
   if (kind === 'lastMonth') {
@@ -4860,6 +4870,7 @@ function renderBusiness() {
   }
   if (keep && categories.some((plan) => plan.id === keep)) select.value = keep;
   renderBusinessSummary();
+  renderTax();
   const list = document.getElementById('business-expense-list');
   list.innerHTML = '';
   const rows = expensesInSummaryPeriod(document.getElementById('business-period-input').value || 'month').filter(isBusinessExpense).reverse();
@@ -5033,7 +5044,7 @@ function parseChaseCsv(text) {
     seen.set(base, count);
     rows.push({
       kind, dateKey, desc, cents: Math.abs(cents), key: `${base}#${count}`,
-      planId: kind === 'out' ? remembered[descKey] || '' : '', source: kind === 'in' ? cleanSource(rememberedSources[descKey]) : '',
+      planId: kind === 'out' ? bankRuleCategory(desc) || remembered[descKey] || '' : '', source: kind === 'in' ? cleanSource(rememberedSources[descKey]) : '',
       imported: false, flagged: bankLooksLikeTransfer(desc),
     });
   });
@@ -5297,6 +5308,643 @@ document.getElementById('bank-import-btn').addEventListener('click', () => {
 document.getElementById('bank-undo-btn').addEventListener('click', () => {
   const taken = undoBankImport();
   setBankStatus(`Took back ${taken.expenses} expense${taken.expenses === 1 ? '' : 's'} and ${taken.deposits} income entr${taken.deposits === 1 ? 'y' : 'ies'} from that import.`, 'ok');
+});
+
+// ---- The Money tab: accounts and net worth, debt payoff, a cash-flow forecast, trends and subscriptions ----
+// Accounts are records in the `income` list, { id: 'acct-<id>', acctName, acctKind ('asset' or 'debt'), apr and payment
+// (debts, optional), ...sync fields }. What an account holds is a series of dated records, { id: 'bal-<id>', balFor:
+// <account id>, balOn, amount }, and the current balance is the newest one, so two devices that both update a
+// balance never overwrite each other and the history of net worth comes for free. For a debt the amount is what is
+// owed (positive). None of these has a `dateKey`, so income totals ignore them, and the sync server needs no change.
+
+// The two kinds of account: what you have, and what you owe.
+const ACCOUNT_KINDS = ['asset', 'debt'];
+
+// The live accounts: assets first, then debts, each by name.
+function accountRecords() {
+  return income.filter((r) => r.acctName && !r.deleted)
+    .sort((a, b) => (a.acctKind === b.acctKind ? a.acctName.localeCompare(b.acctName) : a.acctKind === 'asset' ? -1 : 1));
+}
+
+// An account's balance entries, oldest first.
+function accountBalanceEntries(acctId) {
+  return income.filter((r) => r.balFor === acctId && !r.deleted)
+    .sort((a, b) => a.balOn.localeCompare(b.balOn) || (a.dateAdded || '').localeCompare(b.dateAdded || ''));
+}
+
+// An account's balance on a date (the newest entry on or before it), as { amount, balOn }, or null when it had none yet.
+function accountBalanceOn(acctId, dateKey) {
+  const entries = accountBalanceEntries(acctId).filter((r) => r.balOn <= dateKey);
+  return entries.length ? { amount: entries[entries.length - 1].amount, balOn: entries[entries.length - 1].balOn } : null;
+}
+
+// Sets an account's balance for a day: the day's entry is changed when there is one, otherwise a new one is made.
+function setAccountBalance(acctId, amount, dateKey) {
+  const rounded = Math.round(amount * 100) / 100;
+  const existing = accountBalanceEntries(acctId).filter((r) => r.balOn === dateKey).pop();
+  if (existing) {
+    if (existing.amount === rounded) return;
+    const before = structuredClone(existing);
+    existing.amount = rounded;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+    return;
+  }
+  const now = new Date().toISOString();
+  const record = {
+    id: `bal-${makeId()}`, balFor: acctId, balOn: dateKey, amount: rounded,
+    dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+  };
+  income.push(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', record.id, null, structuredClone(record));
+}
+
+// Checks the Add / Edit account fields and returns the first problem as a sentence ('' when they are fine).
+function accountFieldsError(fields) {
+  if (!fields.name.trim()) return 'Enter a name for the account.';
+  if (!ACCOUNT_KINDS.includes(fields.kind)) return 'Choose whether it is something you have or something you owe.';
+  const balance = Number(fields.balanceRaw);
+  if (fields.balanceRaw === '' || !Number.isFinite(balance) || Math.abs(balance) > MAX_MONEY) return 'Enter the balance (up to $1,000,000,000).';
+  if (fields.kind === 'debt' && balance < 0) return 'Enter what you owe as a positive number.';
+  const apr = Number(fields.aprRaw);
+  if (fields.aprRaw !== '' && (!Number.isFinite(apr) || apr < 0 || apr > 100)) return 'The interest rate must be between 0 and 100.';
+  const payment = Number(fields.paymentRaw);
+  if (fields.paymentRaw !== '' && (!Number.isFinite(payment) || payment < 0 || payment > MAX_MONEY)) return 'The monthly payment must be $0 or more.';
+  return '';
+}
+
+// Adds an account, or changes the one with `id` (a changed balance is recorded as today's entry). Returns the problem
+// as a sentence, or '' when it was saved.
+function saveAccount(fields, id) {
+  const error = accountFieldsError(fields);
+  if (error) return error;
+  const values = { acctName: fields.name.trim().slice(0, 60), acctKind: fields.kind };
+  const apr = fields.kind === 'debt' && fields.aprRaw !== '' ? Number(fields.aprRaw) : undefined;
+  const payment = fields.kind === 'debt' && fields.paymentRaw !== '' ? Math.round(Number(fields.paymentRaw) * 100) / 100 : undefined;
+  const balance = Number(fields.balanceRaw);
+  let record = id ? income.find((r) => r.id === id && r.acctName) : null;
+  if (record) {
+    const before = structuredClone(record);
+    Object.assign(record, values);
+    if (apr === undefined) delete record.apr; else record.apr = apr;
+    if (payment === undefined) delete record.payment; else record.payment = payment;
+    stampSync(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, before, structuredClone(record));
+    const now = accountBalanceOn(record.id, todayKey());
+    if (!now || now.amount !== Math.round(balance * 100) / 100) setAccountBalance(record.id, balance, todayKey());
+  } else {
+    const now = new Date().toISOString();
+    record = {
+      id: `acct-${makeId()}`, ...values,
+      dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    if (apr !== undefined) record.apr = apr;
+    if (payment !== undefined) record.payment = payment;
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+    setAccountBalance(record.id, balance, todayKey());
+  }
+  renderBudget();
+  return '';
+}
+
+// Net worth on a date: what the assets held minus what the debts owed, counting each account at its newest balance on
+// or before that date (an account with no balance yet is left out). Returns { assets, debts, net }.
+function netWorthOn(dateKey) {
+  let assets = 0;
+  let debts = 0;
+  accountRecords().forEach((account) => {
+    const balance = accountBalanceOn(account.id, dateKey);
+    if (!balance) return;
+    if (account.acctKind === 'debt') debts += balance.amount; else assets += balance.amount;
+  });
+  return { assets: Math.round(assets * 100) / 100, debts: Math.round(debts * 100) / 100, net: Math.round((assets - debts) * 100) / 100 };
+}
+
+// Net worth at each date a balance was recorded, oldest first, as { dateKey, net }.
+function netWorthSeries() {
+  const dates = [...new Set(income.filter((r) => r.balFor && !r.deleted && accountRecords().some((a) => a.id === r.balFor)).map((r) => r.balOn))].sort();
+  return dates.map((dateKey) => ({ dateKey, net: netWorthOn(dateKey).net }));
+}
+
+// Draws the accounts, the net worth line and its history.
+function renderAccounts() {
+  const list = document.getElementById('account-list');
+  const template = document.getElementById('account-card-template');
+  list.innerHTML = '';
+  const accounts = accountRecords();
+  accounts.forEach((account) => {
+    const balance = accountBalanceOn(account.id, todayKey());
+    const node = template.content.cloneNode(true);
+    node.firstElementChild.dataset.recordId = account.id;
+    const viewSection = node.querySelector('.recurring-income-view');
+    const editForm = node.querySelector('.recurring-income-edit-form');
+    const editError = node.querySelector('.account-edit-error');
+    node.querySelector('.recurring-income-name').textContent = account.acctName;
+    node.querySelector('.account-kind').textContent = account.acctKind === 'debt' ? 'You owe' : 'You have';
+    node.querySelector('.account-balance').textContent = balance ? formatMoney(balance.amount) : 'No balance yet';
+    node.querySelector('.account-asof').textContent = balance ? `as of ${formatDateKeyShort(balance.balOn)}` : '';
+    const terms = [];
+    if (typeof account.apr === 'number') terms.push(`${account.apr}% interest`);
+    if (typeof account.payment === 'number') terms.push(`${formatMoney(account.payment)} a month`);
+    const termsEl = node.querySelector('.account-terms');
+    if (terms.length) { termsEl.textContent = terms.join(' · '); termsEl.hidden = false; }
+    node.querySelector('.edit-btn').setAttribute('aria-label', `Edit ${account.acctName}`);
+    node.querySelector('.delete-btn').setAttribute('aria-label', `Delete ${account.acctName}`);
+
+    // Elements are captured now: once the fragment is appended it is empty, so node.querySelector would find nothing.
+    const nameBox = node.querySelector('.account-edit-name');
+    const kindBox = node.querySelector('.account-edit-kind');
+    const balanceBox = node.querySelector('.account-edit-balance');
+    const aprBox = node.querySelector('.account-edit-apr');
+    const paymentBox = node.querySelector('.account-edit-payment');
+    node.querySelector('.edit-btn').addEventListener('click', () => {
+      nameBox.value = account.acctName;
+      kindBox.value = account.acctKind;
+      balanceBox.value = balance ? String(balance.amount) : '';
+      aprBox.value = typeof account.apr === 'number' ? String(account.apr) : '';
+      paymentBox.value = typeof account.payment === 'number' ? String(account.payment) : '';
+      editError.hidden = true;
+      viewSection.hidden = true;
+      editForm.hidden = false;
+      balanceBox.focus();
+    });
+    node.querySelector('.cancel-btn').addEventListener('click', () => {
+      editForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    editForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
+      viewSection.hidden = false;
+      const problem = saveAccount({ name: nameBox.value, kind: kindBox.value, balanceRaw: balanceBox.value, aprRaw: aprBox.value, paymentRaw: paymentBox.value }, account.id);
+      if (problem) {
+        viewSection.hidden = true;
+        editForm.hidden = false;
+        editError.textContent = problem;
+        editError.hidden = false;
+      }
+    });
+    node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(account.id));
+    list.appendChild(node);
+  });
+  document.getElementById('account-empty').hidden = accounts.length !== 0;
+
+  const now = netWorthOn(todayKey());
+  document.getElementById('networth-line').innerHTML = accounts.length
+    ? `Net worth: <strong class="${signedAmountClass(now.net)}">${formatSignedCurrency(now.net)}</strong> (${formatMoney(now.assets)} you have, ${formatMoney(now.debts)} you owe)` : '';
+  const history = document.getElementById('networth-history');
+  history.innerHTML = '';
+  netWorthSeries().slice(-6).reverse().forEach((point) => {
+    const row = document.createElement('li');
+    row.textContent = `${formatDateKeyShort(point.dateKey)}: ${formatSignedCurrency(point.net)}`;
+    history.appendChild(row);
+  });
+}
+
+// Add account form: validate, save, and clear the boxes when it worked.
+document.getElementById('account-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('account-form-error');
+  const problem = saveAccount({
+    name: document.getElementById('account-name-input').value,
+    kind: document.getElementById('account-kind-input').value,
+    balanceRaw: document.getElementById('account-balance-input').value,
+    aprRaw: document.getElementById('account-apr-input').value,
+    paymentRaw: document.getElementById('account-payment-input').value,
+  });
+  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
+  errorEl.hidden = true;
+  e.target.reset();
+  document.getElementById('account-name-input').focus();
+});
+
+// ---- Debt payoff ----
+
+// How a debt pays off at a fixed monthly payment: { months, interest } (interest is the total paid on top of the
+// balance), or null when the payment never gets ahead of the interest. apr is a percentage a year, compounded
+// monthly; the last payment may be smaller than the rest.
+function debtPayoff(balance, apr, payment) {
+  if (!(balance > 0)) return { months: 0, interest: 0 };
+  if (!(payment > 0)) return null;
+  const rate = (apr || 0) / 100 / 12;
+  let owed = balance;
+  let interest = 0;
+  for (let months = 1; months <= 1200; months += 1) {
+    const charge = owed * rate;
+    if (payment <= charge + 0.005 && rate > 0 && months === 1) return null; // the first month's interest already eats the payment
+    interest += charge;
+    owed = owed + charge - payment;
+    if (owed <= 0.005) return { months, interest: Math.round(interest * 100) / 100 };
+  }
+  return null;
+}
+
+// The month a payoff lands in, as "March 2027", counting the given number of months from this month.
+function payoffMonthLabel(months) {
+  const today = parseDateKey(todayKey());
+  const date = new Date(today.y, today.m + months, 1);
+  return `${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+// Draws the Debt Payoff fold: each debt with its payoff date and interest at its monthly payment, and, when an extra
+// amount is typed, what paying that much more a month would change.
+function renderDebts() {
+  const list = document.getElementById('debt-list');
+  list.innerHTML = '';
+  const extra = Math.max(0, Number(document.getElementById('debt-extra-input').value) || 0);
+  const debts = accountRecords().filter((a) => a.acctKind === 'debt');
+  let anyShown = false;
+  debts.forEach((debt) => {
+    const balance = accountBalanceOn(debt.id, todayKey());
+    if (!balance || balance.amount <= 0) return;
+    anyShown = true;
+    const item = document.createElement('li');
+    item.className = 'debt-row';
+    const title = document.createElement('strong');
+    title.textContent = `${debt.acctName}: ${formatMoney(balance.amount)} owed`;
+    const lines = document.createElement('span');
+    const parts = [];
+    if (typeof debt.payment !== 'number' || debt.payment <= 0) {
+      parts.push('Add a monthly payment (Edit on the account) to see the payoff date.');
+    } else {
+      const base = debtPayoff(balance.amount, debt.apr, debt.payment);
+      parts.push(base
+        ? `At ${formatMoney(debt.payment)} a month: paid off in ${base.months} month${base.months === 1 ? '' : 's'} (${payoffMonthLabel(base.months)}), about ${formatMoney(base.interest)} in interest.`
+        : `At ${formatMoney(debt.payment)} a month this never pays off: the interest grows as fast as you pay.`);
+      if (extra > 0) {
+        const faster = debtPayoff(balance.amount, debt.apr, debt.payment + extra);
+        if (faster) {
+          const saved = base ? Math.round((base.interest - faster.interest) * 100) / 100 : null;
+          parts.push(`With ${formatMoney(extra)} more a month: ${faster.months} month${faster.months === 1 ? '' : 's'} (${payoffMonthLabel(faster.months)})${saved !== null ? `, saving about ${formatMoney(saved)} in interest` : ''}.`);
+        } else {
+          parts.push(`Even with ${formatMoney(extra)} more a month it does not pay off.`);
+        }
+      }
+    }
+    lines.textContent = parts.join(' ');
+    item.append(title, lines);
+    list.appendChild(item);
+  });
+  document.getElementById('debt-empty').hidden = anyShown;
+}
+
+// The extra-payment box redraws the debts as it is typed in.
+document.getElementById('debt-extra-input').addEventListener('input', renderDebts);
+
+// ---- Cash-flow forecast ----
+
+// The weeks ahead, from this week: for each, what comes in (recurring and typed income), what the bills take, what
+// the Spending Plan sets aside and the expected one-time costs of its month (each month's costs land in the first
+// forecast week that ends in that month), and, starting from what your asset accounts hold, the balance left. This
+// week counts only from today (income and unpaid bills still to come, and the plan not yet spent). Returns { rows,
+// startBalance, hasBalance }.
+function forecastRows(weekCount) {
+  const todayK = todayKey();
+  const bills_ = bills.filter((b) => !b.deleted);
+  const incomeNow = uniqueIncomeEntries(income).filter((r) => !r.deleted);
+  const recurringNow = recurringIncome.filter((r) => !r.deleted);
+  const plannedWeek = planCategories().reduce((sum, r) => sum + planWeekly(planAmount(r), r.frequency), 0);
+  const firstWeek = weekStartKey(todayK);
+  const assets = accountRecords().filter((a) => a.acctKind === 'asset').map((a) => accountBalanceOn(a.id, todayK)).filter(Boolean);
+  const hasBalance = assets.length > 0;
+  let balance = hasBalance ? assets.reduce((sum, b) => sum + b.amount, 0) : 0;
+  const startBalance = balance;
+  const usedMonths = new Set();
+  const rows = [];
+  for (let i = 0; i < weekCount; i += 1) {
+    const weekStart = shiftDateKey(firstWeek, 7 * i);
+    const weekEnd = shiftDateKey(weekStart, 6);
+    const from = i === 0 ? todayK : weekStart;
+    const inflow = totalIncomeInRange(from, weekEnd, incomeNow, recurringNow);
+    const due = amountDueInRange(from, weekEnd, bills_, i === 0);
+    const spending = i === 0 ? Math.max(0, plannedWeek - sumExpensesIn(expenseRecords(), weekStart, weekEnd)) : plannedWeek;
+    const monthKey = weekEnd.slice(0, 7);
+    let costs = 0;
+    if (!usedMonths.has(monthKey)) { costs = guessTotalForMonth(monthKey); usedMonths.add(monthKey); }
+    const net = inflow - due - spending - costs;
+    balance += net;
+    rows.push({ weekStart, label: i === 0 ? 'This week (from today)' : `Week of ${formatDateKeyShort(weekStart)}`, inflow, due, spending, costs, net, balance: Math.round(balance * 100) / 100 });
+  }
+  return { rows, startBalance: Math.round(startBalance * 100) / 100, hasBalance };
+}
+
+// Draws the forecast list for the chosen number of weeks.
+function renderForecast() {
+  const weekCount = Number(document.getElementById('forecast-weeks-input').value) || 8;
+  const { rows, startBalance, hasBalance } = forecastRows(weekCount);
+  const list = document.getElementById('forecast-list');
+  list.innerHTML = '';
+  rows.forEach((row) => {
+    const item = document.createElement('li');
+    item.className = 'forecast-row';
+    const label = document.createElement('strong');
+    label.textContent = row.label;
+    const detail = document.createElement('span');
+    detail.textContent = `In ${formatMoney(row.inflow)} · bills ${formatMoney(row.due)} · spending ${formatMoney(row.spending)}${row.costs ? ` · expected costs ${formatMoney(row.costs)}` : ''}`;
+    const result = document.createElement('span');
+    const figure = hasBalance ? row.balance : row.net;
+    result.className = signedAmountClass(figure);
+    result.textContent = hasBalance ? `Balance ${formatSignedCurrency(row.balance)}` : `Change ${formatSignedCurrency(row.net)}`;
+    item.append(label, detail, result);
+    list.appendChild(item);
+  });
+  const lowest = rows.reduce((low, row) => (row.balance < low.balance ? row : low), rows[0]);
+  document.getElementById('forecast-note').textContent = hasBalance
+    ? `Starting from ${formatMoney(startBalance)} across your asset accounts. ${lowest.balance < 0 ? `You would go below zero in the week of ${formatDateKeyShort(lowest.weekStart)} (${formatSignedCurrency(lowest.balance)}).` : `The lowest point is ${formatMoney(lowest.balance)}, in the week of ${formatDateKeyShort(lowest.weekStart)}.`}`
+    : 'Add an asset account above to see a running balance; until then each week shows what it changes.';
+}
+
+// The week-count choice redraws the forecast.
+document.getElementById('forecast-weeks-input').addEventListener('change', renderForecast);
+
+// ---- Trends ----
+
+// The last twelve months, oldest first, as { label, start, end, income, bills, spending, saved, left }: income and bills
+// as the calendar counts them (recurring included), spending as logged, savings as the net deposited to goals, and
+// left as income minus bills minus spending.
+function trendRows() {
+  const today = parseDateKey(todayKey());
+  const bills_ = bills.filter((b) => !b.deleted);
+  const incomeNow = uniqueIncomeEntries(income).filter((r) => !r.deleted);
+  const recurringNow = recurringIncome.filter((r) => !r.deleted);
+  const expenses = expenseRecords();
+  const deposits = income.filter((r) => r.savedFor && !r.deleted);
+  const rows = [];
+  for (let back = 11; back >= 0; back -= 1) {
+    const first = new Date(today.y, today.m - back, 1);
+    const [start, end] = monthBounds(dateKeyFromLocalDate(first));
+    const monthIncome = totalIncomeInRange(start, end, incomeNow, recurringNow);
+    const monthBills = amountDueInRange(start, end, bills_);
+    const spending = sumExpensesIn(expenses, start, end);
+    const saved = deposits.filter((r) => r.savedOn >= start && r.savedOn <= end).reduce((sum, r) => sum + r.amount, 0);
+    rows.push({ label: `${MONTH_NAMES[first.getMonth()].slice(0, 3)} ${first.getFullYear()}`, start, end, income: monthIncome, bills: monthBills, spending, saved, left: monthIncome - monthBills - spending });
+  }
+  return rows;
+}
+
+// Draws the month-by-month trends and this year so far.
+function renderTrends() {
+  const rows = trendRows();
+  const list = document.getElementById('trend-list');
+  list.innerHTML = '';
+  const biggest = Math.max(1, ...rows.map((r) => Math.max(r.income, r.bills + r.spending)));
+  rows.slice().reverse().forEach((row) => {
+    const item = document.createElement('li');
+    item.className = 'trend-row';
+    const label = document.createElement('strong');
+    label.textContent = row.label;
+    const track = document.createElement('span');
+    track.className = 'chart-track';
+    track.setAttribute('aria-hidden', 'true');
+    const fill = document.createElement('span');
+    fill.className = 'chart-fill';
+    fill.style.width = `${Math.round(Math.min(1, (row.bills + row.spending) / biggest) * 100)}%`;
+    track.appendChild(fill);
+    const detail = document.createElement('span');
+    detail.textContent = `In ${formatMoney(row.income)} · bills ${formatMoney(row.bills)} · spent ${formatMoney(row.spending)} · saved ${formatMoney(row.saved)}`;
+    const left = document.createElement('span');
+    left.className = signedAmountClass(row.left);
+    left.textContent = `Left ${formatSignedCurrency(row.left)}`;
+    item.append(label, track, detail, left);
+    list.appendChild(item);
+  });
+  const year = String(parseDateKey(todayKey()).y);
+  const thisYear = rows.filter((r) => r.start.startsWith(year));
+  const sum = (key) => thisYear.reduce((total, r) => total + r[key], 0);
+  document.getElementById('trend-year-line').textContent = thisYear.length
+    ? `${year} so far: ${formatMoney(sum('income'))} in, ${formatMoney(sum('bills'))} in bills, ${formatMoney(sum('spending'))} spent, ${formatMoney(sum('saved'))} saved; ${formatSignedCurrency(sum('left'))} left.` : '';
+}
+
+// ---- Subscriptions and repeating bills ----
+
+// What a repeating bill costs in an average month: weekly and biweekly bills by 52 or 26 payments a year, yearly bills
+// spread over 12 months, and a custom repeat by its own step.
+function billMonthlyCost(bill) {
+  const period = schedulePeriod(bill);
+  if (!period) return 0;
+  return period.unit === 'days' ? (bill.amount * (365.25 / 12)) / period.step : bill.amount / period.step;
+}
+
+// The first amount a bill was paid at and the amount it is now, when they differ (a price change), else null.
+function billPriceChange(bill) {
+  const paid = Object.keys(bill.paidAmounts || {}).sort().map((d) => bill.paidAmounts[d]).filter((v) => typeof v === 'number' && v > 0);
+  return paid.length && paid[0] !== bill.amount ? { was: paid[0], now: bill.amount } : null;
+}
+
+// Draws the repeating bills with their monthly and yearly cost, biggest first, and flags the ones whose price changed.
+function renderSubscriptions() {
+  const list = document.getElementById('subs-list');
+  list.innerHTML = '';
+  const repeating = bills.filter((b) => !b.deleted && b.frequency !== 'one_time' && schedulePeriod(b))
+    .map((bill) => ({ bill, monthly: billMonthlyCost(bill) })).sort((a, b) => b.monthly - a.monthly);
+  repeating.forEach(({ bill, monthly }) => {
+    const item = document.createElement('li');
+    item.className = 'subs-row';
+    const name = document.createElement('strong');
+    name.textContent = bill.name;
+    const detail = document.createElement('span');
+    detail.textContent = `${formatMoney(bill.amount)} ${billFrequencyLabel(bill).toLowerCase()} · about ${formatMoney(monthly)} a month, ${formatMoney(monthly * 12)} a year`;
+    item.append(name, detail);
+    const change = billPriceChange(bill);
+    if (change) {
+      const flag = document.createElement('span');
+      flag.className = change.now > change.was ? 'amount-negative' : 'amount-positive';
+      flag.textContent = `${change.now > change.was ? 'Went up' : 'Went down'}: first paid ${formatMoney(change.was)}, now ${formatMoney(change.now)}`;
+      item.appendChild(flag);
+    }
+    list.appendChild(item);
+  });
+  const total = repeating.reduce((sum, r) => sum + r.monthly, 0);
+  document.getElementById('subs-total-line').textContent = repeating.length
+    ? `${repeating.length} repeating bill${repeating.length === 1 ? '' : 's'}: about ${formatMoney(total)} a month, ${formatMoney(total * 12)} a year.` : '';
+  document.getElementById('subs-empty').hidden = repeating.length !== 0;
+}
+
+// Draws the whole Money tab.
+function renderMoney() {
+  const openForms = captureOpenCardForms(['account-list']);
+  renderAccounts();
+  renderDebts();
+  renderForecast();
+  renderTrends();
+  renderSubscriptions();
+  restoreOpenCardForms(openForms);
+}
+
+// ---- Tax set-aside for business income ----
+// What to put aside for taxes on business profit, as a rough planning aid (not tax advice). The setting is one record in
+// the `income` list, { id: 'tax-<id>', taxPercent, taxSources: [income sources that count as business income],
+// ...sync fields }; the newest live record counts, so two devices that both change it settle on the later change. The
+// figure for a period is the percentage of (income from those sources minus the business expenses), never below zero.
+
+// The current tax setting, or null when none has been saved.
+function taxSetting() {
+  return income.filter((r) => r.taxPercent !== undefined && !r.deleted)
+    .reduce((best, r) => (!best || (r.updatedAt || '') > (best.updatedAt || '') ? r : best), null);
+}
+
+// Saves the percentage and the sources (typed as a comma-separated list). Returns the problem as a sentence, or ''.
+function saveTaxSetting(percentRaw, sourcesRaw) {
+  const percent = Number(percentRaw);
+  if (percentRaw === '' || !Number.isFinite(percent) || percent < 0 || percent > 100) return 'Enter a percentage from 0 to 100.';
+  const sources = [];
+  String(sourcesRaw).split(',').map(cleanSource).filter(Boolean).forEach((s) => { if (!sources.some((t) => t.toLowerCase() === s.toLowerCase())) sources.push(s); }); // each once, the first spelling
+  const existing = taxSetting();
+  if (existing) {
+    const before = structuredClone(existing);
+    existing.taxPercent = percent;
+    existing.taxSources = sources;
+    stampSync(existing);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', existing.id, before, structuredClone(existing));
+  } else {
+    const now = new Date().toISOString();
+    const record = {
+      id: `tax-${makeId()}`, taxPercent: percent, taxSources: sources,
+      dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', record.id, null, structuredClone(record));
+  }
+  renderBudget();
+  return '';
+}
+
+// The tax figures for a summary period: { income, expenses, profit, setAside }, or null with no setting.
+function taxFigures(kind) {
+  const setting = taxSetting();
+  if (!setting) return null;
+  const [start, end] = summaryPeriodBounds(kind);
+  const sources = new Set(setting.taxSources.map((s) => s.toLowerCase()));
+  const businessIncome = uniqueIncomeEntries(income)
+    .filter((r) => !r.deleted && r.dateKey >= start && r.dateKey <= end && sources.has(cleanSource(r.source).toLowerCase()))
+    .reduce((sum, r) => sum + r.amount, 0);
+  const expenses = expensesInSummaryPeriod(kind).filter(isBusinessExpense).reduce((sum, r) => sum + r.amount, 0);
+  const profit = businessIncome - expenses;
+  return {
+    income: Math.round(businessIncome * 100) / 100, expenses: Math.round(expenses * 100) / 100, profit: Math.round(profit * 100) / 100,
+    setAside: Math.round(Math.max(0, profit) * setting.taxPercent) / 100,
+  };
+}
+
+// Draws the tax fold: the saved setting in its boxes (while they are not being typed in) and the figures for the
+// chosen period.
+function renderTax() {
+  const setting = taxSetting();
+  const percentBox = document.getElementById('tax-percent-input');
+  const sourcesBox = document.getElementById('tax-sources-input');
+  if (document.activeElement !== percentBox && document.activeElement !== sourcesBox) {
+    percentBox.value = setting ? String(setting.taxPercent) : '';
+    sourcesBox.value = setting ? setting.taxSources.join(', ') : '';
+  }
+  const figures = taxFigures(document.getElementById('business-period-input').value || 'month');
+  const list = document.getElementById('tax-result-list');
+  list.innerHTML = '';
+  if (!figures) { document.getElementById('tax-note').textContent = 'Set a percentage and the income sources that count as business income to see what to put aside.'; return; }
+  [
+    `Business income: ${formatMoney(figures.income)}`,
+    `Business expenses: ${formatMoney(figures.expenses)}`,
+    `Profit: ${formatSignedCurrency(figures.profit)}`,
+    `Put aside at ${setting.taxPercent}%: ${formatMoney(figures.setAside)}`,
+  ].forEach((text) => {
+    const row = document.createElement('li');
+    row.textContent = text;
+    list.appendChild(row);
+  });
+  document.getElementById('tax-note').textContent = setting.taxSources.length
+    ? 'A rough planning figure, not tax advice. Check the percentage with whoever does your taxes.'
+    : 'No income sources are chosen yet, so no income is counted. Type the source names (for example Side gig) in the box above.';
+}
+
+// The Save button for the tax setting.
+document.getElementById('tax-save-btn').addEventListener('click', () => {
+  const errorEl = document.getElementById('tax-error');
+  const problem = saveTaxSetting(document.getElementById('tax-percent-input').value, document.getElementById('tax-sources-input').value);
+  errorEl.textContent = problem;
+  errorEl.hidden = !problem;
+});
+
+// ---- Chase rules (text in a description means a category) ----
+// A rule is a record in the `income` list, { id: 'rule-<id>', ruleText, rulePlanId, ...sync fields }: when a spending
+// row's description contains the text (any case), its category starts as that Spending Plan category, ahead of the
+// category remembered from an earlier import. The first rule that matches wins, oldest first.
+
+// The live rules whose category still exists, oldest first.
+function bankRules() {
+  return income.filter((r) => r.ruleText && !r.deleted && income.some((p) => p.id === r.rulePlanId && p.planName && !p.deleted))
+    .sort((a, b) => (a.dateAdded || '').localeCompare(b.dateAdded || ''));
+}
+
+// The category id the rules give a description, or '' when no rule matches.
+function bankRuleCategory(desc) {
+  const text = desc.toLowerCase();
+  const rule = bankRules().find((r) => text.includes(r.ruleText.toLowerCase()));
+  return rule ? rule.rulePlanId : '';
+}
+
+// Adds a rule. Returns the problem as a sentence, or '' when it was saved.
+function addBankRule(textRaw, planId) {
+  const text = textRaw.trim().slice(0, 60);
+  if (text.length < 2) return 'Type at least two characters of the description to look for.';
+  if (!income.some((p) => p.id === planId && p.planName && !p.deleted)) return 'Choose a category (add one on the Plan tab first).';
+  if (bankRules().some((r) => r.ruleText.toLowerCase() === text.toLowerCase())) return 'There is already a rule for that text.';
+  const now = new Date().toISOString();
+  const record = {
+    id: `rule-${makeId()}`, ruleText: text, rulePlanId: planId,
+    dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+  };
+  income.push(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', record.id, null, structuredClone(record));
+  bankRows.filter((r) => r.kind === 'out' && !r.imported && !r.planId).forEach((r) => { r.planId = bankRuleCategory(r.desc); }); // rows on screen follow at once
+  renderBudget();
+  return '';
+}
+
+// Draws the rules list and the category choice for a new rule.
+function renderBankRules() {
+  const list = document.getElementById('bank-rule-list');
+  list.innerHTML = '';
+  bankRules().forEach((rule) => {
+    const item = document.createElement('li');
+    item.className = 'bank-row';
+    const label = document.createElement('span');
+    label.textContent = `Contains "${rule.ruleText}" → ${expenseCategoryName({ planId: rule.rulePlanId, categoryName: '' })}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'small-btn';
+    remove.textContent = 'Delete';
+    remove.setAttribute('aria-label', `Delete the rule for ${rule.ruleText}`);
+    remove.addEventListener('click', () => deleteIncome(rule.id));
+    item.append(label, remove);
+    list.appendChild(item);
+  });
+  const select = document.getElementById('bank-rule-category');
+  const keep = select.value;
+  select.innerHTML = '';
+  planCategories().forEach((plan) => {
+    const option = document.createElement('option');
+    option.value = plan.id;
+    option.textContent = plan.planName;
+    select.appendChild(option);
+  });
+  if (keep) select.value = keep;
+}
+
+// Add rule form: validate, save, and clear the text when it worked.
+document.getElementById('bank-rule-add-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('bank-rule-error');
+  const problem = addBankRule(document.getElementById('bank-rule-text').value, document.getElementById('bank-rule-category').value);
+  errorEl.textContent = problem;
+  errorEl.hidden = !problem;
+  if (!problem) { document.getElementById('bank-rule-text').value = ''; document.getElementById('bank-rule-text').focus(); }
 });
 
 // The expense date starts on today.
@@ -5639,7 +6287,7 @@ const RECORD_LABEL_FIELD = {
 function describeEntry(entry) {
   const labelField = RECORD_LABEL_FIELD[entry.collection];
   const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.recurPlanId ? 'repeating expense' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.recurPlanId ? 'repeating expense' : '') || source.acctName || source.ruleText || (source.balFor ? 'balance' : '') || (source.taxPercent !== undefined ? 'tax setting' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -5685,6 +6333,8 @@ function undoToastMessage(collectionName, before, after) {
     if (after.goalItemFor) return `Added cost ${after.itemName}`;
     if (after.adjustWeek) return 'Adjusted the amount carried forward';
     if (after.recurPlanId) return 'Added a repeating expense';
+    if (after.acctName) return `Added ${after.acctName}`;
+    if (after.ruleText) return 'Added a rule';
     if (after.savedFor) {
       const goal = income.find((r) => r.id === after.savedFor);
       return `${after.amount < 0 ? 'Took out' : 'Saved'} ${formatMoney(Math.abs(after.amount))}${goal ? ` ${after.amount < 0 ? 'from' : 'toward'} ${goal.goalName}` : ''}`;
@@ -5701,6 +6351,8 @@ function undoToastMessage(collectionName, before, after) {
   if (after.savedFor && after.deleted && !before.deleted) return 'Removed a savings entry';
   if (after.adjustWeek && after.deleted && !before.deleted) return 'Removed the carry-forward adjustment';
   if (after.recurPlanId && after.deleted && !before.deleted) return 'Deleted a repeating expense';
+  if (after.acctName && after.deleted && !before.deleted) return `Deleted ${after.acctName}`;
+  if (after.ruleText && after.deleted && !before.deleted) return 'Deleted a rule';
   if (after.recurPlanId && (after.skippedDates || []).length > (before.skippedDates || []).length) return 'Skipped a repeating expense';
   if (after.adjustWeek && !after.deleted && after.amount !== before.amount) return 'Changed the carry-forward adjustment';
   if (after.planName && !after.deleted && after.amount !== before.amount) {
@@ -6585,7 +7237,8 @@ function setDataIoStatus(text, tone) {
 // Rejects records whose types would break rendering or totals later (e.g. a bill whose amount is the
 // string "1200" instead of a number, or a date outside the forms' year range). Records in the income list come in
 // kinds, told apart by which field is present and checked in this order: spentOn (expense), planName (plan
-// category), recurPlanId (a repeating expense), adjustWeek (a carry-forward adjustment), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
+// category), acctName (an account), balFor (an account balance entry), taxPercent (the tax setting), ruleText (a Chase
+// rule), recurPlanId (a repeating expense), adjustWeek (a carry-forward adjustment), goalName (savings goal), goalItemFor (a cost part of a goal), savedFor (savings deposit or withdrawal), guessName (expected cost),
 // projectedFor (projected income), otherwise a plain income entry with a dateKey. A custom-repeat bill must
 // also have a readable every/unit (schedulePeriod). A name must not be empty: the app treats an empty one as absent.
 function isValidImportRecord(collectionName, rec) {
@@ -6617,6 +7270,10 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
+    if (rec.acctName !== undefined) return nonEmptyText(rec.acctName) && ACCOUNT_KINDS.includes(rec.acctKind) && (rec.apr === undefined || (isNum(rec.apr) && rec.apr >= 0 && rec.apr <= 100)) && (rec.payment === undefined || (isNum(rec.payment) && rec.payment >= 0 && rec.payment <= MAX_MONEY));
+    if (rec.balFor !== undefined) return nonEmptyText(rec.balFor) && isDate(rec.balOn) && isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY;
+    if (rec.taxPercent !== undefined) return isNum(rec.taxPercent) && rec.taxPercent >= 0 && rec.taxPercent <= 100 && Array.isArray(rec.taxSources) && rec.taxSources.every(isText);
+    if (rec.ruleText !== undefined) return nonEmptyText(rec.ruleText) && nonEmptyText(rec.rulePlanId);
     if (rec.recurPlanId !== undefined) return nonEmptyText(rec.recurPlanId) && isPositiveMoney(rec.amount) && REPEAT_FREQUENCIES.includes(rec.frequency) && isDate(rec.recurStart) && dateListOrMissing(rec.skippedDates) && textOrMissing(rec.notes);
     if (rec.adjustWeek !== undefined) return isDate(rec.adjustWeek) && isNum(rec.amount) && rec.amount !== 0 && Math.abs(rec.amount) <= MAX_MONEY && textOrMissing(rec.notes);
     if (rec.goalItemFor !== undefined) return nonEmptyText(rec.goalItemFor) && nonEmptyText(rec.itemName) && isPositiveMoney(rec.amount);
@@ -6703,6 +7360,8 @@ function describeContents() {
     [income.filter((r) => r.goalName && !r.deleted).length, 'savings goal', 'savings goals'],
     [income.filter((r) => r.goalItemFor && !r.deleted).length, 'goal cost', 'goal costs'],
     [income.filter((r) => r.recurPlanId && !r.deleted).length, 'repeating expense', 'repeating expenses'],
+    [income.filter((r) => r.acctName && !r.deleted).length, 'account', 'accounts'],
+    [income.filter((r) => r.ruleText && !r.deleted).length, 'Chase rule', 'Chase rules'],
     [income.filter((r) => r.adjustWeek && !r.deleted).length, 'carry-forward adjustment', 'carry-forward adjustments'],
     [income.filter((r) => r.savedFor && !r.deleted).length, 'savings deposit or withdrawal', 'savings deposits and withdrawals'],
     [income.filter((r) => r.spentOn && !r.deleted).length, 'expense', 'expenses'],
@@ -6773,7 +7432,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 46;
+const APP_VERSION = 47;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -7136,7 +7795,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 
 // localStorage key for the last tab used, and the tabs in order.
 const TAB_KEY = 'budgetApp.tab.v1';
-const TABS = ['home', 'income', 'bills', 'plan', 'expenses', 'business'];
+const TABS = ['home', 'income', 'bills', 'plan', 'expenses', 'business', 'money'];
 // The tab on screen.
 let currentTab = 'home';
 
@@ -7174,14 +7833,14 @@ document.querySelectorAll('.tabbar-btn').forEach((button) => {
 });
 
 // The floating + button opens the Add bill form (switching to the Bills tab first). It is hidden on the
-// Income, Plan, Expenses and Business tabs, and on the Bills tab while that form is already on screen.
+// Income, Plan, Expenses, Business and Money tabs, and on the Bills tab while that form is already on screen.
 const addBillFab = document.getElementById('add-bill-fab');
 const addBillForm = document.getElementById('budget-add-form');
 let addFormOnScreen = false;
 
 // Shows or hides the + button for the current tab.
 function updateAddFab() {
-  addBillFab.hidden = ['income', 'plan', 'expenses', 'business'].includes(currentTab) || (currentTab === 'bills' && addFormOnScreen);
+  addBillFab.hidden = ['income', 'plan', 'expenses', 'business', 'money'].includes(currentTab) || (currentTab === 'bills' && addFormOnScreen);
 }
 
 if (addBillFab && addBillForm) {

@@ -1323,6 +1323,25 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .small-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* The rows of the Money tab (a debt, a forecast week, a month's trend, a subscription): a bold line then the details. */
+
+.debt-row,
+.forecast-row,
+.trend-row,
+.subs-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+/* A month's bar spans the row, like the other progress bars. */
+
+.trend-row > .chart-track { width: 100%; }
+
 /* A Home savings goal: the name, how far along it is, its bar, and the box to add savings. */
 
 .home-goal {
@@ -2601,14 +2620,15 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
     border-top: 1px solid var(--border);
   }
 
-  /* Each tab takes an equal share of the bar and is finger-sized. */
+  /* Each tab takes the space its label needs and shares out the rest, and is finger-sized; the type is a little smaller
+     so all seven tabs fit on one row. */
 
   .tabbar-btn {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 44px;
-    padding: 8px 4px;
+    padding: 8px 3px;
     border-radius: 13px;
-    font-size: 0.85rem;
+    font-size: 0.7rem;
   }
 
   /* The + button, the undo bar and the "couldn't save" warning sit above the tab bar. */

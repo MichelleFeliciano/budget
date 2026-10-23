@@ -101,9 +101,10 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <button type="button" class="tabbar-btn" data-tab="plan">Plan</button>
       <button type="button" class="tabbar-btn" data-tab="expenses">Expenses</button>
       <button type="button" class="tabbar-btn" data-tab="business">Business</button>
+      <button type="button" class="tabbar-btn" data-tab="money">Money</button>
     </nav>
 
-    <!-- The six tabs live in this section (Home, Income, Bills, Plan, Expenses, Business); showTab shows one and hides the rest
+    <!-- The seven tabs live in this section (Home, Income, Bills, Plan, Expenses, Business, Money); showTab shows one and hides the rest
          with the hidden attribute. renderBudget redraws all of them (renderBudgetCalendar, renderPayPeriod,
          renderPaidHistory, renderBudgetList, renderRecurringIncomeList, the income lists, renderPlan, renderGuesses,
          renderGoals and renderExpenses); each tab shows its own part. -->
@@ -370,6 +371,15 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <details class="fold" id="fold-expense-bank">
           <summary class="fold-summary"><h2>Import from Chase</h2></summary>
           <p class="stats-line">Download your transactions from Chase as a CSV file (sign in to Chase, open the account, choose Download account activity, then CSV) and pick the file here. It is read on this device and never sent anywhere. Money going out is listed so you can give each row a category, and money coming in so you can give each deposit an income source.</p>
+          <h3 class="chart-title">Rules</h3>
+          <p class="stats-line">A rule gives a category to every row whose description contains some text (for example SHELL means Gas), ahead of what was chosen last time.</p>
+          <ul class="card-list flat-list" id="bank-rule-list"></ul>
+          <form id="bank-rule-add-form" class="add-form add-form-stacked">
+            <input type="text" id="bank-rule-text" maxlength="60" placeholder="Description contains (e.g. SHELL)" required aria-label="Text the description contains">
+            <select id="bank-rule-category" aria-label="Category for this rule"></select>
+            <p class="form-error" id="bank-rule-error" hidden></p>
+            <button type="submit">Add rule</button>
+          </form>
           <input type="file" id="bank-file-input" accept=".csv,text/csv" aria-label="Chase transactions CSV file">
           <p class="stats-line" id="bank-summary"></p>
           <div class="bank-bulk" id="bank-bulk" hidden>
@@ -454,6 +464,78 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <details class="fold" id="fold-business-list" open>
           <summary class="fold-summary"><h2>Business Expenses</h2></summary>
           <ul class="card-list flat-list" id="business-expense-list"></ul>
+        </details>
+
+        <details class="fold" id="fold-business-tax">
+          <summary class="fold-summary"><h2>Tax Set-Aside</h2></summary>
+          <p class="stats-line">A share of your business profit (income from the sources below minus business expenses) to put aside for taxes, for the period chosen in the summary above.</p>
+          <div class="add-form add-form-stacked">
+            <input type="number" inputmode="decimal" id="tax-percent-input" min="0" max="100" step="0.1" placeholder="Percent to set aside (e.g. 25)" aria-label="Percent of profit to set aside for taxes">
+            <input type="text" id="tax-sources-input" list="income-source-options" autocomplete="off" placeholder="Business income sources, separated by commas" aria-label="Income sources that count as business income">
+            <p class="form-error" id="tax-error" hidden></p>
+            <button type="button" id="tax-save-btn">Save</button>
+          </div>
+          <ul class="flat-list" id="tax-result-list"></ul>
+          <p class="stats-line" id="tax-note"></p>
+        </details>
+      </div>
+
+      <!-- Money: accounts and net worth, debt payoff, a cash-flow forecast, month-by-month trends and subscriptions. -->
+      <div class="tab-panel" id="tab-money" hidden>
+        <details class="fold" id="fold-accounts" open>
+          <summary class="fold-summary"><h2>Accounts &amp; Net Worth</h2></summary>
+          <p class="stats-line">What you have in each account and what you owe. Edit an account to change its balance whenever you like: each change is kept as a dated entry, so net worth over time builds up. Net worth is what you have minus what you owe.</p>
+          <p class="stats-line" id="networth-line"></p>
+          <ul class="card-list flat-list" id="account-list"></ul>
+          <p class="empty-state" id="account-empty" hidden>No accounts yet. Add one below.</p>
+          <ul class="flat-list" id="networth-history"></ul>
+          <form id="account-add-form" class="add-form add-form-stacked">
+            <input type="text" id="account-name-input" maxlength="60" placeholder="Account (e.g. Checking, Car loan)" required aria-label="Account name">
+            <select id="account-kind-input" aria-label="Something you have or something you owe">
+              <option value="asset">You have this (checking, savings...)</option>
+              <option value="debt">You owe this (loan, credit card...)</option>
+            </select>
+            <input type="number" inputmode="decimal" id="account-balance-input" step="0.01" placeholder="Balance now" required aria-label="Balance now">
+            <input type="number" inputmode="decimal" id="account-apr-input" min="0" max="100" step="0.01" placeholder="Interest rate % (debts, optional)" aria-label="Interest rate percent">
+            <input type="number" inputmode="decimal" id="account-payment-input" min="0" step="0.01" placeholder="Monthly payment (debts, optional)" aria-label="Monthly payment">
+            <p class="form-error" id="account-form-error" hidden></p>
+            <button type="submit">Add account</button>
+          </form>
+        </details>
+
+        <details class="fold" id="fold-debts" open>
+          <summary class="fold-summary"><h2>Debt Payoff</h2></summary>
+          <p class="stats-line">When each debt is paid off at its monthly payment, and about how much interest that costs. Type an extra amount to see what paying more would change.</p>
+          <input type="number" inputmode="decimal" id="debt-extra-input" min="0" step="0.01" placeholder="Extra per month (optional)" aria-label="Extra amount to pay each month">
+          <ul class="card-list flat-list" id="debt-list"></ul>
+          <p class="empty-state" id="debt-empty" hidden>No debts with a balance. Add an account you owe above.</p>
+        </details>
+
+        <details class="fold" id="fold-forecast" open>
+          <summary class="fold-summary"><h2>Cash-Flow Forecast</h2></summary>
+          <p class="stats-line">The weeks ahead from your recurring income, bills, Spending Plan and expected one-time costs, starting from what your asset accounts hold. This week counts only from today.</p>
+          <select id="forecast-weeks-input" aria-label="How many weeks to show">
+            <option value="4">Next 4 weeks</option>
+            <option value="8" selected>Next 8 weeks</option>
+            <option value="12">Next 12 weeks</option>
+          </select>
+          <p class="stats-line" id="forecast-note"></p>
+          <ul class="card-list flat-list" id="forecast-list"></ul>
+        </details>
+
+        <details class="fold" id="fold-trends">
+          <summary class="fold-summary"><h2>Trends</h2></summary>
+          <p class="stats-line">The last twelve months: what came in, what the bills took, what you spent and saved, and what was left. The bar shows bills plus spending against the busiest month.</p>
+          <p class="stats-line" id="trend-year-line"></p>
+          <ul class="card-list flat-list" id="trend-list"></ul>
+        </details>
+
+        <details class="fold" id="fold-subscriptions">
+          <summary class="fold-summary"><h2>Subscriptions &amp; Repeating Bills</h2></summary>
+          <p class="stats-line">Every repeating bill with what it costs in an average month and a year, biggest first. A bill that costs more (or less) than the first time you paid it is flagged.</p>
+          <p class="stats-line" id="subs-total-line"></p>
+          <ul class="card-list flat-list" id="subs-list"></ul>
+          <p class="empty-state" id="subs-empty" hidden>No repeating bills yet.</p>
         </details>
       </div>
 
@@ -792,6 +874,40 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="date" class="repeat-edit-start" min="1990-01-01" max="2100-12-31" required aria-label="Edit first date">
       <input type="text" class="repeat-edit-notes" maxlength="200" placeholder="Note (optional)" aria-label="Edit note">
       <p class="form-error repeat-edit-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+  </li>
+</template>
+
+<!-- One account (renderAccounts). It reuses the recurring income card's classes, so it looks the same. -->
+<template id="account-card-template">
+  <li class="recurring-income-card">
+    <div class="recurring-income-view">
+      <div class="recurring-income-info">
+        <strong class="recurring-income-name"></strong>
+        <span class="recurring-income-frequency account-kind"></span>
+        <span class="recurring-income-amount account-balance"></span>
+        <span class="recurring-income-start account-asof"></span>
+        <span class="recurring-income-start account-terms" hidden></span>
+      </div>
+      <div class="recurring-income-actions">
+        <button type="button" class="edit-btn">Edit</button>
+        <button type="button" class="delete-btn">Delete</button>
+      </div>
+    </div>
+    <form class="recurring-income-edit-form" hidden>
+      <input type="text" class="account-edit-name" maxlength="60" placeholder="Account" required aria-label="Edit account name">
+      <select class="account-edit-kind" aria-label="Edit: something you have or owe">
+        <option value="asset">You have this</option>
+        <option value="debt">You owe this</option>
+      </select>
+      <input type="number" inputmode="decimal" class="account-edit-balance" step="0.01" placeholder="Balance now" required aria-label="Edit balance">
+      <input type="number" inputmode="decimal" class="account-edit-apr" min="0" max="100" step="0.01" placeholder="Interest rate % (debts)" aria-label="Edit interest rate">
+      <input type="number" inputmode="decimal" class="account-edit-payment" min="0" step="0.01" placeholder="Monthly payment (debts)" aria-label="Edit monthly payment">
+      <p class="form-error account-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>
