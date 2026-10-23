@@ -1367,10 +1367,11 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .goal-history-list { list-style: none; margin: 4px 0 0; padding: 0; }
 
-/* One entry: the date and signed amount on the left, Delete on the right. */
+/* One entry: the date and signed amount on the left, Edit and Delete on the right (its edit form takes a row). */
 
 .goal-history-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;

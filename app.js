@@ -3231,6 +3231,30 @@ function addSavings(goalId, amountRaw, sign) {
   return '';
 }
 
+// Changes the date and amount of a savings entry (a negative amount is money taken out). The goal may not end up
+// with less than nothing saved. Returns the problem as a sentence, or '' when it was saved (nothing is recorded, and
+// no Undo step added, when neither changed).
+function saveSavingsEntry(id, dateKey, amountRaw) {
+  const entry = income.find((r) => r.id === id && r.savedFor && !r.deleted);
+  if (!entry) return 'That entry is gone.';
+  if (!dateKey || !isRealDateKey(dateKey) || !isReasonableDateKey(dateKey)) return DATE_RANGE_MESSAGE;
+  const amount = Number(amountRaw);
+  if (amountRaw === '' || !Number.isFinite(amount) || amount === 0 || Math.abs(amount) > MAX_MONEY) return 'Enter an amount up to $1,000,000,000 (negative for money taken out).';
+  const cents = Math.round(amount * 100) / 100;
+  if (cents === 0) return 'Enter an amount of at least one cent.';
+  if (goalSaved(entry.savedFor) - entry.amount + cents < 0) return 'That would leave less than nothing saved for this goal.';
+  if (dateKey !== entry.savedOn || cents !== entry.amount) {
+    const before = structuredClone(entry);
+    entry.savedOn = dateKey;
+    entry.amount = cents;
+    stampSync(entry);
+    saveCollection(INCOME_KEY, income);
+    recordUndo('income', entry.id, before, structuredClone(entry));
+  }
+  renderBudget();
+  return '';
+}
+
 // Draws the Savings Goals on the Plan tab: each goal with a progress bar, what is left, and (when it has a target
 // date) what to put aside each month to get there.
 function renderGoals() {
@@ -3340,7 +3364,62 @@ function renderGoals() {
       remove.textContent = 'Delete';
       remove.setAttribute('aria-label', `Delete the ${signed} entry from ${formatDateKeyShort(deposit.savedOn)}`);
       remove.addEventListener('click', () => deleteIncome(deposit.id));
-      row.append(label, remove);
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'small-btn';
+      edit.textContent = 'Edit';
+      edit.setAttribute('aria-label', `Edit the ${signed} entry from ${formatDateKeyShort(deposit.savedOn)}`);
+      const actions = document.createElement('span');
+      actions.append(edit, remove);
+
+      // The form that replaces the row while the entry is edited: its date and its amount (negative for money taken out).
+      const form = document.createElement('form');
+      form.className = 'goal-cost-form';
+      form.hidden = true;
+      const dateBox = document.createElement('input');
+      dateBox.type = 'date';
+      dateBox.min = '1990-01-01';
+      dateBox.max = '2100-12-31';
+      dateBox.required = true;
+      dateBox.setAttribute('aria-label', 'Date of this savings entry');
+      const amountBox = document.createElement('input');
+      amountBox.type = 'number';
+      amountBox.inputMode = 'decimal';
+      amountBox.step = '0.01';
+      amountBox.required = true;
+      amountBox.setAttribute('aria-label', 'Amount of this savings entry (negative for money taken out)');
+      const save = document.createElement('button');
+      save.type = 'submit';
+      save.className = 'small-btn';
+      save.textContent = 'Save';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'small-btn';
+      cancel.textContent = 'Cancel';
+      const error = document.createElement('span');
+      error.className = 'form-error';
+      error.hidden = true;
+      form.append(dateBox, amountBox, save, cancel, error);
+      edit.addEventListener('click', () => {
+        dateBox.value = deposit.savedOn;
+        amountBox.value = String(deposit.amount);
+        error.hidden = true;
+        label.hidden = true;
+        actions.hidden = true;
+        form.hidden = false;
+        amountBox.focus();
+      });
+      cancel.addEventListener('click', () => {
+        form.hidden = true;
+        label.hidden = false;
+        actions.hidden = false;
+      });
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const problem = saveSavingsEntry(deposit.id, dateBox.value, amountBox.value);
+        if (problem) { error.textContent = problem; error.hidden = false; }
+      });
+      row.append(label, actions, form);
       historyList.appendChild(row);
     });
     const costNote = node.querySelector('.goal-costs-note');
@@ -6137,7 +6216,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 41;
+const APP_VERSION = 42;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
