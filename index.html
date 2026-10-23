@@ -595,6 +595,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <span class="recurring-income-start guess-notes" hidden></span>
       </div>
       <div class="recurring-income-actions">
+        <button type="button" class="guess-spent-btn">Mark as spent</button>
         <button type="button" class="edit-btn">Edit</button>
         <button type="button" class="delete-btn">Delete</button>
       </div>
@@ -608,6 +609,16 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
         <button type="button" class="cancel-btn">Cancel</button>
+      </div>
+    </form>
+    <!-- Mark as spent: what it really cost and which Spending Plan category it belongs to; saving logs it today as an expense and removes the guess. -->
+    <form class="recurring-income-edit-form guess-spent-form" hidden>
+      <input type="number" inputmode="decimal" class="guess-spent-amount" placeholder="What it cost" min="0.01" step="0.01" required aria-label="What it really cost">
+      <select class="guess-spent-category" aria-label="Spending Plan category"></select>
+      <p class="form-error guess-spent-error" hidden></p>
+      <div class="recurring-income-actions">
+        <button type="submit">Log expense</button>
+        <button type="button" class="guess-spent-cancel">Cancel</button>
       </div>
     </form>
   </li>
@@ -638,6 +649,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <button type="button" class="small-btn goal-take-btn">Take out</button>
         </span>
         <span class="form-error goal-save-error" hidden></span>
+        <!-- Every deposit and withdrawal, newest first, each with a Delete button (renderGoals). -->
+        <details class="goal-history">
+          <summary class="goal-history-summary"></summary>
+          <ul class="goal-history-list"></ul>
+        </details>
       </div>
       <div class="recurring-income-actions">
         <button type="button" class="edit-btn">Edit</button>

@@ -2956,6 +2956,18 @@ function saveGuess(fields, id) {
   return '';
 }
 
+// Turns an expected cost into a real expense dated today, for what it really cost and in the chosen Spending Plan
+// category, with the guess's name as the note, and removes the guess so it is not counted twice. Returns the problem
+// as a sentence, or '' when it worked. Nothing is changed when the expense would be refused.
+function markGuessSpent(guessId, amountRaw, planId) {
+  const guess = income.find((r) => r.id === guessId && r.guessName && !r.deleted);
+  if (!guess) return 'That expected cost is gone.';
+  const problem = expenseFieldsError({ dateKey: todayKey(), amountRaw, planId, notes: guess.guessName });
+  if (problem) return problem;
+  deleteIncome(guess.id);
+  return saveExpense({ dateKey: todayKey(), amountRaw, planId, notes: guess.guessName });
+}
+
 // Draws the expected one-time costs on the Plan tab, with what this month's come to.
 function renderGuesses() {
   const list = document.getElementById('guess-list');
@@ -3011,6 +3023,31 @@ function renderGuesses() {
       }
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(record.id));
+
+    // Mark as spent: the real amount (starting from the guess) and a Spending Plan category, then it becomes an expense.
+    const spentForm = node.querySelector('.guess-spent-form');
+    const spentAmount = node.querySelector('.guess-spent-amount');
+    const spentCategory = node.querySelector('.guess-spent-category');
+    const spentError = node.querySelector('.guess-spent-error');
+    node.querySelector('.guess-spent-btn').addEventListener('click', () => {
+      // The category whose name matches the guess is chosen to start with; otherwise the first one.
+      const match = planCategories().find((plan) => plan.planName.toLowerCase() === record.guessName.toLowerCase());
+      fillExpenseCategorySelect(spentCategory, match ? match.id : '', '');
+      spentAmount.value = String(record.amount);
+      spentError.hidden = true;
+      viewSection.hidden = true;
+      spentForm.hidden = false;
+      spentAmount.focus();
+    });
+    node.querySelector('.guess-spent-cancel').addEventListener('click', () => {
+      spentForm.hidden = true;
+      viewSection.hidden = false;
+    });
+    spentForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const problem = markGuessSpent(record.id, spentAmount.value, spentCategory.value);
+      if (problem) { spentError.textContent = problem; spentError.hidden = false; }
+    });
 
     list.appendChild(node);
   });
@@ -3270,6 +3307,26 @@ function renderGoals() {
       });
       row.append(label, actions, form);
       costList.appendChild(row);
+    });
+    // The savings history: every deposit (+) and withdrawal (-), newest first, each removable (Undo brings it back).
+    const deposits = income.filter((r) => r.savedFor === record.id && !r.deleted)
+      .sort((a, b) => b.savedOn.localeCompare(a.savedOn) || (b.dateAdded || '').localeCompare(a.dateAdded || ''));
+    node.querySelector('.goal-history-summary').textContent = `Savings history (${deposits.length})`;
+    node.querySelector('.goal-history').hidden = deposits.length === 0;
+    const historyList = node.querySelector('.goal-history-list');
+    deposits.forEach((deposit) => {
+      const row = document.createElement('li');
+      const label = document.createElement('span');
+      const signed = `${deposit.amount < 0 ? '-' : '+'}${formatMoney(Math.abs(deposit.amount))}`; // always shows its sign
+      label.textContent = `${formatDateKeyShort(deposit.savedOn)}: ${signed}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'small-btn';
+      remove.textContent = 'Delete';
+      remove.setAttribute('aria-label', `Delete the ${signed} entry from ${formatDateKeyShort(deposit.savedOn)}`);
+      remove.addEventListener('click', () => deleteIncome(deposit.id));
+      row.append(label, remove);
+      historyList.appendChild(row);
     });
     const costNote = node.querySelector('.goal-costs-note');
     costNote.textContent = costs.length
@@ -4673,6 +4730,7 @@ function undoToastMessage(collectionName, before, after) {
   if (after.guessName && after.deleted && !before.deleted) return `Deleted ${after.guessName}`;
   if (after.goalName && after.deleted && !before.deleted) return `Deleted goal ${after.goalName}`;
   if (after.goalItemFor && after.deleted && !before.deleted) return `Removed cost ${after.itemName}`;
+  if (after.savedFor && after.deleted && !before.deleted) return 'Removed a savings entry';
   if (after.adjustWeek && after.deleted && !before.deleted) return 'Removed the carry-forward adjustment';
   if (after.adjustWeek && !after.deleted && after.amount !== before.amount) return 'Changed the carry-forward adjustment';
   if (after.planName && !after.deleted && after.amount !== before.amount) {
@@ -5745,7 +5803,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 37;
+const APP_VERSION = 38;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

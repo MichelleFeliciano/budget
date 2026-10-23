@@ -217,3 +217,7 @@ Each cost is its own record in the `income` list (`goalItemFor` = the goal's id,
 
 The Net carried into a week is worked out from bills and income, so it drifts when real spending differs. You type what you actually have carried into a week and the app stores the difference as an adjustment: a record in the `income` list (`adjustWeek` = that week's Monday, signed `amount`, `notes`, id `adjust-<id>`) added to the carry into that week and, by rolling, every week after. It adjusts the Net and the Projected net by the same amount. One adjustment per week: the newest live record counts, and typing the amount the app already works out removes it. It is a difference, not a fixed value, so a bill or income added to an earlier week later still moves the later weeks. Month totals do not roll forward and are unaffected. No server change: the id is not a date id.
 
+## Marking a guess as spent, and the savings history
+
+Mark as spent is two ordinary changes, not a new record kind: the expense is logged (dated today, the guess's name as its note, in the chosen Spending Plan category, because every expense needs one) and the guess is deleted as a tombstone. They are two Undo steps; nothing is changed if the expense would be refused. The savings history only lists the deposit records that already existed and lets one be deleted, so a wrong entry no longer needs a matching Take out.
+

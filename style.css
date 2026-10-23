@@ -626,6 +626,8 @@ select[id$="-sort-input"] {
 .delete-btn,
 .pay-other-btn,
 .catch-up-btn,
+.guess-spent-btn,
+.guess-spent-cancel,
 .mark-oldest-paid-btn {
   padding: 5px 12px;
   border: 1px solid var(--border);
@@ -648,6 +650,8 @@ select[id$="-sort-input"] {
 .cancel-btn:hover,
 .pay-other-btn:hover:not(:disabled),
 .catch-up-btn:hover,
+.guess-spent-btn:hover,
+.guess-spent-cancel:hover,
 .mark-oldest-paid-btn:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
@@ -1349,6 +1353,28 @@ input[type="date"]::-webkit-date-and-time-value {
 /* The name box of a goal's new cost is wider than the amount box beside it. */
 
 .goal-save-row .goal-cost-name-input { width: 170px; }
+
+/* The savings history under a goal: a folding list of every deposit and withdrawal. */
+
+.goal-history { width: 100%; margin-top: 6px; font-size: 0.85rem; }
+
+/* The line that opens and closes the history. */
+
+.goal-history-summary { cursor: pointer; color: var(--muted); }
+
+/* The history rows: a plain list, one entry per line with its Delete button at the end. */
+
+.goal-history-list { list-style: none; margin: 4px 0 0; padding: 0; }
+
+/* One entry: the date and signed amount on the left, Delete on the right. */
+
+.goal-history-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
 
 /* A goal's cost parts: a plain list, one row per cost with its Remove button at the end. */
 
