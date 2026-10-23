@@ -356,7 +356,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
         <details class="fold" id="fold-expense-bank">
           <summary class="fold-summary"><h2>Import from Chase</h2></summary>
-          <p class="stats-line">Download your transactions from Chase as a CSV file (sign in to Chase, open the account, choose Download account activity, then CSV) and pick the file here. It is read on this device and never sent anywhere. Money going out is listed so you can give each row a category; money in is left out.</p>
+          <p class="stats-line">Download your transactions from Chase as a CSV file (sign in to Chase, open the account, choose Download account activity, then CSV) and pick the file here. It is read on this device and never sent anywhere. Money going out is listed so you can give each row a category, and money coming in so you can give each deposit an income source.</p>
           <input type="file" id="bank-file-input" accept=".csv,text/csv" aria-label="Chase transactions CSV file">
           <p class="stats-line" id="bank-summary"></p>
           <div class="bank-bulk" id="bank-bulk" hidden>
@@ -364,7 +364,13 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <button type="button" class="small-btn" id="bank-bulk-btn">Put every row without a category in this one</button>
           </div>
           <ul class="card-list flat-list" id="bank-list"></ul>
-          <button type="button" id="bank-import-btn" hidden disabled>Choose a category for at least one row</button>
+          <h3 class="chart-title" id="bank-income-heading" hidden>Money in</h3>
+          <div class="bank-bulk" id="bank-bulk-source-row" hidden>
+            <input type="text" id="bank-bulk-source" maxlength="60" list="income-source-options" autocomplete="off" placeholder="Income source (e.g. Paycheck)" aria-label="Income source for every deposit that has none">
+            <button type="button" class="small-btn" id="bank-bulk-source-btn">Use this source for every deposit without one</button>
+          </div>
+          <ul class="card-list flat-list" id="bank-income-list"></ul>
+          <button type="button" id="bank-import-btn" hidden disabled>Choose a category or source for at least one row</button>
           <button type="button" class="small-btn" id="bank-undo-btn" hidden>Undo this import</button>
           <p class="sync-status" id="bank-status" hidden></p>
         </details>

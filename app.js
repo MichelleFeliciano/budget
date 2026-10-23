@@ -4749,18 +4749,25 @@ function downloadExpenseCsv() {
 // with a category to choose from the Spending Plan, and the rows you assign become ordinary expenses carrying a
 // `bankKey` (date, amount and the first words of the description, plus a count for identical rows), so importing the
 // same or an overlapping file again skips what is already in (deleted ones included: a deleted import is not
-// brought back). The category chosen for a description is remembered on this device and offered next time. Money in
-// (deposits, refunds, card payments) is not imported. Nothing is kept from the file except what an expense holds.
+// brought back). The category chosen for a description is remembered on this device and offered next time.
+// Money in (a positive amount) is listed too, with a box for the income source to give it (blank to skip): the rows
+// you give a source are added to the income entry for that day and source (several deposits on one day add up, and an
+// amount already typed for that day and source is added to), and the entry remembers the keys it took in so the same
+// row is not added twice. Nothing is kept from the file except what an expense or income entry holds.
 
 // localStorage key for the remembered category of each bank description, as { descriptionKey: planId }.
 const BANK_CATEGORIES_KEY = 'budgetApp.bankCategories.v1';
+// localStorage key for the remembered income source of each bank description, as { descriptionKey: source }.
+const BANK_SOURCES_KEY = 'budgetApp.bankSources.v1';
 // The biggest file read, and the most rows taken from it (a bank file for a few months is far smaller).
 const BANK_MAX_BYTES = 2 * 1024 * 1024;
 const BANK_MAX_ROWS = 2000;
-// The rows of the file being reviewed, as { dateKey, desc, cents, key, planId, imported, flagged }, and the ids of the
-// expenses the last import made (so that import can be undone in one tap).
+// The rows of the file being reviewed, as { kind: 'out' or 'in', dateKey, desc, cents, key, planId (money out), source
+// (money in), imported, flagged }, the ids of the expenses the last import made, and what its deposits changed (so that
+// import can be undone in one tap).
 let bankRows = [];
 let lastBankImportIds = [];
+let lastBankIncome = [];
 
 // Splits CSV text into rows of cells: quoted cells may hold commas, doubled quotes and line breaks, a leading byte
 // order mark is ignored, and blank lines are dropped.
@@ -4828,9 +4835,20 @@ function loadBankCategories() {
   }
 }
 
+// The remembered income sources of bank descriptions ({} when none, or storage is blocked).
+function loadBankSources() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BANK_SOURCES_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 // Reads a Chase CSV (checking: Details, Posting Date, Description, Amount, ...; credit card: Transaction Date,
-// Post Date, Description, Category, Type, Amount, ...) into the rows for money going out. Returns { rows, problem,
-// moneyIn }: problem is a sentence when the file is not one it understands, moneyIn counts the rows left out.
+// Post Date, Description, Category, Type, Amount, ...) into rows of money going out (kind 'out') and money coming in
+// (kind 'in'). Returns { rows, problem, moneyIn }: problem is a sentence when the file is not one it understands,
+// moneyIn counts the money-in rows.
 function parseChaseCsv(text) {
   const table = parseCsv(text);
   if (!table.length) return { rows: [], problem: 'That file is empty.', moneyIn: 0 };
@@ -4842,6 +4860,7 @@ function parseChaseCsv(text) {
     return { rows: [], problem: 'That does not look like a Chase transactions file (it needs a date, a Description and an Amount column).', moneyIn: 0 };
   }
   const remembered = loadBankCategories();
+  const rememberedSources = loadBankSources();
   const seen = new Map();
   const rows = [];
   let moneyIn = 0;
@@ -4850,41 +4869,63 @@ function parseChaseCsv(text) {
     const cents = bankCents(cells[amountCol] || '');
     const desc = (cells[descCol] || '').trim().replace(/\s+/g, ' ');
     if (!dateKey || cents === null || cents === 0) return;
-    if (cents > 0) { moneyIn += 1; return; }
-    const base = `${dateKey}|${-cents}|${bankDescriptionKey(desc)}`;
+    const kind = cents > 0 ? 'in' : 'out';
+    if (kind === 'in') moneyIn += 1;
+    const descKey = bankDescriptionKey(desc);
+    // Money in has its own key shape so a deposit and a purchase of the same size never share one.
+    const base = `${kind === 'in' ? 'in|' : ''}${dateKey}|${Math.abs(cents)}|${descKey}`;
     const count = (seen.get(base) || 0) + 1; // two identical rows (two coffees one day) are told apart by a count
     seen.set(base, count);
-    rows.push({ dateKey, desc, cents: -cents, key: `${base}#${count}`, planId: remembered[bankDescriptionKey(desc)] || '', imported: false, flagged: bankLooksLikeTransfer(desc) });
+    rows.push({
+      kind, dateKey, desc, cents: Math.abs(cents), key: `${base}#${count}`,
+      planId: kind === 'out' ? remembered[descKey] || '' : '', source: kind === 'in' ? cleanSource(rememberedSources[descKey]) : '',
+      imported: false, flagged: bankLooksLikeTransfer(desc),
+    });
   });
   return { rows, problem: rows.length || moneyIn ? '' : 'No transactions were found in that file.', moneyIn };
 }
 
-// Marks the rows already in the app (their bankKey is on an expense, a deleted one included) and drops a remembered
-// category whose Spending Plan category no longer exists.
+// Marks the rows already in the app (their key is on an expense or on an income entry, a deleted one included) and
+// drops a remembered category whose Spending Plan category no longer exists.
 function markImportedBankRows(rows) {
-  const have = new Set(income.filter((r) => r.bankKey).map((r) => r.bankKey));
+  const have = new Set(income.flatMap((r) => [r.bankKey, ...(r.bankKeys || [])]).filter(Boolean));
   rows.forEach((row) => {
     row.imported = have.has(row.key);
-    if (row.planId && !income.some((r) => r.id === row.planId && r.planName && !r.deleted)) row.planId = '';
+    if (row.kind === 'out' && row.planId && !income.some((r) => r.id === row.planId && r.planName && !r.deleted)) row.planId = '';
   });
 }
 
-// Draws the rows being reviewed, the summary line and the buttons.
+// Draws the rows being reviewed (money out with a category box, money in with a source box), the summary line and the
+// buttons.
 function renderBankRows() {
   const list = document.getElementById('bank-list');
+  const incomeList = document.getElementById('bank-income-list');
   list.innerHTML = '';
+  incomeList.innerHTML = '';
   const categories = planCategories();
   bankRows.forEach((row) => {
     const item = document.createElement('li');
     item.className = 'bank-row';
     const label = document.createElement('span');
-    label.textContent = `${formatDateKeyShort(row.dateKey)} · ${row.desc || 'No description'} · ${formatMoney(row.cents / 100)}${row.flagged ? ' (looks like a payment or transfer)' : ''}`;
+    const amount = row.kind === 'in' ? `+${formatMoney(row.cents / 100)}` : formatMoney(row.cents / 100);
+    label.textContent = `${formatDateKeyShort(row.dateKey)} \u00b7 ${row.desc || 'No description'} \u00b7 ${amount}${row.flagged ? ' (looks like a payment or transfer)' : ''}`;
     item.appendChild(label);
     if (row.imported) {
       const done = document.createElement('span');
       done.className = 'badge';
       done.textContent = 'Already imported';
       item.appendChild(done);
+    } else if (row.kind === 'in') {
+      const box = document.createElement('input');
+      box.type = 'text';
+      box.maxLength = MAX_SOURCE_LENGTH;
+      box.setAttribute('list', 'income-source-options');
+      box.autocomplete = 'off';
+      box.placeholder = 'Income source (blank to skip)';
+      box.setAttribute('aria-label', `Income source for ${row.desc || 'this deposit'} on ${formatDateKeyShort(row.dateKey)}`);
+      box.value = row.source;
+      box.addEventListener('input', () => { row.source = box.value; updateBankButtons(); });
+      item.appendChild(box);
     } else {
       const select = document.createElement('select');
       select.setAttribute('aria-label', `Category for ${row.desc || 'this transaction'} on ${formatDateKeyShort(row.dateKey)}`);
@@ -4902,7 +4943,7 @@ function renderBankRows() {
       select.addEventListener('change', () => { row.planId = select.value; updateBankButtons(); });
       item.appendChild(select);
     }
-    list.appendChild(item);
+    (row.kind === 'in' ? incomeList : list).appendChild(item);
   });
   const fill = document.getElementById('bank-bulk-category');
   const keep = fill.value;
@@ -4914,18 +4955,25 @@ function renderBankRows() {
     fill.appendChild(option);
   });
   if (keep) fill.value = keep;
-  document.getElementById('bank-bulk').hidden = !bankRows.some((r) => !r.imported) || !categories.length;
+  document.getElementById('bank-bulk').hidden = !bankRows.some((r) => r.kind === 'out' && !r.imported) || !categories.length;
+  document.getElementById('bank-income-heading').hidden = !bankRows.some((r) => r.kind === 'in');
+  document.getElementById('bank-bulk-source-row').hidden = !bankRows.some((r) => r.kind === 'in' && !r.imported);
   updateBankButtons();
 }
 
-// The Import button says how many expenses it would add and is off when there are none to add; Undo shows after an import.
+// The Import button says how many expenses and deposits it would add and is off when there are none; Undo shows after
+// an import.
 function updateBankButtons() {
-  const chosen = bankRows.filter((r) => r.planId && !r.imported).length;
+  const outRows = bankRows.filter((r) => r.kind === 'out' && r.planId && !r.imported).length;
+  const inRows = bankRows.filter((r) => r.kind === 'in' && cleanSource(r.source) && !r.imported).length;
   const importBtn = document.getElementById('bank-import-btn');
   importBtn.hidden = !bankRows.some((r) => !r.imported);
-  importBtn.disabled = chosen === 0;
-  importBtn.textContent = chosen ? `Import ${chosen} expense${chosen === 1 ? '' : 's'}` : 'Choose a category for at least one row';
-  document.getElementById('bank-undo-btn').hidden = lastBankImportIds.length === 0;
+  importBtn.disabled = outRows + inRows === 0;
+  const parts = [];
+  if (outRows) parts.push(`${outRows} expense${outRows === 1 ? '' : 's'}`);
+  if (inRows) parts.push(`${inRows} deposit${inRows === 1 ? '' : 's'}`);
+  importBtn.textContent = parts.length ? `Import ${parts.join(' and ')}` : 'Choose a category or source for at least one row';
+  document.getElementById('bank-undo-btn').hidden = lastBankImportIds.length === 0 && lastBankIncome.length === 0;
 }
 
 // Sets the status line under the Chase fold.
@@ -4943,20 +4991,30 @@ function loadBankText(text) {
   if (parsed.problem) { bankRows = []; renderBankRows(); return parsed.problem; }
   markImportedBankRows(parsed.rows);
   bankRows = parsed.rows;
+  const spending = bankRows.filter((r) => r.kind === 'out').length;
   const already = bankRows.filter((r) => r.imported).length;
   document.getElementById('bank-summary').textContent =
-    `${bankRows.length} spending row${bankRows.length === 1 ? '' : 's'} found${already ? ` (${already} already imported)` : ''}; ${parsed.moneyIn} money-in row${parsed.moneyIn === 1 ? '' : 's'} left out. Pick a category for each row to import and leave the rest on Skip.`;
+    `${spending} spending row${spending === 1 ? '' : 's'} and ${parsed.moneyIn} money-in row${parsed.moneyIn === 1 ? '' : 's'} found${already ? ` (${already} already imported)` : ''}. Pick a category for each spending row and a source for each deposit to import, and leave the rest alone.`;
   renderBankRows();
   return '';
 }
 
-// Makes an expense for every row with a category (one change, one redraw), remembers each description's category on this
-// device, and notes the new ids so the whole import can be undone. Returns how many expenses were made.
+// The live income entry for a day and source, or null.
+function liveIncomeEntry(dateKey, source) {
+  const key = entryKey(dateKey, source);
+  return uniqueIncomeEntries(income).find((r) => !r.deleted && entryKey(r.dateKey, r.source) === key) || null;
+}
+
+// Makes an expense for every spending row with a category and adds every deposit row with a source to its day's
+// income entry (several deposits on one day and source add up, and an amount already there is added to, not
+// replaced), remembers each description's category or source on this device, and notes what changed so the whole
+// import can be undone. Returns { expenses, deposits }: how many rows of each kind went in.
 function importBankRows() {
   const now = new Date().toISOString();
   const remembered = loadBankCategories();
-  const made = [];
-  bankRows.filter((r) => r.planId && !r.imported).forEach((row) => {
+  const rememberedSources = loadBankSources();
+  const madeIds = [];
+  bankRows.filter((r) => r.kind === 'out' && r.planId && !r.imported).forEach((row) => {
     const plan = income.find((r) => r.id === row.planId && r.planName && !r.deleted);
     if (!plan) return;
     const record = {
@@ -4965,34 +5023,81 @@ function importBankRows() {
       dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
     };
     income.push(record);
-    made.push(record.id);
+    madeIds.push(record.id);
     row.imported = true;
     remembered[bankDescriptionKey(row.desc)] = plan.id;
   });
-  if (made.length) {
+
+  // Deposits: one change per day and source, however many rows it takes in.
+  const groups = new Map();
+  bankRows.filter((r) => r.kind === 'in' && cleanSource(r.source) && !r.imported).forEach((row) => {
+    const key = entryKey(row.dateKey, row.source);
+    if (!groups.has(key)) groups.set(key, { dateKey: row.dateKey, source: cleanSource(row.source), cents: 0, rows: [] });
+    const group = groups.get(key);
+    group.cents += row.cents;
+    group.rows.push(row);
+  });
+  const changes = [];
+  let deposits = 0;
+  groups.forEach((group) => {
+    const existing = liveIncomeEntry(group.dateKey, group.source);
+    const before = existing ? existing.amount : null;
+    const total = Math.round((before === null ? 0 : before) * 100 + group.cents) / 100;
+    if (total > MAX_MONEY) return;
+    setIncomeForDate(group.dateKey, String(total), group.source);
+    const entry = liveIncomeEntry(group.dateKey, group.source);
+    if (!entry) return;
+    const keys = group.rows.map((r) => r.key);
+    entry.bankKeys = [...new Set([...(entry.bankKeys || []), ...keys])];
+    stampSync(entry);
+    changes.push({ dateKey: group.dateKey, source: group.source, before, keys });
+    group.rows.forEach((row) => {
+      row.imported = true;
+      rememberedSources[bankDescriptionKey(row.desc)] = group.source;
+    });
+    deposits += group.rows.length;
+  });
+
+  if (madeIds.length || changes.length) {
     saveCollection(INCOME_KEY, income);
-    try { localStorage.setItem(BANK_CATEGORIES_KEY, JSON.stringify(remembered)); } catch { /* not remembered: it is asked again next time */ }
-    lastBankImportIds = made;
+    try {
+      localStorage.setItem(BANK_CATEGORIES_KEY, JSON.stringify(remembered));
+      localStorage.setItem(BANK_SOURCES_KEY, JSON.stringify(rememberedSources));
+    } catch { /* not remembered: it is asked again next time */ }
+    lastBankImportIds = madeIds;
+    lastBankIncome = changes;
   }
   renderBudget();
   renderBankRows();
-  return made.length;
+  return { expenses: madeIds.length, deposits };
 }
 
-// Takes back the last import: every expense it made is deleted (as a tombstone, so it syncs) and its rows can be imported again.
+// Takes back the last import: every expense it made is deleted (as a tombstone, so it syncs), every income entry it
+// changed goes back to what it was (or is cleared when the import created it), and its rows can be imported again.
+// Returns how many expenses and income entries were taken back.
 function undoBankImport() {
   const ids = new Set(lastBankImportIds);
   income.forEach((r) => {
     // The bank key goes too, so these rows are offered again (an expense deleted by hand keeps its key and is not).
     if (ids.has(r.id) && !r.deleted) { r.deleted = true; delete r.bankKey; stampSync(r); }
   });
-  saveCollection(INCOME_KEY, income);
-  const count = ids.size;
+  lastBankIncome.forEach((change) => {
+    const key = entryKey(change.dateKey, change.source);
+    income.filter((r) => r.dateKey === change.dateKey && entryKey(r.dateKey, r.source) === key).forEach((r) => {
+      r.bankKeys = (r.bankKeys || []).filter((k) => !change.keys.includes(k));
+      if (!r.bankKeys.length) delete r.bankKeys;
+      stampSync(r);
+    });
+    setIncomeForDate(change.dateKey, change.before === null ? '' : String(change.before), change.source);
+  });
+  const result = { expenses: ids.size, deposits: lastBankIncome.length };
   lastBankImportIds = [];
+  lastBankIncome = [];
+  saveCollection(INCOME_KEY, income);
   markImportedBankRows(bankRows);
   renderBudget();
   renderBankRows();
-  return count;
+  return result;
 }
 
 // The file box reads the chosen file (up to BANK_MAX_BYTES) as text and shows its rows for review.
@@ -5009,22 +5114,34 @@ document.getElementById('bank-file-input').addEventListener('change', async (e) 
   e.target.value = ''; // so choosing the same file again reads it again
 });
 
-// Put every row that has no category yet (and is not a payment or transfer) in the category chosen beside the button.
+// Put every spending row that has no category yet (and is not a payment or transfer) in the category chosen beside the
+// button.
 document.getElementById('bank-bulk-btn').addEventListener('click', () => {
   const planId = document.getElementById('bank-bulk-category').value;
   if (!planId) return;
-  bankRows.filter((r) => !r.imported && !r.planId && !r.flagged).forEach((r) => { r.planId = planId; });
+  bankRows.filter((r) => r.kind === 'out' && !r.imported && !r.planId && !r.flagged).forEach((r) => { r.planId = planId; });
+  renderBankRows();
+});
+
+// Give every deposit row that has no source yet (and is not a payment or transfer) the source typed beside the button.
+document.getElementById('bank-bulk-source-btn').addEventListener('click', () => {
+  const source = cleanSource(document.getElementById('bank-bulk-source').value);
+  if (!source) return;
+  bankRows.filter((r) => r.kind === 'in' && !r.imported && !cleanSource(r.source) && !r.flagged).forEach((r) => { r.source = source; });
   renderBankRows();
 });
 
 // The Import and Undo buttons.
 document.getElementById('bank-import-btn').addEventListener('click', () => {
   const made = importBankRows();
-  setBankStatus(made ? `Imported ${made} expense${made === 1 ? '' : 's'}. Undo this import if it is not right, or delete single ones in Recent Expenses.` : 'Nothing to import.', made ? 'ok' : 'failed');
+  const parts = [];
+  if (made.expenses) parts.push(`${made.expenses} expense${made.expenses === 1 ? '' : 's'}`);
+  if (made.deposits) parts.push(`${made.deposits} deposit${made.deposits === 1 ? '' : 's'}`);
+  setBankStatus(parts.length ? `Imported ${parts.join(' and ')}. Undo this import if it is not right, or fix single ones in Recent Expenses or Income Received.` : 'Nothing to import.', parts.length ? 'ok' : 'failed');
 });
 document.getElementById('bank-undo-btn').addEventListener('click', () => {
-  const count = undoBankImport();
-  setBankStatus(`Took back ${count} expense${count === 1 ? '' : 's'} from that import.`, 'ok');
+  const taken = undoBankImport();
+  setBankStatus(`Took back ${taken.expenses} expense${taken.expenses === 1 ? '' : 's'} and ${taken.deposits} income entr${taken.deposits === 1 ? 'y' : 'ies'} from that import.`, 'ok');
 });
 
 // The expense date starts on today.
@@ -6501,7 +6618,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 43;
+const APP_VERSION = 44;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
