@@ -2008,6 +2008,21 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     }
   }
 
+  // Corrections made this month to what is carried in (see weekAdjustments): a total, and which way they went, so a
+  // plan that keeps needing the same correction is noticed.
+  const adjustedEl = document.getElementById('budget-month-adjusted');
+  if (adjustedEl) {
+    let adjustedTotal = 0;
+    weekAdjustments().forEach((record, weekKey) => { if (weekKey >= monthStartKey && weekKey <= monthEndKey) adjustedTotal += record.amount; });
+    adjustedTotal = Math.round(adjustedTotal * 100) / 100;
+    adjustedEl.hidden = adjustedTotal === 0;
+    if (adjustedTotal !== 0) {
+      adjustedEl.textContent = adjustedTotal < 0
+        ? `You corrected the carried-in amount down by ${formatMoney(-adjustedTotal)} this month: more went out than planned. Check Spent vs Plan on the Expenses tab.`
+        : `You corrected the carried-in amount up by ${formatMoney(adjustedTotal)} this month: less went out than planned.`;
+    }
+  }
+
   // Rebuild the three weeks from scratch: each week gets seven day cells plus its totals.
   const windowDays = getCalendarWindowDays(today);
   const calendarEl = document.getElementById('budget-calendar');
@@ -6122,7 +6137,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 40;
+const APP_VERSION = 41;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

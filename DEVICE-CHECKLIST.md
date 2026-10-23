@@ -4,7 +4,7 @@ These are the things the automated tests cannot prove, because they need a real 
 real sync server. It takes about ten minutes. Use made-up bills while you try this, and do not paste your passphrase
 anywhere but the app's own Passphrase box.
 
-Mark each step done as you go. If a step fails, write down what you saw (and which phone and browser) and tell Claude.
+This list has been worked through on the owner's phone (install, offline use and a live sync all passed); run it again after big changes. Mark each step done as you go. If a step fails, write down what you saw (and which phone and browser) and tell Claude.
 
 ## On one phone
 

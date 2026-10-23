@@ -1140,12 +1140,13 @@ input[type="date"]::-webkit-date-and-time-value {
   box-shadow: 0 0 0 2px var(--accent) inset;
 }
 
-/* Month totals (bills, income, net, left after plan) next to the month name. */
+/* Month totals (bills, income, net, left after plan, carried-in corrections) next to the month name. */
 
 .budget-month-total,
 .budget-month-income-total,
 .budget-month-net-total,
-.budget-month-left-total {
+.budget-month-left-total,
+.budget-month-adjusted {
   margin: 0;
   color: var(--muted);
   font-size: 0.85rem;
