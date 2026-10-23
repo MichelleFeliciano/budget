@@ -1323,6 +1323,52 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .small-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* The split editor under a spending row: one line per part (category and amount), then what is left to place. */
+
+.bank-split {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* One part of a split: its category box and its amount box side by side. */
+
+.bank-split-part {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The amount box of a part is narrow, so it fits beside the category. */
+
+.bank-split-part input { width: 110px; }
+
+/* The first-steps list on Home. */
+
+.setup-checklist {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--surface);
+}
+
+/* A step is a line of text with its Go button at the end. */
+
+.setup-checklist li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+/* A finished step is dimmed. */
+
+.setup-done { color: var(--muted); }
+
 /* The rows of the Money tab (a debt, a forecast week, a month's trend, a subscription): a bold line then the details. */
 
 .debt-row,

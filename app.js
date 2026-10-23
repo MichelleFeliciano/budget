@@ -2751,6 +2751,7 @@ function savePlanCategory(fields, id) {
     amount: Math.round(Number(fields.amountRaw) * 100) / 100, // whole cents, like bills
     frequency: fields.frequency,
     business: fields.type === 'business',
+    rollover: !!fields.rollover,
     notes: fields.notes.trim().slice(0, 500),
   };
   const alt = fields.altRaw === '' ? undefined : Math.round(Number(fields.altRaw) * 100) / 100;
@@ -2821,7 +2822,7 @@ function renderPlan() {
     const editForm = node.querySelector('.recurring-income-edit-form');
     const editError = node.querySelector('.plan-edit-error');
     node.querySelector('.recurring-income-name').textContent = record.planName;
-    node.querySelector('.plan-type').textContent = record.business ? 'Business' : 'Personal';
+    node.querySelector('.plan-type').textContent = `${record.business ? 'Business' : 'Personal'}${record.rollover ? ' \u00b7 carries unspent forward' : ''}`;
     node.querySelector('.plan-amounts').textContent = `${money(weekly)} per week · ${money(monthly)} per month`;
     node.querySelector('.plan-entered').textContent = usingWhatIf
       ? `What-if amount in use (the plan says ${money(record.amount)} ${record.frequency})`
@@ -2843,11 +2844,13 @@ function renderPlan() {
     const typeBox = node.querySelector('.plan-edit-type');
     const altBox = node.querySelector('.plan-edit-alt');
     const notesBox = node.querySelector('.plan-edit-notes');
+    const rolloverBox = node.querySelector('.plan-edit-rollover');
     node.querySelector('.edit-btn').addEventListener('click', () => {
       nameBox.value = record.planName;
       amountBox.value = String(record.amount);
       frequencyBox.value = record.frequency;
       typeBox.value = record.business ? 'business' : 'personal';
+      rolloverBox.checked = !!record.rollover;
       altBox.value = typeof record.altAmount === 'number' ? String(record.altAmount) : '';
       notesBox.value = record.notes || '';
       editError.hidden = true;
@@ -2866,7 +2869,7 @@ function renderPlan() {
       viewSection.hidden = false;
       const problem = savePlanCategory({
         name: nameBox.value, amountRaw: amountBox.value, frequency: frequencyBox.value,
-        type: typeBox.value, altRaw: altBox.value, notes: notesBox.value,
+        type: typeBox.value, rollover: rolloverBox.checked, altRaw: altBox.value, notes: notesBox.value,
       }, record.id);
       if (problem) {
         viewSection.hidden = true;
@@ -2913,6 +2916,7 @@ document.getElementById('plan-add-form').addEventListener('submit', (e) => {
     amountRaw: document.getElementById('plan-amount-input').value,
     frequency: document.getElementById('plan-frequency-input').value,
     type: document.getElementById('plan-type-input').value,
+    rollover: document.getElementById('plan-rollover-input').checked,
     altRaw: document.getElementById('plan-alt-input').value,
     notes: document.getElementById('plan-notes-input').value,
   });
@@ -3627,6 +3631,9 @@ function renderBudget() {
   renderBusiness();
   renderMoney();
   renderGoalsOnHome();
+  renderWeeklyReview();
+  renderPaycheckPlanner();
+  renderSetupChecklist();
   renderIncomeQuickAdd();
   restoreOpenCardForms(openCardForms);
 
@@ -4176,6 +4183,7 @@ function renderSpentVsPlan(expenses) {
   const rows = categories.map((plan) => ({
     plan, name: plan.planName, records: expenses.filter((r) => r.planId === plan.id),
     plannedWeek: planWeekly(plan.amount, plan.frequency), plannedMonth: planMonthly(plan.amount, plan.frequency),
+    carry: planCarry(plan),
   }));
   const knownIds = new Set(categories.map((plan) => plan.id));
   const orphans = expenses.filter((r) => !knownIds.has(r.planId));
@@ -4189,15 +4197,20 @@ function renderSpentVsPlan(expenses) {
     totalWeek += spentWeek; totalMonth += spentMonth;
     if (row.plannedWeek !== null) { plannedWeekAll += row.plannedWeek; plannedMonthAll += row.plannedMonth; }
 
-    const weekStatus = spendStatus(spentWeek, row.plannedWeek);
-    const monthStatus = spendStatus(spentMonth, row.plannedMonth);
+    // What a rollover category carried in counts toward the period it was entered in (its week or its month).
+    const carryWeek = row.plan && row.plan.rollover && row.plan.frequency === 'weekly' ? row.carry : 0;
+    const carryMonth = row.plan && row.plan.rollover && row.plan.frequency === 'monthly' ? row.carry : 0;
+    const effWeek = row.plannedWeek === null ? null : row.plannedWeek + carryWeek;
+    const effMonth = row.plannedMonth === null ? null : row.plannedMonth + carryMonth;
+    const weekStatus = spendStatus(spentWeek, effWeek);
+    const monthStatus = spendStatus(spentMonth, effMonth);
     const lines = [
       {
-        text: (row.plannedWeek === null ? `This week: ${formatMoney(spentWeek)}` : `This week: ${formatMoney(spentWeek)} of ${formatMoney(row.plannedWeek)} planned`) + weekStatus.note,
+        text: (row.plannedWeek === null ? `This week: ${formatMoney(spentWeek)}` : `This week: ${formatMoney(spentWeek)} of ${formatMoney(effWeek)} planned${carryWeek > 0 ? ` (${formatMoney(carryWeek)} carried forward)` : ''}`) + weekStatus.note,
         cls: weekStatus.cls,
       },
       {
-        text: (row.plannedMonth === null ? `This month: ${formatMoney(spentMonth)}` : `This month: ${formatMoney(spentMonth)} of ${formatMoney(row.plannedMonth)} planned`) + monthStatus.note,
+        text: (row.plannedMonth === null ? `This month: ${formatMoney(spentMonth)}` : `This month: ${formatMoney(spentMonth)} of ${formatMoney(effMonth)} planned${carryMonth > 0 ? ` (${formatMoney(carryMonth)} carried forward)` : ''}`) + monthStatus.note,
         cls: monthStatus.cls,
       },
     ];
@@ -4934,6 +4947,8 @@ const BANK_MAX_ROWS = 2000;
 let bankRows = [];
 let lastBankImportIds = [];
 let lastBankIncome = [];
+// The newest balance in the file being reviewed, as { dateKey, cents }, or null.
+let bankBalance = null;
 
 // Splits CSV text into rows of cells: quoted cells may hold commas, doubled quotes and line breaks, a leading byte
 // order mark is ignored, and blank lines are dropped.
@@ -5022,6 +5037,8 @@ function parseChaseCsv(text) {
   const dateCol = ['transaction date', 'posting date', 'post date', 'date'].map((n) => header.indexOf(n)).find((i) => i >= 0);
   const descCol = header.indexOf('description');
   const amountCol = header.indexOf('amount');
+  const balanceCol = header.indexOf('balance');
+  let balance = null;
   if (dateCol === undefined || descCol < 0 || amountCol < 0) {
     return { rows: [], problem: 'That does not look like a Chase transactions file (it needs a date, a Description and an Amount column).', moneyIn: 0 };
   }
@@ -5034,6 +5051,11 @@ function parseChaseCsv(text) {
     const dateKey = bankDateKey(cells[dateCol] || '');
     const cents = bankCents(cells[amountCol] || '');
     const desc = (cells[descCol] || '').trim().replace(/\s+/g, ' ');
+    if (balanceCol >= 0 && dateKey) {
+      // The newest balance in the file (a checking file lists a running balance; the first row of a day wins a tie).
+      const balanceCents = bankCents(cells[balanceCol] || '');
+      if (balanceCents !== null && (!balance || dateKey > balance.dateKey)) balance = { dateKey, cents: balanceCents };
+    }
     if (!dateKey || cents === null || cents === 0) return;
     const kind = cents > 0 ? 'in' : 'out';
     if (kind === 'in') moneyIn += 1;
@@ -5048,21 +5070,89 @@ function parseChaseCsv(text) {
       imported: false, flagged: bankLooksLikeTransfer(desc),
     });
   });
-  return { rows, problem: rows.length || moneyIn ? '' : 'No transactions were found in that file.', moneyIn };
+  return { rows, problem: rows.length || moneyIn ? '' : 'No transactions were found in that file.', moneyIn, balance };
 }
 
-// Marks the rows already in the app (their key is on an expense or on an income entry, a deleted one included) and
-// drops a remembered category whose Spending Plan category no longer exists.
+// Marks the rows already in the app (their key is on an expense or on an income entry, a deleted one included; a split
+// row's expenses carry the key plus ~0, ~1...) and drops a remembered category whose Spending Plan category no longer
+// exists.
 function markImportedBankRows(rows) {
   const have = new Set(income.flatMap((r) => [r.bankKey, ...(r.bankKeys || [])]).filter(Boolean));
   rows.forEach((row) => {
-    row.imported = have.has(row.key);
+    row.imported = have.has(row.key) || have.has(`${row.key}~0`);
     if (row.kind === 'out' && row.planId && !income.some((r) => r.id === row.planId && r.planName && !r.deleted)) row.planId = '';
   });
 }
 
-// Draws the rows being reviewed (money out with a category box, money in with a source box), the summary line and the
-// buttons.
+// The parts of a split row as { planId, cents } when they are usable (every part has a category and an amount, and the
+// amounts add up to the row exactly), else null.
+function bankSplitCents(row) {
+  if (!row.parts || row.parts.length < 2) return null;
+  const parts = row.parts.map((p) => ({ planId: p.planId, cents: Math.round(Number(p.amount) * 100) }));
+  const ok = parts.every((p) => p.planId && Number.isFinite(p.cents) && p.cents > 0) && parts.reduce((sum, p) => sum + p.cents, 0) === row.cents;
+  return ok ? parts : null;
+}
+
+// Draws the split editor of a spending row: a category and an amount for each part, what is left to place, and the
+// buttons to add a part or go back to a single category.
+function renderBankSplit(item, row, categories) {
+  const box = document.createElement('div');
+  box.className = 'bank-split';
+  const remaining = document.createElement('span');
+  const refresh = () => {
+    const placed = row.parts.reduce((sum, p) => sum + Math.round((Number(p.amount) || 0) * 100), 0);
+    const left = row.cents - placed;
+    remaining.textContent = left === 0 ? 'All placed' : `${formatMoney(Math.abs(left) / 100)} ${left > 0 ? 'left to place' : 'too much'}`;
+    remaining.className = left === 0 ? 'amount-positive' : 'amount-negative';
+    updateBankButtons();
+  };
+  row.parts.forEach((part, index) => {
+    const line = document.createElement('div');
+    line.className = 'bank-split-part';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', `Category for part ${index + 1} of ${row.desc || 'this transaction'}`);
+    const choose = document.createElement('option');
+    choose.value = '';
+    choose.textContent = 'Choose a category';
+    select.appendChild(choose);
+    categories.forEach((plan) => {
+      const option = document.createElement('option');
+      option.value = plan.id;
+      option.textContent = plan.planName;
+      select.appendChild(option);
+    });
+    select.value = part.planId;
+    select.addEventListener('change', () => { part.planId = select.value; refresh(); });
+    const amount = document.createElement('input');
+    amount.type = 'number';
+    amount.inputMode = 'decimal';
+    amount.min = '0.01';
+    amount.step = '0.01';
+    amount.placeholder = 'Amount';
+    amount.setAttribute('aria-label', `Amount for part ${index + 1} of ${row.desc || 'this transaction'}`);
+    amount.value = part.amount;
+    amount.addEventListener('input', () => { part.amount = amount.value; refresh(); });
+    line.append(select, amount);
+    box.appendChild(line);
+  });
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'small-btn';
+  more.textContent = 'Add a part';
+  more.hidden = row.parts.length >= 4;
+  more.addEventListener('click', () => { row.parts.push({ planId: '', amount: '' }); renderBankRows(); });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'small-btn';
+  cancel.textContent = 'Use one category';
+  cancel.addEventListener('click', () => { row.parts = null; renderBankRows(); });
+  box.append(remaining, more, cancel);
+  item.appendChild(box);
+  refresh();
+}
+
+// Draws the rows being reviewed (money out with a category box or a split, money in with a source box), the summary line,
+// the balance offer and the buttons.
 function renderBankRows() {
   const list = document.getElementById('bank-list');
   const incomeList = document.getElementById('bank-income-list');
@@ -5074,7 +5164,7 @@ function renderBankRows() {
     item.className = 'bank-row';
     const label = document.createElement('span');
     const amount = row.kind === 'in' ? `+${formatMoney(row.cents / 100)}` : formatMoney(row.cents / 100);
-    label.textContent = `${formatDateKeyShort(row.dateKey)} \u00b7 ${row.desc || 'No description'} \u00b7 ${amount}${row.flagged ? ' (looks like a payment or transfer)' : ''}`;
+    label.textContent = `${formatDateKeyShort(row.dateKey)} · ${row.desc || 'No description'} · ${amount}${row.flagged ? ' (looks like a payment or transfer)' : ''}`;
     item.appendChild(label);
     if (row.imported) {
       const done = document.createElement('span');
@@ -5092,6 +5182,8 @@ function renderBankRows() {
       box.value = row.source;
       box.addEventListener('input', () => { row.source = box.value; updateBankButtons(); });
       item.appendChild(box);
+    } else if (row.parts) {
+      renderBankSplit(item, row, categories);
     } else {
       const select = document.createElement('select');
       select.setAttribute('aria-label', `Category for ${row.desc || 'this transaction'} on ${formatDateKeyShort(row.dateKey)}`);
@@ -5108,6 +5200,14 @@ function renderBankRows() {
       select.value = row.planId;
       select.addEventListener('change', () => { row.planId = select.value; updateBankButtons(); });
       item.appendChild(select);
+      const split = document.createElement('button');
+      split.type = 'button';
+      split.className = 'small-btn';
+      split.textContent = 'Split';
+      split.setAttribute('aria-label', `Split ${row.desc || 'this transaction'} between categories`);
+      split.disabled = categories.length === 0;
+      split.addEventListener('click', () => { row.parts = [{ planId: row.planId, amount: '' }, { planId: '', amount: '' }]; renderBankRows(); });
+      item.appendChild(split);
     }
     (row.kind === 'in' ? incomeList : list).appendChild(item);
   });
@@ -5124,13 +5224,31 @@ function renderBankRows() {
   document.getElementById('bank-bulk').hidden = !bankRows.some((r) => r.kind === 'out' && !r.imported) || !categories.length;
   document.getElementById('bank-income-heading').hidden = !bankRows.some((r) => r.kind === 'in');
   document.getElementById('bank-bulk-source-row').hidden = !bankRows.some((r) => r.kind === 'in' && !r.imported);
+
+  // The balance in the file: offered for an asset account (checking, savings), so net worth and the forecast stay current.
+  const balanceBox = document.getElementById('bank-balance');
+  const assets = accountRecords().filter((a) => a.acctKind === 'asset');
+  balanceBox.hidden = !bankBalance || assets.length === 0;
+  if (bankBalance) {
+    document.getElementById('bank-balance-text').textContent = `The newest balance in this file is ${formatSignedCurrency(bankBalance.cents / 100)} on ${formatDateKeyShort(bankBalance.dateKey)}.`;
+    const select = document.getElementById('bank-balance-account');
+    const chosen = select.value;
+    select.innerHTML = '';
+    assets.forEach((account) => {
+      const option = document.createElement('option');
+      option.value = account.id;
+      option.textContent = account.acctName;
+      select.appendChild(option);
+    });
+    if (chosen) select.value = chosen;
+  }
   updateBankButtons();
 }
 
 // The Import button says how many expenses and deposits it would add and is off when there are none; Undo shows after
 // an import.
 function updateBankButtons() {
-  const outRows = bankRows.filter((r) => r.kind === 'out' && r.planId && !r.imported).length;
+  const outRows = bankRows.filter((r) => r.kind === 'out' && !r.imported && (r.parts ? bankSplitCents(r) : r.planId)).length;
   const inRows = bankRows.filter((r) => r.kind === 'in' && cleanSource(r.source) && !r.imported).length;
   const importBtn = document.getElementById('bank-import-btn');
   importBtn.hidden = !bankRows.some((r) => !r.imported);
@@ -5154,13 +5272,14 @@ function setBankStatus(text, tone) {
 // Reads the text of a chosen file into the review list (see parseChaseCsv). Returns the problem as a sentence, or ''.
 function loadBankText(text) {
   const parsed = parseChaseCsv(text);
-  if (parsed.problem) { bankRows = []; renderBankRows(); return parsed.problem; }
+  bankBalance = parsed.balance || null;
+  if (parsed.problem) { bankRows = []; bankBalance = null; renderBankRows(); return parsed.problem; }
   markImportedBankRows(parsed.rows);
   bankRows = parsed.rows;
   const spending = bankRows.filter((r) => r.kind === 'out').length;
   const already = bankRows.filter((r) => r.imported).length;
   document.getElementById('bank-summary').textContent =
-    `${spending} spending row${spending === 1 ? '' : 's'} and ${parsed.moneyIn} money-in row${parsed.moneyIn === 1 ? '' : 's'} found${already ? ` (${already} already imported)` : ''}. Pick a category for each spending row and a source for each deposit to import, and leave the rest alone.`;
+    `${spending} spending row${spending === 1 ? '' : 's'} and ${parsed.moneyIn} money-in row${parsed.moneyIn === 1 ? '' : 's'} found${already ? ` (${already} already imported)` : ''}. Pick a category for each spending row (or Split it between several) and a source for each deposit to import, and leave the rest alone.`;
   renderBankRows();
   return '';
 }
@@ -5171,26 +5290,42 @@ function liveIncomeEntry(dateKey, source) {
   return uniqueIncomeEntries(income).find((r) => !r.deleted && entryKey(r.dateKey, r.source) === key) || null;
 }
 
-// Makes an expense for every spending row with a category and adds every deposit row with a source to its day's
-// income entry (several deposits on one day and source add up, and an amount already there is added to, not
-// replaced), remembers each description's category or source on this device, and notes what changed so the whole
-// import can be undone. Returns { expenses, deposits }: how many rows of each kind went in.
+// Makes an expense for every spending row with a category (a split row makes one expense per part, keyed `<key>~0`,
+// `~1`...) and adds every deposit row with a source to its day's income entry (several deposits on one day and source
+// add up, and an amount already there is added to, not replaced), remembers each description's category or source on
+// this device, and notes what changed so the whole import can be undone. A split whose parts do not add up to the row is
+// left out and counted. Returns { expenses, deposits, skipped }: how many rows of each kind went in, and how many splits
+// were left out.
 function importBankRows() {
   const now = new Date().toISOString();
   const remembered = loadBankCategories();
   const rememberedSources = loadBankSources();
   const madeIds = [];
-  bankRows.filter((r) => r.kind === 'out' && r.planId && !r.imported).forEach((row) => {
-    const plan = income.find((r) => r.id === row.planId && r.planName && !r.deleted);
-    if (!plan) return;
+  let importedOut = 0;
+  let skipped = 0;
+  const make = (row, plan, cents, key, note) => {
     const record = {
-      id: `expense-${makeId()}`, spentOn: row.dateKey, amount: row.cents / 100, planId: plan.id, categoryName: plan.planName,
-      notes: row.desc.slice(0, 200), bankKey: row.key,
+      id: `expense-${makeId()}`, spentOn: row.dateKey, amount: cents / 100, planId: plan.id, categoryName: plan.planName,
+      notes: note.slice(0, 200), bankKey: key,
       dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
     };
     income.push(record);
     madeIds.push(record.id);
+  };
+  bankRows.filter((r) => r.kind === 'out' && !r.imported).forEach((row) => {
+    if (row.parts) {
+      const parts = bankSplitCents(row);
+      if (!parts || !parts.every((p) => income.some((r) => r.id === p.planId && r.planName && !r.deleted))) { skipped += 1; return; }
+      parts.forEach((part, index) => make(row, income.find((r) => r.id === part.planId), part.cents, `${row.key}~${index}`, row.desc));
+      row.imported = true;
+      importedOut += 1;
+      return;
+    }
+    const plan = row.planId ? income.find((r) => r.id === row.planId && r.planName && !r.deleted) : null;
+    if (!plan) return;
+    make(row, plan, row.cents, row.key, row.desc);
     row.imported = true;
+    importedOut += 1;
     remembered[bankDescriptionKey(row.desc)] = plan.id;
   });
 
@@ -5235,7 +5370,7 @@ function importBankRows() {
   }
   renderBudget();
   renderBankRows();
-  return { expenses: madeIds.length, deposits };
+  return { expenses: importedOut, deposits, skipped };
 }
 
 // Takes back the last import: every expense it made is deleted (as a tombstone, so it syncs), every income entry it
@@ -5303,7 +5438,8 @@ document.getElementById('bank-import-btn').addEventListener('click', () => {
   const parts = [];
   if (made.expenses) parts.push(`${made.expenses} expense${made.expenses === 1 ? '' : 's'}`);
   if (made.deposits) parts.push(`${made.deposits} deposit${made.deposits === 1 ? '' : 's'}`);
-  setBankStatus(parts.length ? `Imported ${parts.join(' and ')}. Undo this import if it is not right, or fix single ones in Recent Expenses or Income Received.` : 'Nothing to import.', parts.length ? 'ok' : 'failed');
+  const skippedNote = made.skipped ? ` ${made.skipped} split row${made.skipped === 1 ? ' was' : 's were'} left out because the parts did not add up.` : '';
+  setBankStatus(parts.length ? `Imported ${parts.join(' and ')}. Undo this import if it is not right, or fix single ones in Recent Expenses or Income Received.${skippedNote}` : `Nothing to import.${skippedNote}`, parts.length ? 'ok' : 'failed');
 });
 document.getElementById('bank-undo-btn').addEventListener('click', () => {
   const taken = undoBankImport();
@@ -5945,6 +6081,221 @@ document.getElementById('bank-rule-add-form').addEventListener('submit', (e) => 
   errorEl.textContent = problem;
   errorEl.hidden = !problem;
   if (!problem) { document.getElementById('bank-rule-text').value = ''; document.getElementById('bank-rule-text').focus(); }
+});
+
+// ---- Setting an account's balance from the Chase file ----
+
+// The Set balance button: the newest balance in the file becomes the chosen asset account's balance for that day.
+document.getElementById('bank-balance-btn').addEventListener('click', () => {
+  const accountId = document.getElementById('bank-balance-account').value;
+  if (!bankBalance || !accountRecords().some((a) => a.id === accountId)) return;
+  setAccountBalance(accountId, bankBalance.cents / 100, bankBalance.dateKey);
+  renderBudget();
+  setBankStatus(`Set the balance to ${formatSignedCurrency(bankBalance.cents / 100)} as of ${formatDateKeyShort(bankBalance.dateKey)}.`, 'ok');
+});
+
+// ---- Plan money that carries forward (envelopes) ----
+// A Spending Plan category marked "carry unspent money forward" does not lose what it did not spend: each period
+// (a week for a weekly plan, a month for a monthly one) starts with its own amount plus what the earlier periods left
+// over. Overspending is not carried as a debt. Counting starts in the period the category was added (at most
+// MAX_CARRY_PERIODS back).
+
+// The most periods looked back when working out what has carried forward.
+const MAX_CARRY_PERIODS = 104;
+
+// What a rollover category has carried into the current period (0 for any other category), in its own period.
+function planCarry(plan) {
+  if (!plan.rollover) return 0;
+  const todayK = todayKey();
+  const records = expenseRecords().filter((r) => r.planId === plan.id);
+  const added = dateKeyFromLocalDate(new Date(plan.dateAdded || Date.now()));
+  let carry = 0;
+  if (plan.frequency === 'weekly') {
+    const current = weekStartKey(todayK);
+    let start = weekStartKey(added);
+    const earliest = shiftDateKey(current, -7 * MAX_CARRY_PERIODS);
+    if (start < earliest) start = earliest;
+    for (let ws = start; ws < current; ws = shiftDateKey(ws, 7)) {
+      carry = Math.max(0, carry + plan.amount - sumExpensesIn(records, ws, shiftDateKey(ws, 6)));
+    }
+  } else {
+    const today = parseDateKey(todayK);
+    const addedDate = parseDateKey(added);
+    let months = (today.y - addedDate.y) * 12 + (today.m - addedDate.m);
+    months = Math.min(months, MAX_CARRY_PERIODS);
+    for (let back = months; back >= 1; back -= 1) {
+      const [start, end] = monthBounds(dateKeyFromLocalDate(new Date(today.y, today.m - back, 1)));
+      carry = Math.max(0, carry + plan.amount - sumExpensesIn(records, start, end));
+    }
+  }
+  return Math.round(carry * 100) / 100;
+}
+
+// ---- Last week in review ----
+
+// Draws the Last Week fold on Home: what came in, what the bills took, what was spent and saved, how the carried-in
+// amount was corrected, and each Spending Plan category's spending against its weekly plan, the biggest overshoot first.
+function renderWeeklyReview() {
+  const list = document.getElementById('review-list');
+  list.innerHTML = '';
+  const thisWeek = weekStartKey(todayKey());
+  const start = shiftDateKey(thisWeek, -7);
+  const end = shiftDateKey(start, 6);
+  const incomeNow = uniqueIncomeEntries(income).filter((r) => !r.deleted);
+  const recurringNow = recurringIncome.filter((r) => !r.deleted);
+  const inflow = totalIncomeInRange(start, end, incomeNow, recurringNow);
+  const due = amountDueInRange(start, end, bills.filter((b) => !b.deleted));
+  const expenses = expenseRecords();
+  const spent = sumExpensesIn(expenses, start, end);
+  const saved = income.filter((r) => r.savedFor && !r.deleted && r.savedOn >= start && r.savedOn <= end).reduce((sum, r) => sum + r.amount, 0);
+  const adjustment = weekAdjustments().get(start);
+  const add = (text, cls) => {
+    const row = document.createElement('li');
+    row.textContent = text;
+    if (cls) row.className = cls;
+    list.appendChild(row);
+  };
+  document.getElementById('review-heading').textContent = `Last Week (${formatDateKeyShort(start)} to ${formatDateKeyShort(end)})`;
+  add(`Income ${formatMoney(inflow)}, bills due ${formatMoney(due)}, spent ${formatMoney(spent)}, saved ${formatMoney(saved)}.`);
+  if (adjustment) add(`You corrected the carried-in amount by ${formatSignedCurrency(adjustment.amount)}${adjustment.notes ? ` (${adjustment.notes})` : ''}.`);
+  const rows = planCategories().map((plan) => {
+    const planned = planWeekly(plan.amount, plan.frequency);
+    const categorySpent = sumExpensesIn(expenses.filter((r) => r.planId === plan.id), start, end);
+    return { name: plan.planName, planned, spent: categorySpent, over: categorySpent - planned };
+  }).sort((a, b) => b.over - a.over);
+  rows.forEach((row) => {
+    const over = Math.round(row.over * 100) / 100;
+    if (over > 0) add(`${row.name}: spent ${formatMoney(row.spent)} of ${formatMoney(row.planned)}, over by ${formatMoney(over)}.`, 'amount-negative');
+    else add(`${row.name}: spent ${formatMoney(row.spent)} of ${formatMoney(row.planned)}${over < 0 ? `, ${formatMoney(-over)} under` : ''}.`);
+  });
+  if (!rows.length) add('Add categories on the Plan tab to see how each did against its plan.');
+}
+
+// ---- Paycheck planner ----
+
+// The next two dates a recurring income source pays on or after today, as [first, second] (either may be missing).
+function nextPaydays(source) {
+  const found = [];
+  const todayK = todayKey();
+  for (let i = 0; i <= 90 && found.length < 2; i += 1) {
+    const dateKey = shiftDateKey(todayK, i);
+    if (occursOnDate(source, dateKey)) found.push(dateKey);
+  }
+  return found;
+}
+
+// How one paycheck could be divided until the next one: { amount, from, to, days, bills, billCount, plan, goals, left },
+// where goals lists { name, amount } for each dated savings goal (what to put aside to reach it by its date, over the
+// days this paycheck covers) and left is what remains. Null when the source has no upcoming payday.
+function paycheckPlan(source) {
+  const [first, second] = nextPaydays(source);
+  if (!first) return null;
+  const to = second ? shiftDateKey(second, -1) : shiftDateKey(first, 13);
+  const days = utcDayDiff(first, to) + 1;
+  const bills_ = bills.filter((b) => !b.deleted);
+  const billTotal = amountDueInRange(first, to, bills_);
+  let billCount = 0;
+  bills_.forEach((b) => { for (let d = first; d <= to; d = shiftDateKey(d, 1)) if (occursOnDate(b, d)) billCount += 1; });
+  const plan = planCategories().reduce((sum, r) => sum + planWeekly(planAmount(r), r.frequency), 0) * (days / 7);
+  const goals = goalRecords().filter((g) => g.goalDate).map((g) => {
+    const left = goalTarget(g) - goalSaved(g.id);
+    const daysLeft = utcDayDiff(first, g.goalDate);
+    if (!(left > 0) || daysLeft < 1) return null;
+    return { name: g.goalName, amount: Math.round(Math.min(left, (left / daysLeft) * days) * 100) / 100 };
+  }).filter(Boolean);
+  const goalTotal = goals.reduce((sum, g) => sum + g.amount, 0);
+  return {
+    amount: source.amount, from: first, to, days, bills: billTotal, billCount, plan: Math.round(plan * 100) / 100, goals,
+    left: Math.round((source.amount - billTotal - plan - goalTotal) * 100) / 100,
+  };
+}
+
+// Draws the Paycheck Planner on the Income tab for the chosen recurring income source.
+function renderPaycheckPlanner() {
+  const select = document.getElementById('planner-source-input');
+  const sources = recurringIncome.filter((r) => !r.deleted && ['weekly', 'biweekly', 'monthly'].includes(r.frequency)).sort((a, b) => a.name.localeCompare(b.name));
+  const keep = select.value;
+  select.innerHTML = '';
+  sources.forEach((source) => {
+    const option = document.createElement('option');
+    option.value = source.id;
+    option.textContent = `${source.name} (${formatMoney(source.amount)})`;
+    select.appendChild(option);
+  });
+  if (keep && sources.some((s) => s.id === keep)) select.value = keep;
+  select.hidden = sources.length === 0;
+  const list = document.getElementById('planner-list');
+  list.innerHTML = '';
+  const note = document.getElementById('planner-note');
+  const source = sources.find((s) => s.id === select.value);
+  if (!source) { note.textContent = 'Add a recurring income source (a paycheck) below to plan how it is divided.'; return; }
+  const result = paycheckPlan(source);
+  if (!result) { note.textContent = 'No payday for that source in the next three months.'; return; }
+  note.textContent = `For the paycheck on ${formatDateKeyShort(result.from)}, until the day before the next one (${result.days} days, to ${formatDateKeyShort(result.to)}).`;
+  const add = (text, cls) => {
+    const row = document.createElement('li');
+    row.textContent = text;
+    if (cls) row.className = cls;
+    list.appendChild(row);
+  };
+  add(`Paycheck: ${formatMoney(result.amount)}`);
+  add(`Bills due in that time: ${formatMoney(result.bills)} (${result.billCount} payment${result.billCount === 1 ? '' : 's'})`);
+  add(`Spending Plan for ${result.days} days: ${formatMoney(result.plan)}`);
+  result.goals.forEach((goal) => add(`Toward ${goal.name} (to reach it by its date): ${formatMoney(goal.amount)}`));
+  add(`Left over: ${formatSignedCurrency(result.left)}`, signedAmountClass(result.left));
+}
+
+// The choice of paycheck redraws the planner.
+document.getElementById('planner-source-input').addEventListener('change', renderPaycheckPlanner);
+
+// ---- Setup checklist ----
+
+// localStorage key set when the setup checklist on Home is closed (kept per device, not synced).
+const SETUP_DISMISSED_KEY = 'budgetApp.setupChecklistDismissed.v1';
+
+// The setup steps in order, as { text, done, tab } where tab is the tab that helps with it.
+function setupSteps() {
+  return [
+    { text: 'Add a bill', done: bills.some((b) => !b.deleted), tab: 'bills' },
+    { text: 'Add your income (a recurring paycheck or what you received)', done: recurringIncome.some((r) => !r.deleted) || income.some((r) => r.dateKey && !r.deleted), tab: 'income' },
+    { text: 'Add a Spending Plan category', done: planCategories().length > 0, tab: 'plan' },
+    { text: 'Set up sync with a passphrase, so your other devices can match', done: !!loadSyncConfig(), tab: 'home' },
+    { text: 'Sync once', done: lastSyncTime() !== null, tab: 'home' },
+    { text: 'Save a full backup file (Menu, Share backup)', done: daysSinceBackup(EXPORT_AT_KEY) !== null, tab: 'home' },
+  ];
+}
+
+// Draws the setup checklist on Home until every step is done or it is closed.
+function renderSetupChecklist() {
+  const box = document.getElementById('setup-checklist');
+  const list = document.getElementById('setup-list');
+  list.innerHTML = '';
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(SETUP_DISMISSED_KEY) === '1'; } catch { /* shown: storage is blocked */ }
+  const steps = setupSteps();
+  const remaining = steps.filter((s) => !s.done).length;
+  box.hidden = dismissed || remaining === 0;
+  steps.forEach((step) => {
+    const row = document.createElement('li');
+    row.className = step.done ? 'setup-done' : '';
+    row.textContent = `${step.done ? '✓' : '○'} ${step.text}`;
+    if (!step.done && step.tab !== 'home') {
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'small-btn';
+      go.textContent = 'Go';
+      go.setAttribute('aria-label', `Open the tab for: ${step.text}`);
+      go.addEventListener('click', () => { showTab(step.tab); window.scrollTo({ top: 0, behavior: scrollBehavior() }); });
+      row.appendChild(go);
+    }
+    list.appendChild(row);
+  });
+}
+
+// The close button hides the checklist on this device.
+document.getElementById('setup-close-btn').addEventListener('click', () => {
+  try { localStorage.setItem(SETUP_DISMISSED_KEY, '1'); } catch { /* it comes back next time */ }
+  renderSetupChecklist();
 });
 
 // The expense date starts on today.
@@ -7266,7 +7617,7 @@ function isValidImportRecord(collectionName, rec) {
     }
     if (rec.planName !== undefined) {
       return nonEmptyText(rec.planName) && isPositiveMoney(rec.amount) && PLAN_FREQUENCIES.includes(rec.frequency)
-        && (rec.business === undefined || typeof rec.business === 'boolean') && textOrMissing(rec.notes)
+        && (rec.business === undefined || typeof rec.business === 'boolean') && (rec.rollover === undefined || typeof rec.rollover === 'boolean') && textOrMissing(rec.notes)
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
@@ -7432,7 +7783,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 47;
+const APP_VERSION = 48;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

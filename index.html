@@ -127,6 +127,12 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
       <!-- The tabs. Home: the calendar and its week totals. -->
       <div class="tab-panel" id="tab-home">
+        <!-- A short list of first steps, shown until every one is done or it is closed on this device (renderSetupChecklist). -->
+        <div class="setup-checklist" id="setup-checklist" hidden>
+          <h3 class="chart-title">Getting set up</h3>
+          <ul class="flat-list" id="setup-list"></ul>
+          <button type="button" class="small-btn" id="setup-close-btn">Hide this</button>
+        </div>
         <div class="collection-toolbar">
           <h2 id="budget-month-label">This month</h2>
           <p class="budget-month-total" id="budget-month-total"></p>
@@ -142,6 +148,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <h3 class="chart-title">Savings goals</h3>
           <ul class="card-list flat-list" id="home-goal-list"></ul>
         </div>
+
+        <details class="fold" id="fold-weekly-review">
+          <summary class="fold-summary"><h2 id="review-heading">Last Week</h2></summary>
+          <ul class="flat-list" id="review-list"></ul>
+        </details>
 
         <!-- Slide the three weeks shown earlier or later; Today brings them back (the totals above stay this month's). -->
         <div class="calendar-nav">
@@ -227,6 +238,14 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="empty-state" id="projected-income-empty-state" hidden>No projected income coming up.</p>
         </details>
 
+        <details class="fold" id="fold-planner">
+          <summary class="fold-summary"><h2>Paycheck Planner</h2></summary>
+          <p class="stats-line">How one paycheck could be divided until the next one: the bills that come due, your Spending Plan for those days, and what to put toward savings goals that have a date. What is left is yours.</p>
+          <select id="planner-source-input" aria-label="Which paycheck to plan"></select>
+          <p class="stats-line" id="planner-note"></p>
+          <ul class="flat-list" id="planner-list"></ul>
+        </details>
+
         <details class="fold" id="fold-recurring-income" open>
           <summary class="fold-summary"><h2>Recurring Income</h2></summary>
           <form id="recurring-income-add-form" class="add-form add-form-stacked">
@@ -275,6 +294,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             </select>
             <input type="number" inputmode="decimal" id="plan-alt-input" placeholder="What-if amount (optional, same period)" min="0" step="0.01" aria-label="What-if amount">
             <input type="text" id="plan-notes-input" maxlength="500" placeholder="Notes (optional)" aria-label="Notes">
+            <label class="check-field"><input type="checkbox" id="plan-rollover-input"> Carry unspent money forward to the next period</label>
             <p class="form-error" id="plan-form-error" hidden></p>
             <button type="submit">Add category</button>
           </form>
@@ -382,6 +402,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
           <input type="file" id="bank-file-input" accept=".csv,text/csv" aria-label="Chase transactions CSV file">
           <p class="stats-line" id="bank-summary"></p>
+          <div class="bank-bulk" id="bank-balance" hidden>
+            <span id="bank-balance-text"></span>
+            <select id="bank-balance-account" aria-label="Account to set to this balance"></select>
+            <button type="button" class="small-btn" id="bank-balance-btn">Set this account's balance</button>
+          </div>
           <div class="bank-bulk" id="bank-bulk" hidden>
             <select id="bank-bulk-category" aria-label="Category for every row that has none"></select>
             <button type="button" class="small-btn" id="bank-bulk-btn">Put every row without a category in this one</button>
@@ -749,6 +774,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       </select>
       <input type="number" inputmode="decimal" class="plan-edit-alt" placeholder="What-if amount (optional)" min="0" step="0.01" aria-label="Edit what-if amount">
       <input type="text" class="plan-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
+      <label class="check-field"><input type="checkbox" class="plan-edit-rollover"> Carry unspent money forward</label>
       <p class="form-error plan-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
