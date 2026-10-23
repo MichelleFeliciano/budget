@@ -229,3 +229,11 @@ A repeating expense is a record in the `income` list (`recurPlanId`, `amount`, `
 
 An expense is Business or Personal by its Spending Plan category's flag, so changing a category's flag on the Plan tab changes how its past expenses are counted too; nothing about the split is kept on the expense. The CSV has one line per expense in the chosen period and a text cell that begins with =, +, - or @ is prefixed with an apostrophe so a spreadsheet treats it as text rather than a formula. The backup, calendar and CSV downloads share one `downloadBlob` helper.
 
+## Bank import is a downloaded CSV, read on the device, expenses only
+
+There is no live connection to Chase: that would mean handing a bank login or an aggregator service access to the data, which this app (no server beyond its own sync copy, no third party) deliberately avoids. The CSV is read locally and nothing is kept from it except what an expense holds: its date, amount, category and the bank description as the note, plus a `bankKey` (date, cents, the first words of the description, and a count for identical rows) that stops the same row being imported twice, a deleted expense included. Undo this import deletes the batch and removes those keys so the rows can be imported again. Only money going out is imported (a negative amount); deposits, refunds and card payments are not, and rows that read like a payment or transfer are left on Skip because importing both the card purchases and the payment that settles them would count the same money twice. The category for each description is remembered on this device only.
+
+## Savings history entries can be edited
+
+A deposit or withdrawal can change its date and amount (a negative amount is money taken out), but never so far that the goal would have less than nothing saved.
+

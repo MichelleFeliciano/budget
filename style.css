@@ -1398,6 +1398,35 @@ input[type="date"]::-webkit-date-and-time-value {
   font-size: 0.9rem;
 }
 
+/* One row of a bank file being reviewed: the date, description and amount, then the category to give it. */
+
+.bank-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* The row's text takes the space the category box leaves. */
+
+.bank-row > span:first-child { flex: 1 1 220px; overflow-wrap: anywhere; }
+
+/* The category box on a bank row does not stretch across the page. */
+
+.bank-row select { max-width: 100%; }
+
+/* The "put every row in this category" choice and its button, side by side. */
+
+.bank-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
 /* A repeating expense that is due: what it is, then Log it and Skip. */
 
 .repeat-due {

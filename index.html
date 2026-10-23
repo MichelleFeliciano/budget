@@ -354,6 +354,21 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
         </details>
 
+        <details class="fold" id="fold-expense-bank">
+          <summary class="fold-summary"><h2>Import from Chase</h2></summary>
+          <p class="stats-line">Download your transactions from Chase as a CSV file (sign in to Chase, open the account, choose Download account activity, then CSV) and pick the file here. It is read on this device and never sent anywhere. Money going out is listed so you can give each row a category; money in is left out.</p>
+          <input type="file" id="bank-file-input" accept=".csv,text/csv" aria-label="Chase transactions CSV file">
+          <p class="stats-line" id="bank-summary"></p>
+          <div class="bank-bulk" id="bank-bulk" hidden>
+            <select id="bank-bulk-category" aria-label="Category for every row that has none"></select>
+            <button type="button" class="small-btn" id="bank-bulk-btn">Put every row without a category in this one</button>
+          </div>
+          <ul class="card-list flat-list" id="bank-list"></ul>
+          <button type="button" id="bank-import-btn" hidden disabled>Choose a category for at least one row</button>
+          <button type="button" class="small-btn" id="bank-undo-btn" hidden>Undo this import</button>
+          <p class="sync-status" id="bank-status" hidden></p>
+        </details>
+
         <details class="fold" id="fold-expense-business" open>
           <summary class="fold-summary"><h2>Business Summary</h2></summary>
           <p class="stats-line">What you spent on Business and Personal categories (set on the Plan tab) over a period, and a spreadsheet file (CSV) of every expense in it, for a tax preparer.</p>

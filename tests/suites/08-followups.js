@@ -170,7 +170,7 @@ hideUndoToast(); bills.length = 0; renderBudget();
 
 // ---- the long parts of the page fold up and remember it ----
 const payFold = $('fold-pay-period');
-check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, Savings Goals, the seven Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 15 && payFold.open === true);
+check('Pay Period, Income Received, Projected Income, Spending Plan, the Expected Costs, Savings Goals, the eight Expenses sections, Paid History and Recurring Income are folds, open to start with', document.querySelectorAll('details.fold').length === 16 && payFold.open === true);
 payFold.open = false; await sleep(30);
 check('folding one up is remembered on this device', JSON.parse(localStorage.getItem('budgetApp.folds.v1') || '{}')['fold-pay-period'] === false);
 payFold.open = true; await sleep(30);
@@ -975,3 +975,36 @@ check('an entry can be turned into a withdrawal, but not below nothing saved', s
 check('saving with nothing changed adds no Undo step', (() => { const e = income.find((r) => r.savedFor === edGoal && r.amount === 50); const before = undoStack.length; saveSavingsEntry(e.id, e.savedOn, '50'); return undoStack.length === before; })());
 check('the Edit button in the history opens a form that saves and closes, and Undo restores', await (async () => { renderBudget(); const row = [...document.querySelectorAll('#goal-list .goal-history-list li')].find((r) => /\+\$50\.00/.test(r.textContent)); row.querySelector('button').click(); const form = row.querySelector('.goal-cost-form'); const opened = !form.hidden && form.querySelector('input[type="number"]').value === '50'; form.querySelector('input[type="number"]').value = '75'; form.requestSubmit(); await sleep(40); const ok = opened && goalSaved(edGoal) === 55; undo(); await sleep(30); return ok && goalSaved(edGoal) === 30; })());
 income.length = 0; hideUndoToast(); renderBudget();
+
+// ---- import from Chase (made-up transactions) ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; hideUndoToast(); showTab('expenses');
+try { localStorage.removeItem(BANK_CATEGORIES_KEY); } catch {}
+savePlanCategory({ name: 'Bank gas', amountRaw: '60', frequency: 'weekly', type: 'business', altRaw: '', notes: '' });
+savePlanCategory({ name: 'Bank food', amountRaw: '80', frequency: 'weekly', type: 'personal', altRaw: '', notes: '' });
+renderBudget();
+const bankGas = income.find((r) => r.planName === 'Bank gas').id, bankFood = income.find((r) => r.planName === 'Bank food').id;
+const checkingCsv = '﻿Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #\r\n'
+  + 'DEBIT,10/20/2026,"SHELL OIL 57444 AUSTIN TX",-40.25,DEBIT_CARD,900.00,,\r\n'
+  + 'DEBIT,10/21/2026,"CAFE, THE 1234",-4.50,DEBIT_CARD,895.50,,\r\n'
+  + 'DEBIT,10/21/2026,"CAFE, THE 5678",-4.50,DEBIT_CARD,891.00,,\r\n'
+  + 'CREDIT,10/22/2026,"PAYROLL ACME",1500.00,ACH_CREDIT,2391.00,,\r\n'
+  + 'DEBIT,10/22/2026,"Payment to Chase card ending in 1234",-200.00,ACH_DEBIT,2191.00,,\r\n'
+  + 'DEBIT,13/45/2026,"BAD DATE",-5.00,DEBIT_CARD,0,,\r\n';
+const cardCsv = 'Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n10/19/2026,10/20/2026,KROGER #123,Groceries,Sale,-23.10,\n10/19/2026,10/20/2026,PAYMENT THANK YOU,,Payment,300.00,\n';
+check('the CSV reader handles a BOM, quoted commas, doubled quotes and line breaks', JSON.stringify(parseCsv('﻿a,"b,c","d ""q"""\r\n\r\n"x\ny",2\n')) === JSON.stringify([['a', 'b,c', 'd "q"'], ['x\ny', '2']]));
+check('dates and amounts are read the way banks write them', bankDateKey('10/20/2026') === '2026-10-20' && bankDateKey('2026-10-20') === '2026-10-20' && bankDateKey('13/45/2026') === '' && bankDateKey('x') === '' && bankCents('-40.25') === -4025 && bankCents('$1,200.00') === 120000 && bankCents('(5.00)') === -500 && bankCents('abc') === null && bankCents('') === null);
+check('a checking file gives the money-out rows, leaves money in out and skips bad rows', (() => { const r = parseChaseCsv(checkingCsv); return !r.problem && r.rows.length === 4 && r.moneyIn === 1 && r.rows[0].dateKey === '2026-10-20' && r.rows[0].cents === 4025 && r.rows[0].desc === 'SHELL OIL 57444 AUSTIN TX'; })());
+check('a credit card file is read too (purchases out, payments in)', (() => { const r = parseChaseCsv(cardCsv); return r.rows.length === 1 && r.rows[0].dateKey === '2026-10-19' && r.rows[0].cents === 2310 && r.moneyIn === 1; })());
+check('two identical rows get different keys, and a payment or transfer is flagged', (() => { const r = parseChaseCsv(checkingCsv).rows; return r[1].key !== r[2].key && r[1].key.endsWith('#1') && r[2].key.endsWith('#2') && r[3].flagged === true && r[0].flagged === false; })());
+check('a file that is not a bank file or is empty is refused with a message', parseChaseCsv('hello,world\n1,2').problem !== '' && parseChaseCsv('').problem !== '' && parseChaseCsv('Date,Description,Amount\n').problem !== '');
+check('a description is matched by its first words, not by digits or places', bankDescriptionKey('SHELL OIL 57444 AUSTIN TX') === 'SHELL OIL AUSTIN' && bankDescriptionKey('Shell Oil 99 #2 Dallas') === 'SHELL OIL DALLAS');
+check('the review list shows each spending row with a category box, and nothing is imported until one is chosen', (() => { loadBankText(checkingCsv); const rows = document.querySelectorAll('#bank-list li'); return rows.length === 4 && rows[0].querySelectorAll('select option').length === 3 && $('bank-import-btn').disabled === true && /4 spending rows found/.test($('bank-summary').textContent) && /1 money-in row left out/.test($('bank-summary').textContent); })(), $('bank-summary').textContent);
+check('choosing categories counts the rows on the Import button', (() => { const selects = document.querySelectorAll('#bank-list select'); selects[0].value = bankGas; selects[0].dispatchEvent(new Event('change')); selects[1].value = bankFood; selects[1].dispatchEvent(new Event('change')); return $('bank-import-btn').disabled === false && /Import 2 expenses/.test($('bank-import-btn').textContent); })(), $('bank-import-btn').textContent);
+check('the bulk button fills every row without a category except payments and transfers', (() => { $('bank-bulk-category').value = bankFood; $('bank-bulk-btn').click(); return bankRows.filter((r) => r.planId === bankFood).length === 2 && bankRows.find((r) => r.flagged).planId === '' && /Import 3 expenses/.test($('bank-import-btn').textContent); })(), $('bank-import-btn').textContent);
+check('Import makes ordinary expenses in one go, with the description as the note', (() => { $('bank-import-btn').click(); const made = income.filter((r) => r.bankKey && !r.deleted); return made.length === 3 && made.some((r) => r.spentOn === '2026-10-20' && r.amount === 40.25 && r.categoryName === 'Bank gas' && r.notes === 'SHELL OIL 57444 AUSTIN TX') && made.every((r) => !r.dateKey && r.planId) && /Imported 3 expenses/.test($('bank-status').textContent) && $('bank-undo-btn').hidden === false; })(), $('bank-status').textContent);
+check('loading the same file again shows those rows as already imported and imports nothing twice', (() => { loadBankText(checkingCsv); const already = bankRows.filter((r) => r.imported).length; return already === 3 && document.querySelectorAll('#bank-list .badge').length === 3 && /3 already imported/.test($('bank-summary').textContent); })(), $('bank-summary').textContent);
+check('the category chosen for a description is remembered for next time', (() => { const r = parseChaseCsv(checkingCsv).rows; return r[0].planId === bankGas && r[1].planId === bankFood; })());
+check('Undo this import deletes everything it made and the rows can be imported again', (() => { const count = undoBankImport(); return count === 3 && income.filter((r) => r.bankKey && !r.deleted).length === 0 && bankRows.filter((r) => r.imported).length === 0 && $('bank-undo-btn').hidden === true; })());
+check('a deleted imported expense is not brought back by importing again', (() => { loadBankText(checkingCsv); bankRows.forEach((r) => { if (!r.flagged) r.planId = bankGas; }); importBankRows(); const e = income.find((r) => r.bankKey && !r.deleted); deleteIncome(e.id); loadBankText(checkingCsv); return bankRows.find((r) => r.key === e.bankKey).imported === true; })());
+check('a remembered category that was deleted is dropped', (() => { income.find((r) => r.id === bankGas).deleted = true; loadBankText(checkingCsv); const ok = bankRows.every((r) => r.planId !== bankGas); income.find((r) => r.id === bankGas).deleted = false; return ok; })());
+income.length = 0; lastBankImportIds = []; bankRows = []; try { localStorage.removeItem(BANK_CATEGORIES_KEY); } catch {} hideUndoToast(); renderBudget();

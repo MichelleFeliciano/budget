@@ -4395,6 +4395,7 @@ function renderExpenses() {
   renderExpenseList(expenses);
   renderRepeats();
   renderBusinessSummary();
+  renderBankRows();
   restoreOpenCardForms(openForms);
 }
 
@@ -4741,6 +4742,290 @@ function downloadExpenseCsv() {
   select.addEventListener('change', renderBusinessSummary);
   document.getElementById('business-csv-btn').addEventListener('click', downloadExpenseCsv);
 })();
+
+// ---- Import from Chase (a downloaded CSV of transactions) ----
+// The app never connects to a bank. You download your transactions from Chase as a CSV file (checking or credit
+// card), choose the file here, and it is read on this device only. Money going out (a negative amount) is listed
+// with a category to choose from the Spending Plan, and the rows you assign become ordinary expenses carrying a
+// `bankKey` (date, amount and the first words of the description, plus a count for identical rows), so importing the
+// same or an overlapping file again skips what is already in (deleted ones included: a deleted import is not
+// brought back). The category chosen for a description is remembered on this device and offered next time. Money in
+// (deposits, refunds, card payments) is not imported. Nothing is kept from the file except what an expense holds.
+
+// localStorage key for the remembered category of each bank description, as { descriptionKey: planId }.
+const BANK_CATEGORIES_KEY = 'budgetApp.bankCategories.v1';
+// The biggest file read, and the most rows taken from it (a bank file for a few months is far smaller).
+const BANK_MAX_BYTES = 2 * 1024 * 1024;
+const BANK_MAX_ROWS = 2000;
+// The rows of the file being reviewed, as { dateKey, desc, cents, key, planId, imported, flagged }, and the ids of the
+// expenses the last import made (so that import can be undone in one tap).
+let bankRows = [];
+let lastBankImportIds = [];
+
+// Splits CSV text into rows of cells: quoted cells may hold commas, doubled quotes and line breaks, a leading byte
+// order mark is ignored, and blank lines are dropped.
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  const input = text.replace(/^﻿/, '');
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (quoted) {
+      if (ch === '"' && input[i + 1] === '"') { cell += '"'; i += 1; } else if (ch === '"') quoted = false; else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(cell); cell = ''; } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && input[i + 1] === '\n') i += 1;
+      row.push(cell);
+      cell = '';
+      if (row.some((c) => c.trim() !== '')) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c.trim() !== '')) rows.push(row);
+  return rows;
+}
+
+// A bank date ("10/20/2026", or "2026-10-20") as a date key, or '' when it is not a real date in the forms' range.
+function bankDateKey(text) {
+  const t = text.trim();
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
+  const key = us ? `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}` : t;
+  return isRealDateKey(key) && isReasonableDateKey(key) ? key : '';
+}
+
+// A bank amount ("-12.34", "$1,200.00", "(5.00)") in whole cents, or null when it is not a number.
+function bankCents(text) {
+  let t = text.trim().replace(/[$,\s]/g, '');
+  let negative = false;
+  if (/^\(.*\)$/.test(t)) { negative = true; t = t.slice(1, -1); }
+  if (!/^-?\d*\.?\d+$/.test(t)) return null;
+  const value = Math.round(Number(t) * 100) * (negative ? -1 : 1);
+  return Number.isFinite(value) && Math.abs(value) <= MAX_MONEY * 100 ? value : null;
+}
+
+// The first words of a description with digits and symbols dropped ("SHELL OIL 57444 AUSTIN TX" is "SHELL OIL AUSTIN"):
+// what stays the same from one visit to the same shop, used to match rows and to remember a category.
+function bankDescriptionKey(desc) {
+  return desc.toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 3).join(' ');
+}
+
+// Whether a description reads like a payment or transfer between your own accounts, which would count the same money
+// twice if it were also imported as an expense.
+function bankLooksLikeTransfer(desc) {
+  return /payment|transfer|autopay|zelle|credit card|online banking/i.test(desc);
+}
+
+// The remembered categories of bank descriptions ({} when none, or storage is blocked).
+function loadBankCategories() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BANK_CATEGORIES_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Reads a Chase CSV (checking: Details, Posting Date, Description, Amount, ...; credit card: Transaction Date,
+// Post Date, Description, Category, Type, Amount, ...) into the rows for money going out. Returns { rows, problem,
+// moneyIn }: problem is a sentence when the file is not one it understands, moneyIn counts the rows left out.
+function parseChaseCsv(text) {
+  const table = parseCsv(text);
+  if (!table.length) return { rows: [], problem: 'That file is empty.', moneyIn: 0 };
+  const header = table[0].map((h) => h.trim().toLowerCase());
+  const dateCol = ['transaction date', 'posting date', 'post date', 'date'].map((n) => header.indexOf(n)).find((i) => i >= 0);
+  const descCol = header.indexOf('description');
+  const amountCol = header.indexOf('amount');
+  if (dateCol === undefined || descCol < 0 || amountCol < 0) {
+    return { rows: [], problem: 'That does not look like a Chase transactions file (it needs a date, a Description and an Amount column).', moneyIn: 0 };
+  }
+  const remembered = loadBankCategories();
+  const seen = new Map();
+  const rows = [];
+  let moneyIn = 0;
+  table.slice(1, BANK_MAX_ROWS + 1).forEach((cells) => {
+    const dateKey = bankDateKey(cells[dateCol] || '');
+    const cents = bankCents(cells[amountCol] || '');
+    const desc = (cells[descCol] || '').trim().replace(/\s+/g, ' ');
+    if (!dateKey || cents === null || cents === 0) return;
+    if (cents > 0) { moneyIn += 1; return; }
+    const base = `${dateKey}|${-cents}|${bankDescriptionKey(desc)}`;
+    const count = (seen.get(base) || 0) + 1; // two identical rows (two coffees one day) are told apart by a count
+    seen.set(base, count);
+    rows.push({ dateKey, desc, cents: -cents, key: `${base}#${count}`, planId: remembered[bankDescriptionKey(desc)] || '', imported: false, flagged: bankLooksLikeTransfer(desc) });
+  });
+  return { rows, problem: rows.length || moneyIn ? '' : 'No transactions were found in that file.', moneyIn };
+}
+
+// Marks the rows already in the app (their bankKey is on an expense, a deleted one included) and drops a remembered
+// category whose Spending Plan category no longer exists.
+function markImportedBankRows(rows) {
+  const have = new Set(income.filter((r) => r.bankKey).map((r) => r.bankKey));
+  rows.forEach((row) => {
+    row.imported = have.has(row.key);
+    if (row.planId && !income.some((r) => r.id === row.planId && r.planName && !r.deleted)) row.planId = '';
+  });
+}
+
+// Draws the rows being reviewed, the summary line and the buttons.
+function renderBankRows() {
+  const list = document.getElementById('bank-list');
+  list.innerHTML = '';
+  const categories = planCategories();
+  bankRows.forEach((row) => {
+    const item = document.createElement('li');
+    item.className = 'bank-row';
+    const label = document.createElement('span');
+    label.textContent = `${formatDateKeyShort(row.dateKey)} · ${row.desc || 'No description'} · ${formatMoney(row.cents / 100)}${row.flagged ? ' (looks like a payment or transfer)' : ''}`;
+    item.appendChild(label);
+    if (row.imported) {
+      const done = document.createElement('span');
+      done.className = 'badge';
+      done.textContent = 'Already imported';
+      item.appendChild(done);
+    } else {
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', `Category for ${row.desc || 'this transaction'} on ${formatDateKeyShort(row.dateKey)}`);
+      const skip = document.createElement('option');
+      skip.value = '';
+      skip.textContent = 'Skip';
+      select.appendChild(skip);
+      categories.forEach((plan) => {
+        const option = document.createElement('option');
+        option.value = plan.id;
+        option.textContent = plan.planName;
+        select.appendChild(option);
+      });
+      select.value = row.planId;
+      select.addEventListener('change', () => { row.planId = select.value; updateBankButtons(); });
+      item.appendChild(select);
+    }
+    list.appendChild(item);
+  });
+  const fill = document.getElementById('bank-bulk-category');
+  const keep = fill.value;
+  fill.innerHTML = '';
+  categories.forEach((plan) => {
+    const option = document.createElement('option');
+    option.value = plan.id;
+    option.textContent = plan.planName;
+    fill.appendChild(option);
+  });
+  if (keep) fill.value = keep;
+  document.getElementById('bank-bulk').hidden = !bankRows.some((r) => !r.imported) || !categories.length;
+  updateBankButtons();
+}
+
+// The Import button says how many expenses it would add and is off when there are none to add; Undo shows after an import.
+function updateBankButtons() {
+  const chosen = bankRows.filter((r) => r.planId && !r.imported).length;
+  const importBtn = document.getElementById('bank-import-btn');
+  importBtn.hidden = !bankRows.some((r) => !r.imported);
+  importBtn.disabled = chosen === 0;
+  importBtn.textContent = chosen ? `Import ${chosen} expense${chosen === 1 ? '' : 's'}` : 'Choose a category for at least one row';
+  document.getElementById('bank-undo-btn').hidden = lastBankImportIds.length === 0;
+}
+
+// Sets the status line under the Chase fold.
+function setBankStatus(text, tone) {
+  const el = document.getElementById('bank-status');
+  el.textContent = text;
+  el.hidden = !text;
+  el.classList.toggle('sync-ok', tone === 'ok');
+  el.classList.toggle('sync-failed', tone === 'failed');
+}
+
+// Reads the text of a chosen file into the review list (see parseChaseCsv). Returns the problem as a sentence, or ''.
+function loadBankText(text) {
+  const parsed = parseChaseCsv(text);
+  if (parsed.problem) { bankRows = []; renderBankRows(); return parsed.problem; }
+  markImportedBankRows(parsed.rows);
+  bankRows = parsed.rows;
+  const already = bankRows.filter((r) => r.imported).length;
+  document.getElementById('bank-summary').textContent =
+    `${bankRows.length} spending row${bankRows.length === 1 ? '' : 's'} found${already ? ` (${already} already imported)` : ''}; ${parsed.moneyIn} money-in row${parsed.moneyIn === 1 ? '' : 's'} left out. Pick a category for each row to import and leave the rest on Skip.`;
+  renderBankRows();
+  return '';
+}
+
+// Makes an expense for every row with a category (one change, one redraw), remembers each description's category on this
+// device, and notes the new ids so the whole import can be undone. Returns how many expenses were made.
+function importBankRows() {
+  const now = new Date().toISOString();
+  const remembered = loadBankCategories();
+  const made = [];
+  bankRows.filter((r) => r.planId && !r.imported).forEach((row) => {
+    const plan = income.find((r) => r.id === row.planId && r.planName && !r.deleted);
+    if (!plan) return;
+    const record = {
+      id: `expense-${makeId()}`, spentOn: row.dateKey, amount: row.cents / 100, planId: plan.id, categoryName: plan.planName,
+      notes: row.desc.slice(0, 200), bankKey: row.key,
+      dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+    };
+    income.push(record);
+    made.push(record.id);
+    row.imported = true;
+    remembered[bankDescriptionKey(row.desc)] = plan.id;
+  });
+  if (made.length) {
+    saveCollection(INCOME_KEY, income);
+    try { localStorage.setItem(BANK_CATEGORIES_KEY, JSON.stringify(remembered)); } catch { /* not remembered: it is asked again next time */ }
+    lastBankImportIds = made;
+  }
+  renderBudget();
+  renderBankRows();
+  return made.length;
+}
+
+// Takes back the last import: every expense it made is deleted (as a tombstone, so it syncs) and its rows can be imported again.
+function undoBankImport() {
+  const ids = new Set(lastBankImportIds);
+  income.forEach((r) => {
+    // The bank key goes too, so these rows are offered again (an expense deleted by hand keeps its key and is not).
+    if (ids.has(r.id) && !r.deleted) { r.deleted = true; delete r.bankKey; stampSync(r); }
+  });
+  saveCollection(INCOME_KEY, income);
+  const count = ids.size;
+  lastBankImportIds = [];
+  markImportedBankRows(bankRows);
+  renderBudget();
+  renderBankRows();
+  return count;
+}
+
+// The file box reads the chosen file (up to BANK_MAX_BYTES) as text and shows its rows for review.
+document.getElementById('bank-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (file.size > BANK_MAX_BYTES) { setBankStatus('That file is too big to be a transactions file.', 'failed'); return; }
+  try {
+    const problem = loadBankText(await file.text());
+    setBankStatus(problem, problem ? 'failed' : null);
+  } catch {
+    setBankStatus('Could not read that file.', 'failed');
+  }
+  e.target.value = ''; // so choosing the same file again reads it again
+});
+
+// Put every row that has no category yet (and is not a payment or transfer) in the category chosen beside the button.
+document.getElementById('bank-bulk-btn').addEventListener('click', () => {
+  const planId = document.getElementById('bank-bulk-category').value;
+  if (!planId) return;
+  bankRows.filter((r) => !r.imported && !r.planId && !r.flagged).forEach((r) => { r.planId = planId; });
+  renderBankRows();
+});
+
+// The Import and Undo buttons.
+document.getElementById('bank-import-btn').addEventListener('click', () => {
+  const made = importBankRows();
+  setBankStatus(made ? `Imported ${made} expense${made === 1 ? '' : 's'}. Undo this import if it is not right, or delete single ones in Recent Expenses.` : 'Nothing to import.', made ? 'ok' : 'failed');
+});
+document.getElementById('bank-undo-btn').addEventListener('click', () => {
+  const count = undoBankImport();
+  setBankStatus(`Took back ${count} expense${count === 1 ? '' : 's'} from that import.`, 'ok');
+});
 
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
@@ -6216,7 +6501,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 42;
+const APP_VERSION = 43;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
