@@ -42,6 +42,6 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
 ## Git
 Commit in small steps. Ask before pushing.
 
-## Not yet verified
-Service-worker install, offline use and add-to-home-screen on a real device; a live sync against a deployed
-server.
+## Verified on a real device
+Service-worker install, offline use, add-to-home-screen and a live sync against the deployed server have been checked
+on the owner's phone (see `DEVICE-CHECKLIST.md` for what was tried). Nothing is currently listed as unverified.
