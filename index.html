@@ -353,6 +353,16 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
         </details>
 
+        <details class="fold" id="fold-expense-business" open>
+          <summary class="fold-summary"><h2>Business Summary</h2></summary>
+          <p class="stats-line">What you spent on Business and Personal categories (set on the Plan tab) over a period, and a spreadsheet file (CSV) of every expense in it, for a tax preparer.</p>
+          <select id="business-period-input" aria-label="Period"></select>
+          <p class="stats-line" id="business-total-line"></p>
+          <ul class="card-list flat-list" id="business-category-list"></ul>
+          <p class="empty-state" id="business-empty" hidden>No expenses in this period.</p>
+          <button type="button" class="small-btn" id="business-csv-btn">Download CSV</button>
+        </details>
+
         <details class="fold" id="fold-expense-summary" open>
           <summary class="fold-summary"><h2>Spent vs Plan</h2></summary>
           <p class="stats-line" id="expense-total-line"></p>

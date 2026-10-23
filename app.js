@@ -4300,6 +4300,7 @@ function renderExpenses() {
   renderExpenseCharts(expenses, rows);
   renderExpenseList(expenses);
   renderRepeats();
+  renderBusinessSummary();
   restoreOpenCardForms(openForms);
 }
 
@@ -4546,6 +4547,106 @@ document.getElementById('repeat-add-form').addEventListener('submit', (e) => {
 
 // The first date of a new repeating expense starts on today.
 document.getElementById('repeat-start-input').value = todayKey();
+
+// ---- Business summary and the expenses spreadsheet (CSV) ----
+// A Spending Plan category is marked Business or Personal on the Plan tab, and each expense belongs to a category, so
+// an expense is Business or Personal by its category (an expense whose category was deleted counts as Personal when
+// the category cannot be found at all). The summary adds them up for a period, and the CSV lists every expense in it
+// for a spreadsheet or a tax preparer. Nothing is stored: it is worked out from the expenses each time.
+
+// The periods the summary can show, as { value, label }.
+const SUMMARY_PERIODS = [
+  { value: 'month', label: 'This month' },
+  { value: 'lastMonth', label: 'Last month' },
+  { value: 'year', label: 'This year' },
+  { value: 'lastYear', label: 'Last year' },
+];
+
+// The first and last day keys of a summary period (see SUMMARY_PERIODS), counted from today.
+function summaryPeriodBounds(kind) {
+  const today = parseDateKey(todayKey());
+  if (kind === 'year') return [`${today.y}-01-01`, `${today.y}-12-31`];
+  if (kind === 'lastYear') return [`${today.y - 1}-01-01`, `${today.y - 1}-12-31`];
+  if (kind === 'lastMonth') {
+    // A Date rolls January back into December of the year before; a hand-built key would say month 0.
+    return monthBounds(dateKeyFromLocalDate(new Date(today.y, today.m - 1, 1)));
+  }
+  return monthBounds(todayKey());
+}
+
+// Whether an expense is a Business one, by its Spending Plan category.
+function isBusinessExpense(expense) {
+  const plan = income.find((r) => r.id === expense.planId && r.planName);
+  return !!(plan && plan.business);
+}
+
+// The live expenses dated within a summary period, oldest first.
+function expensesInSummaryPeriod(kind) {
+  const [start, end] = summaryPeriodBounds(kind);
+  return expenseRecords().filter((r) => r.spentOn >= start && r.spentOn <= end).sort((a, b) => a.spentOn.localeCompare(b.spentOn));
+}
+
+// One cell of a CSV line: wrapped in quotes with inner quotes doubled, and a text that starts with =, +, - or @ gets a
+// leading apostrophe so a spreadsheet shows it as text instead of running it as a formula.
+function csvCell(value) {
+  let text = String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+// The spreadsheet text for a list of expenses: a header line, then date, category, Business or Personal, amount, note.
+function buildExpenseCsv(expenses) {
+  const lines = [['Date', 'Category', 'Type', 'Amount', 'Note'].map(csvCell).join(',')];
+  expenses.forEach((r) => {
+    lines.push([r.spentOn, expenseCategoryName(r), isBusinessExpense(r) ? 'Business' : 'Personal', r.amount.toFixed(2), r.notes || ''].map(csvCell).join(','));
+  });
+  return lines.join('\r\n');
+}
+
+// Draws the Business Summary fold for the chosen period: the totals, the Business categories, and the CSV button.
+function renderBusinessSummary() {
+  const kind = document.getElementById('business-period-input').value || 'month';
+  const expenses = expensesInSummaryPeriod(kind);
+  const business = expenses.filter(isBusinessExpense);
+  const businessTotal = business.reduce((sum, r) => sum + r.amount, 0);
+  const total = expenses.reduce((sum, r) => sum + r.amount, 0);
+  document.getElementById('business-total-line').textContent = expenses.length
+    ? `Business: ${formatMoney(businessTotal)} · Personal: ${formatMoney(total - businessTotal)} · Total: ${formatMoney(total)} (${expenses.length} expense${expenses.length === 1 ? '' : 's'}).`
+    : '';
+  const byCategory = new Map();
+  business.forEach((r) => byCategory.set(expenseCategoryName(r), (byCategory.get(expenseCategoryName(r)) || 0) + r.amount));
+  const list = document.getElementById('business-category-list');
+  list.innerHTML = '';
+  [...byCategory.entries()].sort((a, b) => b[1] - a[1]).forEach(([name, amount]) => {
+    const row = document.createElement('li');
+    row.textContent = `${name}: ${formatMoney(amount)}`;
+    list.appendChild(row);
+  });
+  document.getElementById('business-empty').hidden = expenses.length !== 0;
+  document.getElementById('business-csv-btn').disabled = expenses.length === 0;
+}
+
+// Downloads the expenses of the chosen period as a CSV file.
+function downloadExpenseCsv() {
+  const select = document.getElementById('business-period-input');
+  const expenses = expensesInSummaryPeriod(select.value || 'month');
+  if (!expenses.length) return;
+  const label = SUMMARY_PERIODS.find((p) => p.value === select.value);
+  downloadBlob(new Blob([buildExpenseCsv(expenses)], { type: 'text/csv' }), `budget-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
+}
+
+// The period choices, filled once, and the summary redrawing when the choice changes or the button is pressed.
+(function initBusinessSummary() {
+  const select = document.getElementById('business-period-input');
+  SUMMARY_PERIODS.forEach((p) => {
+    const option = document.createElement('option');
+    option.value = p.value;
+    option.textContent = p.label;
+    select.appendChild(option);
+  });
+  select.addEventListener('change', renderBusinessSummary);
+  document.getElementById('business-csv-btn').addEventListener('click', downloadExpenseCsv);
+})();
 
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
@@ -5539,19 +5640,24 @@ function buildExportPayload() {
   return { collections, local };
 }
 
+// Saves a file to the device by clicking a temporary link to it. The link is kept for a while: revoking it at once can
+// cancel the download on iOS/Safari.
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 // Downloads the full backup (the three lists plus the payday settings) as one JSON file.
 function exportData() {
   recordBackupTime(EXPORT_AT_KEY);
   const json = JSON.stringify(buildExportPayload(), null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `budget-export-${todayKey()}.json`; // the local date, not the UTC one
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000); // revoking at once can cancel the download on iOS/Safari
+  downloadBlob(new Blob([json], { type: 'application/json' }), `budget-export-${todayKey()}.json`); // the local date, not the UTC one
   setDataIoStatus('Backup downloaded. Keep the file somewhere private.', 'ok');
   renderBackupNotes();
 }
@@ -5674,14 +5780,7 @@ function exportCalendar() {
     setDataIoStatus('No upcoming bills to add to a calendar.', 'failed');
     return;
   }
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/calendar' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'budget-reminders.ics';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  downloadBlob(new Blob([text], { type: 'text/calendar' }), 'budget-reminders.ics');
   setDataIoStatus('Calendar file downloaded. Open it to add your bills to your calendar.', 'ok');
 }
 
@@ -6023,7 +6122,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 39;
+const APP_VERSION = 40;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

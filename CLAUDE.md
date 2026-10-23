@@ -31,7 +31,7 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 593/593).
+  about 15 seconds. The title ends `OK n/n` (currently 601/601).
 - Python: `python -m unittest discover -s tests` (app file checks plus the sync server tests).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:

@@ -225,3 +225,7 @@ Mark as spent is two ordinary changes, not a new record kind: the expense is log
 
 A repeating expense is a record in the `income` list (`recurPlanId`, `amount`, `frequency`, `recurStart`, `skippedDates`, id `rexp-<id>`), with no server change. Each due date is offered on the Expenses tab (Log it / Skip) instead of being logged when the app opens, because two devices opening the app would both log it and create duplicates. A logged date is an ordinary expense carrying `recurId` and `recurDate`, which is how it stops being offered; deleting that expense offers the date again. Only the last 45 days are offered so an old repeat does not bury you in dates. If two devices both tap Log it for the same date before syncing there are two expenses; the Recent Expenses list lets you delete one. The schedule reuses `occursOnDate`, so month-end days behave like a monthly bill.
 
+## The business summary is worked out, not stored
+
+An expense is Business or Personal by its Spending Plan category's flag, so changing a category's flag on the Plan tab changes how its past expenses are counted too; nothing about the split is kept on the expense. The CSV has one line per expense in the chosen period and a text cell that begins with =, +, - or @ is prefixed with an apostrophe so a spreadsheet treats it as text rather than a formula. The backup, calendar and CSV downloads share one `downloadBlob` helper.
+
