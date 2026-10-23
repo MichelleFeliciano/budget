@@ -385,6 +385,16 @@ const BILL_FREQUENCY_LABELS = {
 // A custom bill repeats every `every` weeks or months: a whole number from 1 up to this.
 const MAX_REPEAT_EVERY = 99;
 
+// The end of a repeating bill in words, to follow its frequency: " · last payment Mar 5, 2027 (6 left)", or
+// " · ended" once the last date has passed; '' for a bill that never ends.
+function billEndNote(bill) {
+  if (!bill.endDate) return '';
+  const todayK = todayKey();
+  if (bill.endDate < todayK) return ' \u00b7 ended';
+  const left = occurrenceCountThrough(bill, bill.endDate) - occurrenceCountThrough(bill, shiftDateKey(todayK, -1));
+  return ` \u00b7 last payment ${formatDateKeyShort(bill.endDate)} (${left} left)`;
+}
+
 // How often a bill repeats, in words: "Monthly", or "Every 6 weeks" for a custom one.
 function billFrequencyLabel(bill) {
   if (bill.frequency !== 'custom') return BILL_FREQUENCY_LABELS[bill.frequency] || bill.frequency;
@@ -481,6 +491,7 @@ function occursOnDate(bill, dateKey) {
 
   const period = schedulePeriod(bill);
   if (!period) return false;
+  if (bill.endDate && dateKey > bill.endDate) return false; // a bill that has ended no longer comes due
 
   if (period.unit === 'days') {
     const dayDiff = utcDayDiff(bill.dueDate, dateKey);
@@ -501,6 +512,7 @@ function occursOnDate(bill, dateKey) {
 function occurrenceCountThrough(bill, throughKey) {
   if (throughKey < bill.dueDate) return 0;
   if (bill.frequency === 'one_time') return 1;
+  if (bill.endDate && throughKey > bill.endDate) throughKey = bill.endDate; // nothing after the last payment counts
 
   const period = schedulePeriod(bill);
   if (!period) return 0;
@@ -944,7 +956,22 @@ function validateBillFields(fields) {
   if (frequency === 'custom' && !schedulePeriod({ frequency, every, unit })) {
     return { ok: false, error: `Repeat every needs a whole number from 1 to ${MAX_REPEAT_EVERY}, in weeks or months.` };
   }
-  return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
+  // A repeating bill may stop: on a last payment date, or after a number of payments (which works the date out).
+  let endDate = fields.endDate || undefined;
+  if (frequency === 'one_time') endDate = undefined;
+  else {
+    const paymentsRaw = fields.payments === undefined || fields.payments === null ? '' : String(fields.payments).trim();
+    if (paymentsRaw !== '') {
+      const count = Number(paymentsRaw);
+      if (!Number.isInteger(count) || count < 1 || count > 999) return { ok: false, error: 'The number of payments must be a whole number from 1 to 999.' };
+      endDate = nthOccurrenceDate({ dueDate, frequency, every, unit }, count - 1) || undefined;
+    }
+    if (endDate) {
+      if (!isRealDateKey(endDate) || !isReasonableDateKey(endDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
+      if (endDate < dueDate) return { ok: false, error: 'The last payment date cannot be before the first due date.' };
+    }
+  }
+  return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, endDate, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
 }
 
 // A category typed in another case ("utilities") takes the spelling already in use ("Utilities"), so the
@@ -989,6 +1016,7 @@ function addBill(fields) {
     version: 0,
   };
   if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; }
+  if (result.endDate) bill.endDate = result.endDate;
   // "I'm caught up": every date up to paidThrough starts out paid (one undo still removes the whole bill).
   if (fields.paidThrough) {
     const dates = occurrenceDatesThrough(bill, fields.paidThrough);
@@ -1007,12 +1035,16 @@ function nthOccurrenceDate(bill, n) {
   if (bill.frequency === 'one_time') return n === 0 ? bill.dueDate : null;
   const period = schedulePeriod(bill);
   if (!period) return null;
-  if (period.unit === 'days') return shiftDateKey(bill.dueDate, n * period.step);
-  const anchor = parseDateKey(bill.dueDate);
-  const total = anchor.y * 12 + anchor.m + n * period.step;
-  const y = Math.floor(total / 12);
-  const m = total % 12;
-  return dateKeyFromParts(y, m, Math.min(anchor.d, daysInMonth(y, m)));
+  let result;
+  if (period.unit === 'days') result = shiftDateKey(bill.dueDate, n * period.step);
+  else {
+    const anchor = parseDateKey(bill.dueDate);
+    const total = anchor.y * 12 + anchor.m + n * period.step;
+    const y = Math.floor(total / 12);
+    const m = total % 12;
+    result = dateKeyFromParts(y, m, Math.min(anchor.d, daysInMonth(y, m)));
+  }
+  return bill.endDate && result > bill.endDate ? null : result; // there is no payment after the last one
 }
 
 // Every date a bill is due on, from its first one up to and including throughKey (5000 at most, as a safety stop).
@@ -1053,7 +1085,7 @@ function updateBill(id, fields) {
   const result = validateBillFields(fields);
   if (!result.ok) return result;
   const before = structuredClone(bill);
-  const oldSchedule = { dueDate: bill.dueDate, frequency: bill.frequency, every: bill.every, unit: bill.unit };
+  const oldSchedule = { dueDate: bill.dueDate, frequency: bill.frequency, every: bill.every, unit: bill.unit, endDate: bill.endDate };
   // Changing the amount must not rewrite money that was already paid: record each existing
   // payment at the amount it was actually paid before the new amount takes effect.
   if (result.amount !== bill.amount) {
@@ -1068,13 +1100,14 @@ function updateBill(id, fields) {
   bill.dueDate = result.dueDate;
   bill.frequency = result.frequency;
   if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; } else { delete bill.every; delete bill.unit; }
+  if (result.endDate) bill.endDate = result.endDate; else delete bill.endDate;
   bill.category = result.category;
   bill.autopay = result.autopay;
   // Changing when a bill is due must not orphan the payments already marked
   // paid: each paid occurrence moves to the same-numbered occurrence of the
   // new schedule (the 3rd payment stays the 3rd payment), so totals don't jump.
   if (oldSchedule.dueDate !== bill.dueDate || oldSchedule.frequency !== bill.frequency
-    || oldSchedule.every !== bill.every || oldSchedule.unit !== bill.unit) {
+    || oldSchedule.every !== bill.every || oldSchedule.unit !== bill.unit || oldSchedule.endDate !== bill.endDate) {
     const moved = [];
     const movedAmounts = {};
     (bill.paidDates || []).forEach((d) => {
@@ -1547,6 +1580,7 @@ function nextDueDateKey(bill, todayK) {
 // { text: 'Due Mon, Oct 12 · in 2 days', late: false } or { text: 'Overdue Mon, Oct 5 · 7 days ago', late: true }.
 function billDueInfo(bill, todayK) {
   const dateKey = nextDueDateKey(bill, todayK);
+  if (!dateKey && bill.endDate) return { text: 'Finished: every payment is paid', late: false };
   if (!dateKey) {
     // No date left to pay: a paid one-time bill, or a schedule that cannot be read (shown as its first date).
     const paidOff = bill.frequency === 'one_time' && (bill.paidDates || []).length;
@@ -2370,7 +2404,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const dueEl = node.querySelector('.bill-due');
     dueEl.textContent = due.text;
     dueEl.classList.toggle('bill-due-late', due.late);
-    node.querySelector('.bill-frequency').textContent = billFrequencyLabel(bill);
+    node.querySelector('.bill-frequency').textContent = billFrequencyLabel(bill) + billEndNote(bill);
 
     const categoryEl = node.querySelector('.bill-category');
     if (bill.category) {
@@ -2430,6 +2464,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const editDueDateInput = node.querySelector('.bill-edit-duedate');
     const editFrequencyInput = node.querySelector('.bill-edit-frequency');
     const editEveryInput = node.querySelector('.bill-edit-every');
+    const editEndDateInput = node.querySelector('.bill-edit-enddate');
     const editUnitInput = node.querySelector('.bill-edit-unit');
     const editCategoryInput = node.querySelector('.bill-edit-category');
     const editAutopayInput = node.querySelector('.bill-edit-autopay');
@@ -2446,6 +2481,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       editAmountInput.value = String(bill.amount);
       editDueDateInput.value = bill.dueDate;
       editFrequencyInput.value = bill.frequency;
+      editEndDateInput.value = bill.endDate || '';
       editEveryInput.value = String(bill.every || 6);
       editUnitInput.value = bill.unit || 'weeks';
       syncCustomRepeat(editFrequencyInput);
@@ -2475,6 +2511,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
         frequency: editFrequencyInput.value,
         every: editEveryInput.value,
         unit: editUnitInput.value,
+        endDate: editEndDateInput.value,
         category: editCategoryInput.value,
         autopay: editAutopayInput.checked,
       });
@@ -2494,6 +2531,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       editAmountInput.value = openEdit.amount;
       editDueDateInput.value = openEdit.dueDate;
       editFrequencyInput.value = openEdit.frequency;
+      editEndDateInput.value = openEdit.endDate;
       editEveryInput.value = openEdit.every;
       editUnitInput.value = openEdit.unit;
       syncCustomRepeat(editFrequencyInput);
@@ -2845,12 +2883,32 @@ function renderPlan() {
     const altBox = node.querySelector('.plan-edit-alt');
     const notesBox = node.querySelector('.plan-edit-notes');
     const rolloverBox = node.querySelector('.plan-edit-rollover');
+    const mergeSelect = node.querySelector('.plan-merge-target');
+    node.querySelector('.plan-merge-btn').addEventListener('click', () => {
+      if (!mergeSelect.value) { editError.textContent = 'Choose a category to merge into.'; editError.hidden = false; return; }
+      const result = mergePlanCategory(record.id, mergeSelect.value);
+      if (!result.ok) { editError.textContent = result.error; editError.hidden = false; return; }
+      const status = document.getElementById('plan-status');
+      status.textContent = `Merged ${result.from} into ${result.to}: ${result.moved} item${result.moved === 1 ? '' : 's'} moved. Undo brings ${result.from} back, but not what moved.`;
+      status.hidden = false;
+    });
     node.querySelector('.edit-btn').addEventListener('click', () => {
       nameBox.value = record.planName;
       amountBox.value = String(record.amount);
       frequencyBox.value = record.frequency;
       typeBox.value = record.business ? 'business' : 'personal';
       rolloverBox.checked = !!record.rollover;
+      mergeSelect.innerHTML = '';
+      const prompt = document.createElement('option');
+      prompt.value = '';
+      prompt.textContent = 'Merge into...';
+      mergeSelect.appendChild(prompt);
+      planCategories().filter((p) => p.id !== record.id).forEach((p) => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        option.textContent = p.planName;
+        mergeSelect.appendChild(option);
+      });
       altBox.value = typeof record.altAmount === 'number' ? String(record.altAmount) : '';
       notesBox.value = record.notes || '';
       editError.hidden = true;
@@ -3594,6 +3652,7 @@ function renderBudget() {
         dueDate: openForm.querySelector('.bill-edit-duedate').value,
         frequency: openForm.querySelector('.bill-edit-frequency').value,
         every: openForm.querySelector('.bill-edit-every').value,
+        endDate: openForm.querySelector('.bill-edit-enddate').value,
         unit: openForm.querySelector('.bill-edit-unit').value,
         category: openForm.querySelector('.bill-edit-category').value,
         autopay: openForm.querySelector('.bill-edit-autopay').checked,
@@ -3634,6 +3693,7 @@ function renderBudget() {
   renderWeeklyReview();
   renderPaycheckPlanner();
   renderSetupChecklist();
+  renderSearchResults();
   renderIncomeQuickAdd();
   restoreOpenCardForms(openCardForms);
 
@@ -3693,6 +3753,8 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
     dueDate: dueDateInput.value,
     frequency: frequencyInput.value,
     every: document.getElementById('budget-every-input').value,
+    endDate: document.getElementById('budget-enddate-input').value,
+    payments: document.getElementById('budget-payments-input').value,
     unit: document.getElementById('budget-unit-input').value,
     category: categoryInput.value,
     autopay: document.getElementById('budget-autopay-input').checked,
@@ -3714,6 +3776,8 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
   amountInput.value = '';
   dueDateInput.value = todayKey();
   frequencyInput.value = 'monthly';
+  document.getElementById('budget-enddate-input').value = '';
+  document.getElementById('budget-payments-input').value = '';
   document.getElementById('budget-every-input').value = '6';
   document.getElementById('budget-unit-input').value = 'weeks';
   syncCustomRepeat(frequencyInput);
@@ -4519,6 +4583,7 @@ function renderExpenses() {
   renderRepeats();
   renderBankRows();
   renderBankRules();
+  renderShops();
   restoreOpenCardForms(openForms);
 }
 
@@ -5030,17 +5095,23 @@ function loadBankSources() {
 // Post Date, Description, Category, Type, Amount, ...) into rows of money going out (kind 'out') and money coming in
 // (kind 'in'). Returns { rows, problem, moneyIn }: problem is a sentence when the file is not one it understands,
 // moneyIn counts the money-in rows.
-function parseChaseCsv(text) {
+function parseChaseCsv(text, mapping = null) {
   const table = parseCsv(text);
   if (!table.length) return { rows: [], problem: 'That file is empty.', moneyIn: 0 };
   const header = table[0].map((h) => h.trim().toLowerCase());
-  const dateCol = ['transaction date', 'posting date', 'post date', 'date'].map((n) => header.indexOf(n)).find((i) => i >= 0);
-  const descCol = header.indexOf('description');
-  const amountCol = header.indexOf('amount');
+  // The columns: the ones the caller chose, else found by their usual names (a file with separate Debit and Credit
+  // columns instead of one Amount is read too). When none can be found the caller is told to ask which is which.
+  const named = (names) => names.map((n) => header.indexOf(n)).find((i) => i >= 0);
+  const dateCol = mapping ? mapping.dateCol : named(['transaction date', 'posting date', 'post date', 'date']);
+  const descCol = mapping ? mapping.descCol : named(['description', 'payee', 'merchant']);
+  const amountCol = mapping ? mapping.amountCol : named(['amount']);
+  const debitCol = header.indexOf('debit');
+  const creditCol = header.indexOf('credit');
+  const splitAmounts = !mapping && amountCol === undefined && debitCol >= 0 && creditCol >= 0;
   const balanceCol = header.indexOf('balance');
   let balance = null;
-  if (dateCol === undefined || descCol < 0 || amountCol < 0) {
-    return { rows: [], problem: 'That does not look like a Chase transactions file (it needs a date, a Description and an Amount column).', moneyIn: 0 };
+  if (dateCol === undefined || descCol === undefined || (amountCol === undefined && !splitAmounts)) {
+    return { rows: [], problem: 'I could not tell which columns hold the date, the description and the amount. Choose them below.', moneyIn: 0, needsMapping: true, headers: table[0] };
   }
   const remembered = loadBankCategories();
   const rememberedSources = loadBankSources();
@@ -5049,7 +5120,15 @@ function parseChaseCsv(text) {
   let moneyIn = 0;
   table.slice(1, BANK_MAX_ROWS + 1).forEach((cells) => {
     const dateKey = bankDateKey(cells[dateCol] || '');
-    const cents = bankCents(cells[amountCol] || '');
+    let cents;
+    if (splitAmounts) {
+      const debit = bankCents(cells[debitCol] || '');
+      const credit = bankCents(cells[creditCol] || '');
+      cents = debit === null && credit === null ? null : Math.abs(credit || 0) - Math.abs(debit || 0);
+    } else {
+      cents = bankCents(cells[amountCol] || '');
+      if (mapping && mapping.invert && cents !== null) cents = -cents; // a bank that lists spending as positive numbers
+    }
     const desc = (cells[descCol] || '').trim().replace(/\s+/g, ' ');
     if (balanceCol >= 0 && dateKey) {
       // The newest balance in the file (a checking file lists a running balance; the first row of a day wins a tie).
@@ -5271,7 +5350,11 @@ function setBankStatus(text, tone) {
 
 // Reads the text of a chosen file into the review list (see parseChaseCsv). Returns the problem as a sentence, or ''.
 function loadBankText(text) {
-  const parsed = parseChaseCsv(text);
+  const header = parseCsv(text)[0] || [];
+  const mapping = loadBankMappings()[bankHeaderSignature(header)] || null;
+  const parsed = parseChaseCsv(text, mapping);
+  pendingBankFile = parsed.needsMapping ? { text, headers: parsed.headers } : null;
+  renderBankMapper();
   bankBalance = parsed.balance || null;
   if (parsed.problem) { bankRows = []; bankBalance = null; renderBankRows(); return parsed.problem; }
   markImportedBankRows(parsed.rows);
@@ -5876,7 +5959,7 @@ function billPriceChange(bill) {
 function renderSubscriptions() {
   const list = document.getElementById('subs-list');
   list.innerHTML = '';
-  const repeating = bills.filter((b) => !b.deleted && b.frequency !== 'one_time' && schedulePeriod(b))
+  const repeating = bills.filter((b) => !b.deleted && b.frequency !== 'one_time' && schedulePeriod(b) && !(b.endDate && b.endDate < todayKey()))
     .map((bill) => ({ bill, monthly: billMonthlyCost(bill) })).sort((a, b) => b.monthly - a.monthly);
   repeating.forEach(({ bill, monthly }) => {
     const item = document.createElement('li');
@@ -5909,6 +5992,7 @@ function renderMoney() {
   renderForecast();
   renderTrends();
   renderSubscriptions();
+  renderSetAsides();
   restoreOpenCardForms(openForms);
 }
 
@@ -6297,6 +6381,338 @@ document.getElementById('setup-close-btn').addEventListener('click', () => {
   try { localStorage.setItem(SETUP_DISMISSED_KEY, '1'); } catch { /* it comes back next time */ }
   renderSetupChecklist();
 });
+
+// ---- Printable report ----
+// A one-page summary of a period for printing or saving as a PDF (the phone's print dialog offers both): income, bills,
+// spending by category, Business and Personal totals, savings, the tax set-aside and net worth. It is worked out when
+// asked for and drawn into a block that is hidden on screen and is the only thing shown when printing.
+
+// What the report holds for a summary period (see SUMMARY_PERIODS): { label, start, end, income, bills, spending, saved,
+// left, categories ([{ name, total }], biggest first), businessTotal, personalTotal, tax (taxFigures or null), accounts
+// (net worth now, or null) }.
+function reportData(kind) {
+  const [start, end] = summaryPeriodBounds(kind);
+  const incomeNow = uniqueIncomeEntries(income).filter((r) => !r.deleted);
+  const recurringNow = recurringIncome.filter((r) => !r.deleted);
+  const expenses = expensesInSummaryPeriod(kind);
+  const byCategory = new Map();
+  expenses.forEach((r) => byCategory.set(expenseCategoryName(r), (byCategory.get(expenseCategoryName(r)) || 0) + r.amount));
+  const businessTotal = expenses.filter(isBusinessExpense).reduce((sum, r) => sum + r.amount, 0);
+  const spending = expenses.reduce((sum, r) => sum + r.amount, 0);
+  const monthIncome = totalIncomeInRange(start, end, incomeNow, recurringNow);
+  const monthBills = amountDueInRange(start, end, bills.filter((b) => !b.deleted));
+  return {
+    label: (SUMMARY_PERIODS.find((p) => p.value === kind) || SUMMARY_PERIODS[0]).label, start, end,
+    income: monthIncome, bills: monthBills, spending,
+    saved: income.filter((r) => r.savedFor && !r.deleted && r.savedOn >= start && r.savedOn <= end).reduce((sum, r) => sum + r.amount, 0),
+    left: monthIncome - monthBills - spending,
+    categories: [...byCategory.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
+    businessTotal, personalTotal: spending - businessTotal,
+    tax: taxFigures(kind),
+    accounts: accountRecords().length ? netWorthOn(todayKey()) : null,
+  };
+}
+
+// Draws the report for a period into the print block.
+function renderPrintReport(kind) {
+  const data = reportData(kind);
+  const box = document.getElementById('print-report');
+  box.innerHTML = '';
+  const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; box.appendChild(el); return el; };
+  const table = (rows) => {
+    const t = document.createElement('table');
+    rows.forEach(([a, b]) => {
+      const tr = document.createElement('tr');
+      const left = document.createElement('td');
+      left.textContent = a;
+      const right = document.createElement('td');
+      right.textContent = b;
+      tr.append(left, right);
+      t.appendChild(tr);
+    });
+    box.appendChild(t);
+  };
+  add('h1', 'Budget report');
+  add('p', `${data.label}: ${formatDateKeyLong(data.start)} to ${formatDateKeyLong(data.end)}`);
+  add('h2', 'Summary');
+  table([['Income', formatMoney(data.income)], ['Bills due', formatMoney(data.bills)], ['Spending logged', formatMoney(data.spending)], ['Saved toward goals', formatMoney(data.saved)], ['Left (income minus bills and spending)', formatSignedCurrency(data.left)]]);
+  add('h2', 'Spending by category');
+  if (data.categories.length) table([...data.categories.map((c) => [c.name, formatMoney(c.total)]), ['Total', formatMoney(data.spending)]]);
+  else add('p', 'No spending was logged in this period.');
+  add('h2', 'Business and personal');
+  table([['Business spending', formatMoney(data.businessTotal)], ['Personal spending', formatMoney(data.personalTotal)]]);
+  if (data.tax) {
+    add('h2', 'Tax set-aside (a planning figure, not tax advice)');
+    table([['Business income', formatMoney(data.tax.income)], ['Business expenses', formatMoney(data.tax.expenses)], ['Profit', formatSignedCurrency(data.tax.profit)], ['To put aside', formatMoney(data.tax.setAside)]]);
+  }
+  if (data.accounts) {
+    add('h2', 'Net worth today');
+    table([['What you have', formatMoney(data.accounts.assets)], ['What you owe', formatMoney(data.accounts.debts)], ['Net worth', formatSignedCurrency(data.accounts.net)]]);
+  }
+  add('p', `Made on ${formatDateKeyLong(todayKey())}.`);
+}
+
+// The report button fills the print block and opens the print dialog; the page returns to normal afterwards.
+document.getElementById('report-btn').addEventListener('click', () => {
+  renderPrintReport(document.getElementById('report-period-input').value || 'month');
+  document.body.classList.add('printing-report');
+  window.print();
+});
+window.addEventListener('afterprint', () => document.body.classList.remove('printing-report'));
+
+// The report's period choices (the same as the Business summary's).
+(function initReportPeriods() {
+  const select = document.getElementById('report-period-input');
+  SUMMARY_PERIODS.forEach((p) => {
+    const option = document.createElement('option');
+    option.value = p.value;
+    option.textContent = p.label;
+    select.appendChild(option);
+  });
+})();
+
+// ---- Search everything ----
+
+// How many matches the search shows.
+const SEARCH_MAX_RESULTS = 30;
+
+// The matches for some text across bills, expenses, income, plan categories, expected costs, goals, accounts and the
+// rest, as { kind, text, tab }: any record whose names or notes contain the text (any case). Under two characters finds
+// nothing.
+function searchEverything(query) {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const has = (...parts) => parts.some((p) => String(p || '').toLowerCase().includes(q));
+  const found = [];
+  const add = (kind, text, tab) => found.push({ kind, text, tab });
+  bills.filter((b) => !b.deleted && has(b.name, b.category)).forEach((b) => add('Bill', `${b.name} · ${formatMoney(b.amount)} · ${billFrequencyLabel(b)}`, 'bills'));
+  recurringIncome.filter((r) => !r.deleted && has(r.name, r.category)).forEach((r) => add('Recurring income', `${r.name} · ${formatMoney(r.amount)}`, 'income'));
+  income.filter((r) => !r.deleted).forEach((r) => {
+    if (r.spentOn && has(r.notes, expenseCategoryName(r), r.spentOn)) add('Expense', `${formatDateKeyShort(r.spentOn)} · ${expenseCategoryName(r)} · ${formatMoney(r.amount)}${r.notes ? ` · ${r.notes}` : ''}`, 'expenses');
+    else if (r.dateKey && has(r.source, r.dateKey)) add('Income', `${formatDateKeyShort(r.dateKey)} · ${formatMoney(r.amount)}${r.source ? ` · ${r.source}` : ''}`, 'income');
+    else if (r.planName && has(r.planName, r.notes)) add('Plan category', r.planName, 'plan');
+    else if (r.guessName && has(r.guessName, r.notes)) add('Expected cost', `${r.guessName} · ${formatMoney(r.amount)}`, 'plan');
+    else if (r.goalName && has(r.goalName, r.notes)) add('Savings goal', r.goalName, 'plan');
+    else if (r.goalItemFor && has(r.itemName)) add('Goal cost', `${r.itemName} · ${formatMoney(r.amount)}`, 'plan');
+    else if (r.acctName && has(r.acctName)) add('Account', r.acctName, 'money');
+    else if (r.recurPlanId && has(expenseCategoryName({ planId: r.recurPlanId, categoryName: '' }), r.notes)) add('Repeating expense', `${expenseCategoryName({ planId: r.recurPlanId, categoryName: '' })} · ${formatMoney(r.amount)}`, 'expenses');
+    else if (r.ruleText && has(r.ruleText)) add('Chase rule', r.ruleText, 'expenses');
+  });
+  return found.slice(0, SEARCH_MAX_RESULTS);
+}
+
+// Draws the search results under the box on Home.
+function renderSearchResults() {
+  const query = document.getElementById('global-search-input').value;
+  const list = document.getElementById('search-results');
+  list.innerHTML = '';
+  const results = searchEverything(query);
+  results.forEach((result) => {
+    const item = document.createElement('li');
+    const label = document.createElement('span');
+    const kind = document.createElement('strong');
+    kind.textContent = `${result.kind}: `;
+    label.append(kind, document.createTextNode(result.text));
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'small-btn';
+    open.textContent = 'Open';
+    open.setAttribute('aria-label', `Open the ${TAB_NAMES[result.tab]} tab for ${result.text}`);
+    open.addEventListener('click', () => { showTab(result.tab); window.scrollTo({ top: 0, behavior: scrollBehavior() }); });
+    item.append(label, open);
+    list.appendChild(item);
+  });
+  const note = document.getElementById('search-note');
+  note.hidden = query.trim().length < 2 || results.length > 0;
+  note.textContent = 'Nothing found.';
+}
+
+// The names of the tabs, for the search results' buttons.
+const TAB_NAMES = { home: 'Home', income: 'Income', bills: 'Bills', plan: 'Plan', expenses: 'Expenses', business: 'Business', money: 'Money' };
+
+// Typing in the box searches as you go.
+document.getElementById('global-search-input').addEventListener('input', renderSearchResults);
+
+// ---- Where the money goes (shops) and what is unusually high ----
+
+// This period's expenses grouped by shop: the first two words of each note (a Chase import keeps the bank's description as
+// the note), biggest first, as { name, total, count }. Expenses with no note are not counted.
+function shopTotals(start, end) {
+  const groups = new Map();
+  expenseRecords().filter((r) => r.spentOn >= start && r.spentOn <= end && (r.notes || '').trim()).forEach((r) => {
+    const key = bankDescriptionKey(r.notes).split(' ').slice(0, 2).join(' ') || r.notes.trim().toUpperCase(); // two words: the shop, not its town
+    const group = groups.get(key) || { name: r.notes.trim(), total: 0, count: 0 };
+    group.total += r.amount;
+    group.count += 1;
+    groups.set(key, group);
+  });
+  return [...groups.values()].sort((a, b) => b.total - a.total);
+}
+
+// The categories whose spending this month is well above their usual: at least 30% and $20 over their average full
+// month of the previous three, as { name, spent, usual }, the biggest gap first.
+function unusualSpending() {
+  const today = parseDateKey(todayKey());
+  const [monthStart, monthEnd] = monthBounds(todayKey());
+  const expenses = expenseRecords();
+  return planCategories().map((plan) => {
+    const records = expenses.filter((r) => r.planId === plan.id);
+    let usual = 0;
+    for (let back = 1; back <= 3; back += 1) {
+      const [start, end] = monthBounds(dateKeyFromLocalDate(new Date(today.y, today.m - back, 1)));
+      usual += sumExpensesIn(records, start, end) / 3;
+    }
+    return { name: plan.planName, spent: sumExpensesIn(records, monthStart, monthEnd), usual };
+  }).filter((r) => r.usual > 0 && r.spent > r.usual * 1.3 && r.spent - r.usual >= 20).sort((a, b) => (b.spent - b.usual) - (a.spent - a.usual));
+}
+
+// Draws the Where It Goes fold: this month's top shops, and the categories running above their usual.
+function renderShops() {
+  const [start, end] = monthBounds(todayKey());
+  const shops = shopTotals(start, end).slice(0, 8);
+  const list = document.getElementById('shop-list');
+  list.innerHTML = '';
+  shops.forEach((shop) => {
+    const row = document.createElement('li');
+    row.textContent = `${shop.name}: ${formatMoney(shop.total)}${shop.count > 1 ? ` (${shop.count} times)` : ''}`;
+    list.appendChild(row);
+  });
+  document.getElementById('shop-empty').hidden = shops.length !== 0;
+  const unusual = unusualSpending();
+  const alerts = document.getElementById('unusual-list');
+  alerts.innerHTML = '';
+  unusual.forEach((row) => {
+    const item = document.createElement('li');
+    item.className = 'amount-negative';
+    item.textContent = `${row.name}: ${formatMoney(row.spent)} so far this month, usually about ${formatMoney(row.usual)}`;
+    alerts.appendChild(item);
+  });
+}
+
+// ---- Set aside for yearly bills ----
+
+// The bills that come around rarely (yearly, or every three months or more) with what to put aside each month so each
+// one is covered by its due date, as { bill, monthly, next, months }, biggest monthly amount first. Ended bills and
+// bills with no date coming are left out.
+function setAsideRows() {
+  const todayK = todayKey();
+  return bills.filter((b) => !b.deleted && b.frequency !== 'one_time' && !(b.endDate && b.endDate < todayK)).map((bill) => {
+    const period = schedulePeriod(bill);
+    if (!period || period.unit !== 'months' || period.step < 3) return null;
+    const next = nextDueDateKey(bill, todayK);
+    if (!next) return null;
+    return { bill, monthly: billMonthlyCost(bill), next, months: Math.max(1, Math.round(utcDayDiff(todayK, next) / 30.44)) };
+  }).filter(Boolean).sort((a, b) => b.monthly - a.monthly);
+}
+
+// Draws the set-asides under the subscriptions, each with a button that turns the bill into a savings goal.
+function renderSetAsides() {
+  const rows = setAsideRows();
+  const list = document.getElementById('setaside-list');
+  list.innerHTML = '';
+  rows.forEach(({ bill, monthly, next, months }) => {
+    const item = document.createElement('li');
+    item.className = 'subs-row';
+    const name = document.createElement('strong');
+    name.textContent = bill.name;
+    const detail = document.createElement('span');
+    detail.textContent = `${formatMoney(bill.amount)} due ${formatDateKeyShort(next)} (about ${months} month${months === 1 ? '' : 's'} away): put aside ${formatMoney(monthly)} a month`;
+    const exists = goalRecords().some((g) => g.goalName.toLowerCase() === bill.name.toLowerCase());
+    const make = document.createElement('button');
+    make.type = 'button';
+    make.className = 'small-btn';
+    make.textContent = exists ? 'Already a savings goal' : 'Make it a savings goal';
+    make.disabled = exists;
+    make.addEventListener('click', () => saveGoal({ name: bill.name, targetRaw: String(bill.amount), date: next, notes: 'Set aside for the bill' }));
+    item.append(name, detail, make);
+    list.appendChild(item);
+  });
+  const total = rows.reduce((sum, r) => sum + r.monthly, 0);
+  document.getElementById('setaside-line').textContent = rows.length ? `To cover them all: about ${formatMoney(total)} a month.` : '';
+  document.getElementById('setaside-heading').hidden = rows.length === 0;
+}
+
+// ---- Other banks' CSV files: choosing the columns ----
+// A file whose headers are not the ones Chase uses (or the usual date, description and amount names) asks which column is
+// which, once. The choice is remembered on this device against the file's header line, so the next file from that bank
+// loads straight away.
+
+// localStorage key for the remembered column choices, as { headerLine: { dateCol, descCol, amountCol, invert } }.
+const BANK_MAPPING_KEY = 'budgetApp.bankMapping.v1';
+// The file waiting for its columns to be chosen, as { text, headers }, or null.
+let pendingBankFile = null;
+
+// A header line as a lookup key: the names joined, in lower case.
+function bankHeaderSignature(headers) {
+  return headers.map((h) => h.trim().toLowerCase()).join('|');
+}
+
+// The remembered column choices ({} when none, or storage is blocked).
+function loadBankMappings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BANK_MAPPING_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Shows or hides the column chooser for the pending file.
+function renderBankMapper() {
+  const box = document.getElementById('bank-map');
+  box.hidden = !pendingBankFile;
+  if (!pendingBankFile) return;
+  const headers = pendingBankFile.headers;
+  const guess = (words) => Math.max(0, headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w))));
+  [['bank-map-date', ['date']], ['bank-map-desc', ['desc', 'memo', 'payee', 'merchant', 'name']], ['bank-map-amount', ['amount']]].forEach(([id, words]) => {
+    const select = document.getElementById(id);
+    select.innerHTML = '';
+    headers.forEach((header, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = header || `Column ${index + 1}`;
+      select.appendChild(option);
+    });
+    select.value = String(guess(words));
+  });
+}
+
+// The Use these columns button remembers the choice and reads the file again with it.
+document.getElementById('bank-map-btn').addEventListener('click', () => {
+  if (!pendingBankFile) return;
+  const mapping = {
+    dateCol: Number(document.getElementById('bank-map-date').value),
+    descCol: Number(document.getElementById('bank-map-desc').value),
+    amountCol: Number(document.getElementById('bank-map-amount').value),
+    invert: document.getElementById('bank-map-invert').checked,
+  };
+  const saved = loadBankMappings();
+  saved[bankHeaderSignature(pendingBankFile.headers)] = mapping;
+  try { localStorage.setItem(BANK_MAPPING_KEY, JSON.stringify(saved)); } catch { /* asked again next time */ }
+  const text = pendingBankFile.text;
+  pendingBankFile = null;
+  const problem = loadBankText(text);
+  setBankStatus(problem, problem ? 'failed' : null);
+});
+
+// ---- Merge one Spending Plan category into another ----
+
+// Moves everything that points at one category (expenses, repeating expenses and Chase rules) to another and deletes the
+// first, so two near-duplicates become one. Returns { ok, moved, error }.
+function mergePlanCategory(fromId, toId) {
+  if (fromId === toId) return { ok: false, error: 'Choose a different category to merge into.' };
+  const from = income.find((r) => r.id === fromId && r.planName && !r.deleted);
+  const to = income.find((r) => r.id === toId && r.planName && !r.deleted);
+  if (!from || !to) return { ok: false, error: 'That category is gone.' };
+  let moved = 0;
+  income.forEach((r) => {
+    if (r.deleted) return;
+    if (r.spentOn && r.planId === fromId) { r.planId = toId; r.categoryName = to.planName; stampSync(r); moved += 1; } else if (r.recurPlanId === fromId) { r.recurPlanId = toId; stampSync(r); moved += 1; } else if (r.ruleText && r.rulePlanId === fromId) { r.rulePlanId = toId; stampSync(r); moved += 1; }
+  });
+  saveCollection(INCOME_KEY, income);
+  deleteIncome(fromId);
+  return { ok: true, moved, from: from.planName, to: to.planName };
+}
 
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
@@ -7373,6 +7789,12 @@ function icsFold(line) {
 // leap years. The file only holds each bill's next unpaid date within a year: a one-time bill or a custom
 // schedule further out than that is left out.
 function icsRepeatRule(bill) {
+  const rule = icsBaseRule(bill);
+  return rule && bill.endDate ? `${rule};UNTIL=${bill.endDate.replace(/-/g, '')}` : rule; // a bill that ends stops repeating there
+}
+
+// The repeat rule of a bill without its end (see icsRepeatRule).
+function icsBaseRule(bill) {
   const day = parseDateKey(bill.dueDate).d;
   if (bill.frequency === 'weekly') return 'FREQ=WEEKLY';
   if (bill.frequency === 'biweekly') return 'FREQ=WEEKLY;INTERVAL=2';
@@ -7608,7 +8030,7 @@ function isValidImportRecord(collectionName, rec) {
   if (rec.version !== undefined && !isNum(rec.version)) return false;
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
+  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
@@ -7783,7 +8205,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 48;
+const APP_VERSION = 49;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

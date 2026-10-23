@@ -1323,6 +1323,87 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .small-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* The search box and its matches at the top of Home. */
+
+.home-search { margin-bottom: 12px; }
+
+/* The search box looks like the other form boxes and spans the page. */
+
+.home-search input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* One match: what it is and where, then the button that opens its tab. */
+
+.home-search li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
+}
+
+/* The column chooser for a bank file that is not a Chase one. */
+
+.bank-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+/* The merge choice at the foot of a category's edit form. */
+
+.plan-merge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The report: never on screen. */
+
+.print-report { display: none; }
+
+/* When printing the report, everything but the report is hidden and the report is plain black on white. */
+
+@media print {
+  /* Everything on the page except the report. */
+
+  body.printing-report > *:not(.print-report) { display: none !important; }
+
+  /* The report itself. */
+
+  body.printing-report .print-report {
+    display: block;
+    padding: 12px;
+    background: #fff;
+    color: #000;
+    font-family: Georgia, serif;
+  }
+
+  /* The report's tables run the page's width, one line per figure. */
+
+  .print-report table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+
+  /* A cell is a thin ruled line, with the figure on the right. */
+
+  .print-report td { padding: 4px 6px; border-bottom: 1px solid #ccc; }
+
+  /* The figures line up on the right. */
+
+  .print-report td:last-child { text-align: right; }
+}
+
 /* The split editor under a spending row: one line per part (category and amount), then what is left to place. */
 
 .bank-split {

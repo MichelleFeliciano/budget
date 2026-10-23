@@ -127,6 +127,13 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
       <!-- The tabs. Home: the calendar and its week totals. -->
       <div class="tab-panel" id="tab-home">
+        <!-- Search across bills, expenses, income, goals and the rest; each match has a button that opens its tab (renderSearchResults). -->
+        <div class="home-search">
+          <input type="search" id="global-search-input" autocomplete="off" placeholder="Search bills, expenses, income, goals..." aria-label="Search everything">
+          <p class="stats-line" id="search-note" hidden></p>
+          <ul class="flat-list" id="search-results"></ul>
+        </div>
+
         <!-- A short list of first steps, shown until every one is done or it is closed on this device (renderSetupChecklist). -->
         <div class="setup-checklist" id="setup-checklist" hidden>
           <h3 class="chart-title">Getting set up</h3>
@@ -280,6 +287,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line" id="plan-split-line"></p>
           <p class="stats-line" id="plan-scenario-line"></p>
           <ul class="card-list flat-list" id="plan-list"></ul>
+          <p class="sync-status" id="plan-status" hidden></p>
           <p class="empty-state" id="plan-empty-state" hidden>No categories yet. Add one below.</p>
           <form id="plan-add-form" class="add-form add-form-stacked">
             <input type="text" id="plan-name-input" maxlength="60" placeholder="Category (e.g. Groceries)" required aria-label="Category name">
@@ -388,6 +396,14 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </form>
         </details>
 
+        <details class="fold" id="fold-expense-shops">
+          <summary class="fold-summary"><h2>Where It Goes</h2></summary>
+          <p class="stats-line">This month's biggest shops (from the notes on your expenses, which a Chase import fills in), and any category running well above its usual.</p>
+          <ul class="flat-list" id="unusual-list"></ul>
+          <ul class="flat-list" id="shop-list"></ul>
+          <p class="empty-state" id="shop-empty" hidden>No expenses with a note this month yet.</p>
+        </details>
+
         <details class="fold" id="fold-expense-bank">
           <summary class="fold-summary"><h2>Import from Chase</h2></summary>
           <p class="stats-line">Download your transactions from Chase as a CSV file (sign in to Chase, open the account, choose Download account activity, then CSV) and pick the file here. It is read on this device and never sent anywhere. Money going out is listed so you can give each row a category, and money coming in so you can give each deposit an income source.</p>
@@ -421,6 +437,15 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <button type="button" id="bank-import-btn" hidden disabled>Choose a category or source for at least one row</button>
           <button type="button" class="small-btn" id="bank-undo-btn" hidden>Undo this import</button>
           <p class="sync-status" id="bank-status" hidden></p>
+          <!-- Shown when a file's columns are not ones the app knows: pick which column is which (remembered for that bank). -->
+          <div class="bank-map" id="bank-map" hidden>
+            <p class="stats-line">Choose which column holds each thing in this file:</p>
+            <label>Date <select id="bank-map-date"></select></label>
+            <label>Description <select id="bank-map-desc"></select></label>
+            <label>Amount <select id="bank-map-amount"></select></label>
+            <label class="check-field"><input type="checkbox" id="bank-map-invert"> Spending shows as positive numbers</label>
+            <button type="button" class="small-btn" id="bank-map-btn">Use these columns</button>
+          </div>
         </details>
 
         <details class="fold" id="fold-expense-summary" open>
@@ -555,12 +580,22 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <ul class="card-list flat-list" id="trend-list"></ul>
         </details>
 
+        <details class="fold" id="fold-report">
+          <summary class="fold-summary"><h2>Printable Report</h2></summary>
+          <p class="stats-line">A one-page summary of a period (income, bills, spending by category, business and personal, savings, net worth) to print or save as a PDF from your phone's print screen.</p>
+          <select id="report-period-input" aria-label="Period for the report"></select>
+          <button type="button" id="report-btn">Open the report to print</button>
+        </details>
+
         <details class="fold" id="fold-subscriptions">
           <summary class="fold-summary"><h2>Subscriptions &amp; Repeating Bills</h2></summary>
           <p class="stats-line">Every repeating bill with what it costs in an average month and a year, biggest first. A bill that costs more (or less) than the first time you paid it is flagged.</p>
           <p class="stats-line" id="subs-total-line"></p>
           <ul class="card-list flat-list" id="subs-list"></ul>
           <p class="empty-state" id="subs-empty" hidden>No repeating bills yet.</p>
+          <h3 class="chart-title" id="setaside-heading" hidden>Set aside for yearly bills</h3>
+          <p class="stats-line" id="setaside-line"></p>
+          <ul class="card-list flat-list" id="setaside-list"></ul>
         </details>
       </div>
 
@@ -608,6 +643,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           </div>
           <input type="text" id="budget-category-input" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Bill category">
           <label class="check-field"><input type="checkbox" id="budget-autopay-input"> Pays automatically (autopay)</label>
+          <!-- When a repeating bill stops (a loan or a payment plan): a last payment date, or a number of payments that works the date out. -->
+          <label class="date-field">Last payment date (optional)
+            <input type="date" id="budget-enddate-input" min="1990-01-01" max="2100-12-31" aria-label="Last payment date">
+          </label>
+          <input type="number" inputmode="numeric" id="budget-payments-input" min="1" max="999" step="1" placeholder="Or the number of payments (optional)" aria-label="Number of payments">
           <!-- Offered only for a repeating bill with a due date in the past (see updateCaughtUpOption). -->
           <label class="check-field" id="budget-caughtup-field" hidden><input type="checkbox" id="budget-caughtup-input" checked> I'm caught up: mark the dates before today as paid</label>
           <p class="form-error" id="budget-form-error" hidden></p>
@@ -695,6 +735,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <option value="months">months</option>
         </select>
       </div>
+      <label class="date-field">Last payment date (optional)
+        <input type="date" class="bill-edit-enddate" min="1990-01-01" max="2100-12-31" aria-label="Edit last payment date">
+      </label>
       <input type="text" class="bill-edit-category" list="category-options" autocomplete="off" placeholder="Category (optional)" aria-label="Edit bill category">
       <label class="check-field"><input type="checkbox" class="bill-edit-autopay"> Pays automatically (autopay)</label>
       <p class="form-error bill-edit-error" hidden></p>
@@ -775,6 +818,10 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
       <input type="number" inputmode="decimal" class="plan-edit-alt" placeholder="What-if amount (optional)" min="0" step="0.01" aria-label="Edit what-if amount">
       <input type="text" class="plan-edit-notes" maxlength="500" placeholder="Notes (optional)" aria-label="Edit notes">
       <label class="check-field"><input type="checkbox" class="plan-edit-rollover"> Carry unspent money forward</label>
+      <div class="plan-merge">
+        <select class="plan-merge-target" aria-label="Merge this category into another"></select>
+        <button type="button" class="small-btn plan-merge-btn">Merge into it</button>
+      </div>
       <p class="form-error plan-edit-error" hidden></p>
       <div class="recurring-income-actions">
         <button type="submit">Save</button>
@@ -1070,5 +1117,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
 <!-- All app behaviour lives in app.js; it must load last so every element above exists. -->
 <script src="app.js"></script>
+<!-- The report (renderPrintReport): hidden on screen, the only thing shown when printing. -->
+<div class="print-report" id="print-report"></div>
+
 </body>
 </html>
