@@ -971,7 +971,7 @@ function validateBillFields(fields) {
       if (endDate < dueDate) return { ok: false, error: 'The last payment date cannot be before the first due date.' };
     }
   }
-  return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, endDate, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay };
+  return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, endDate, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay, business: !!fields.business };
 }
 
 // A category typed in another case ("utilities") takes the spelling already in use ("Utilities"), so the
@@ -1017,6 +1017,7 @@ function addBill(fields) {
   };
   if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; }
   if (result.endDate) bill.endDate = result.endDate;
+  if (result.business) bill.business = true;
   // "I'm caught up": every date up to paidThrough starts out paid (one undo still removes the whole bill).
   if (fields.paidThrough) {
     const dates = occurrenceDatesThrough(bill, fields.paidThrough);
@@ -1101,6 +1102,7 @@ function updateBill(id, fields) {
   bill.frequency = result.frequency;
   if (result.frequency === 'custom') { bill.every = result.every; bill.unit = result.unit; } else { delete bill.every; delete bill.unit; }
   if (result.endDate) bill.endDate = result.endDate; else delete bill.endDate;
+  if (result.business) bill.business = true; else delete bill.business;
   bill.category = result.category;
   bill.autopay = result.autopay;
   // Changing when a bill is due must not orphan the payments already marked
@@ -2412,6 +2414,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       categoryEl.hidden = false;
     }
     node.querySelector('.bill-autopay').hidden = !bill.autopay;
+    node.querySelector('.bill-business').hidden = !bill.business;
 
     // Only offered while something is still owed as of today.
     const markOldestBtn = node.querySelector('.mark-oldest-paid-btn');
@@ -2468,6 +2471,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     const editUnitInput = node.querySelector('.bill-edit-unit');
     const editCategoryInput = node.querySelector('.bill-edit-category');
     const editAutopayInput = node.querySelector('.bill-edit-autopay');
+    const editBusinessInput = node.querySelector('.bill-edit-business');
     const editError = node.querySelector('.bill-edit-error');
 
     node.querySelector('.edit-btn').addEventListener('click', () => {
@@ -2487,6 +2491,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       syncCustomRepeat(editFrequencyInput);
       editCategoryInput.value = bill.category || '';
       editAutopayInput.checked = !!bill.autopay;
+      editBusinessInput.checked = !!bill.business;
       editError.hidden = true;
       viewSection.hidden = true;
       editForm.hidden = false;
@@ -2514,6 +2519,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
         endDate: editEndDateInput.value,
         category: editCategoryInput.value,
         autopay: editAutopayInput.checked,
+        business: editBusinessInput.checked,
       });
       if (!result.ok) {
         viewSection.hidden = true;
@@ -2537,6 +2543,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       syncCustomRepeat(editFrequencyInput);
       editCategoryInput.value = openEdit.category;
       editAutopayInput.checked = openEdit.autopay;
+      editBusinessInput.checked = openEdit.business;
       viewSection.hidden = true;
       editForm.hidden = false;
     }
@@ -3659,6 +3666,7 @@ function renderBudget() {
         unit: openForm.querySelector('.bill-edit-unit').value,
         category: openForm.querySelector('.bill-edit-category').value,
         autopay: openForm.querySelector('.bill-edit-autopay').checked,
+        business: openForm.querySelector('.bill-edit-business').checked,
       }
     : null;
 
@@ -3761,6 +3769,7 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
     unit: document.getElementById('budget-unit-input').value,
     category: categoryInput.value,
     autopay: document.getElementById('budget-autopay-input').checked,
+    business: document.getElementById('budget-business-input').checked,
     // When the "I'm caught up" box is showing and ticked, every date before today starts out paid.
     paidThrough: !document.getElementById('budget-caughtup-field').hidden && document.getElementById('budget-caughtup-input').checked
       ? shiftDateKey(todayKey(), -1)
@@ -3775,6 +3784,7 @@ document.getElementById('budget-add-form').addEventListener('submit', (e) => {
 
   errorEl.hidden = true;
   document.getElementById('budget-autopay-input').checked = false;
+  document.getElementById('budget-business-input').checked = false;
   nameInput.value = '';
   amountInput.value = '';
   dueDateInput.value = todayKey();
@@ -4888,6 +4898,59 @@ function summaryPeriodBounds(kind) {
   return monthBounds(todayKey());
 }
 
+// ---- Business bills ----
+// A bill with `business: true` is a business cost (rent, software, insurance). It is still an ordinary bill: it is
+// scheduled, due and marked paid on the Bills tab like any other, and the calendar, forecast and totals count it. What
+// the flag adds is the Business tab: a list of these bills, and what was paid on them in a period, which counts in the
+// summary, the tax figure and the business CSV alongside the business expenses.
+
+// The live business bills, by name.
+function businessBills() {
+  return bills.filter((b) => !b.deleted && b.business).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// What was paid on business bills in a summary period, as { bill, dateKey, amount }, oldest first. A date marked
+// skipped (paid as 0) is not a payment.
+function businessBillPayments(kind) {
+  const [start, end] = summaryPeriodBounds(kind);
+  const payments = [];
+  businessBills().forEach((bill) => {
+    (bill.paidDates || []).filter((d) => d >= start && d <= end).forEach((dateKey) => {
+      const amount = paidAmountFor(bill, dateKey);
+      if (amount > 0) payments.push({ bill, dateKey, amount });
+    });
+  });
+  return payments.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+}
+
+// Draws the Business Bills fold: each business bill with its cost and what is due next, and what they cost in an
+// average month.
+function renderBusinessBills() {
+  const list = document.getElementById('business-bill-list');
+  list.innerHTML = '';
+  const mine = businessBills().filter((b) => !(b.endDate && b.endDate < todayKey()));
+  mine.forEach((bill) => {
+    const item = document.createElement('li');
+    item.className = 'subs-row';
+    const name = document.createElement('strong');
+    name.textContent = bill.name;
+    const detail = document.createElement('span');
+    detail.textContent = `${formatMoney(bill.amount)} ${billFrequencyLabel(bill).toLowerCase()}${billEndNote(bill)} \u00b7 ${billDueInfo(bill, todayKey()).text}`;
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'small-btn';
+    open.textContent = 'Open on Bills';
+    open.setAttribute('aria-label', `Open ${bill.name} on the Bills tab`);
+    open.addEventListener('click', () => { showTab('bills'); window.scrollTo({ top: 0, behavior: scrollBehavior() }); });
+    item.append(name, detail, open);
+    list.appendChild(item);
+  });
+  const monthly = mine.reduce((sum, b) => sum + billMonthlyCost(b), 0);
+  document.getElementById('business-bill-line').textContent = mine.length
+    ? `${mine.length} business bill${mine.length === 1 ? '' : 's'}: about ${formatMoney(monthly)} a month, ${formatMoney(monthly * 12)} a year.` : '';
+  document.getElementById('business-bill-empty').hidden = mine.length !== 0;
+}
+
 // Whether an expense is a Business one, by its Spending Plan category.
 function isBusinessExpense(expense) {
   const plan = income.find((r) => r.id === expense.planId && r.planName);
@@ -4908,12 +4971,14 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-// The spreadsheet text for a list of expenses: a header line, then date, category, Business or Personal, amount, note.
-function buildExpenseCsv(expenses) {
+// The spreadsheet text for a list of expenses (and, for the business file, the payments made on business bills): a header
+// line, then date, category, Business, Personal or Business bill, amount, note.
+function buildExpenseCsv(expenses, billPayments = []) {
   const lines = [['Date', 'Category', 'Type', 'Amount', 'Note'].map(csvCell).join(',')];
   expenses.forEach((r) => {
     lines.push([r.spentOn, expenseCategoryName(r), isBusinessExpense(r) ? 'Business' : 'Personal', r.amount.toFixed(2), r.notes || ''].map(csvCell).join(','));
   });
+  billPayments.forEach((p) => lines.push([p.dateKey, p.bill.name, 'Business bill', p.amount.toFixed(2), 'Bill payment'].map(csvCell).join(',')));
   return lines.join('\r\n');
 }
 
@@ -4936,17 +5001,23 @@ function renderBusinessSummary() {
     row.textContent = `${name}: ${formatMoney(amount)}`;
     list.appendChild(row);
   });
-  document.getElementById('business-empty').hidden = business.length !== 0;
-  document.getElementById('business-csv-btn').disabled = business.length === 0;
+  const payments = businessBillPayments(kind);
+  const paidTotal = payments.reduce((sum, p) => sum + p.amount, 0);
+  const billsLine = document.getElementById('business-bills-line');
+  billsLine.hidden = payments.length === 0;
+  billsLine.textContent = `Business bills paid: ${formatMoney(paidTotal)} (${payments.length} payment${payments.length === 1 ? '' : 's'}).`;
+  document.getElementById('business-empty').hidden = business.length !== 0 || payments.length !== 0;
+  document.getElementById('business-csv-btn').disabled = business.length === 0 && payments.length === 0;
 }
 
 // Downloads the business expenses of the chosen period as a CSV file.
 function downloadExpenseCsv() {
   const select = document.getElementById('business-period-input');
   const expenses = expensesInSummaryPeriod(select.value || 'month').filter(isBusinessExpense);
-  if (!expenses.length) return;
+  const payments = businessBillPayments(select.value || 'month');
+  if (!expenses.length && !payments.length) return;
   const label = SUMMARY_PERIODS.find((p) => p.value === select.value);
-  downloadBlob(new Blob([buildExpenseCsv(expenses)], { type: 'text/csv' }), `budget-business-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
+  downloadBlob(new Blob([buildExpenseCsv(expenses, payments)], { type: 'text/csv' }), `budget-business-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
 }
 
 // Draws the Business tab: the Log form's categories (the ones marked Business), the summary and the business expenses
@@ -4972,6 +5043,7 @@ function renderBusiness() {
   if (keep && categories.some((plan) => plan.id === keep)) select.value = keep;
   renderBusinessSummary();
   renderTax();
+  renderBusinessBills();
   const list = document.getElementById('business-expense-list');
   list.innerHTML = '';
   const rows = expensesInSummaryPeriod(document.getElementById('business-period-input').value || 'month').filter(isBusinessExpense).reverse();
@@ -6023,7 +6095,8 @@ function renderMoney() {
 // What to put aside for taxes on business profit, as a rough planning aid (not tax advice). The setting is one record in
 // the `income` list, { id: 'tax-<id>', taxPercent, taxSources: [income sources that count as business income],
 // ...sync fields }; the newest live record counts, so two devices that both change it settle on the later change. The
-// figure for a period is the percentage of (income from those sources minus the business expenses), never below zero.
+// figure for a period is the percentage of (income from those sources minus the business expenses and the business bills
+// paid), never below zero.
 
 // The current tax setting, or null when none has been saved.
 function taxSetting() {
@@ -6069,9 +6142,10 @@ function taxFigures(kind) {
     .filter((r) => !r.deleted && r.dateKey >= start && r.dateKey <= end && sources.has(cleanSource(r.source).toLowerCase()))
     .reduce((sum, r) => sum + r.amount, 0);
   const expenses = expensesInSummaryPeriod(kind).filter(isBusinessExpense).reduce((sum, r) => sum + r.amount, 0);
-  const profit = businessIncome - expenses;
+  const billsPaid = businessBillPayments(kind).reduce((sum, p) => sum + p.amount, 0);
+  const profit = businessIncome - expenses - billsPaid;
   return {
-    income: Math.round(businessIncome * 100) / 100, expenses: Math.round(expenses * 100) / 100, profit: Math.round(profit * 100) / 100,
+    income: Math.round(businessIncome * 100) / 100, expenses: Math.round(expenses * 100) / 100, bills: Math.round(billsPaid * 100) / 100, profit: Math.round(profit * 100) / 100,
     setAside: Math.round(Math.max(0, profit) * setting.taxPercent) / 100,
   };
 }
@@ -6093,6 +6167,7 @@ function renderTax() {
   [
     `Business income: ${formatMoney(figures.income)}`,
     `Business expenses: ${formatMoney(figures.expenses)}`,
+    ...(figures.bills > 0 ? [`Business bills paid: ${formatMoney(figures.bills)}`] : []),
     `Profit: ${formatSignedCurrency(figures.profit)}`,
     `Put aside at ${setting.taxPercent}%: ${formatMoney(figures.setAside)}`,
   ].forEach((text) => {
@@ -6431,6 +6506,7 @@ function reportData(kind) {
     left: monthIncome - monthBills - spending,
     categories: [...byCategory.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
     businessTotal, personalTotal: spending - businessTotal,
+    businessBills: businessBillPayments(kind).reduce((sum, p) => sum + p.amount, 0),
     tax: taxFigures(kind),
     accounts: accountRecords().length ? netWorthOn(todayKey()) : null,
   };
@@ -6463,7 +6539,7 @@ function renderPrintReport(kind) {
   if (data.categories.length) table([...data.categories.map((c) => [c.name, formatMoney(c.total)]), ['Total', formatMoney(data.spending)]]);
   else add('p', 'No spending was logged in this period.');
   add('h2', 'Business and personal');
-  table([['Business spending', formatMoney(data.businessTotal)], ['Personal spending', formatMoney(data.personalTotal)]]);
+  table([['Business spending', formatMoney(data.businessTotal)], ['Personal spending', formatMoney(data.personalTotal)], ...(data.businessBills > 0 ? [['Business bills paid', formatMoney(data.businessBills)]] : [])]);
   if (data.tax) {
     add('h2', 'Tax set-aside (a planning figure, not tax advice)');
     table([['Business income', formatMoney(data.tax.income)], ['Business expenses', formatMoney(data.tax.expenses)], ['Profit', formatSignedCurrency(data.tax.profit)], ['To put aside', formatMoney(data.tax.setAside)]]);
@@ -8053,7 +8129,7 @@ function isValidImportRecord(collectionName, rec) {
   if (rec.version !== undefined && !isNum(rec.version)) return false;
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean');
+  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean') && (rec.business === undefined || typeof rec.business === 'boolean');
   if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
@@ -8228,7 +8304,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 50;
+const APP_VERSION = 51;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
