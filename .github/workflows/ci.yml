@@ -24,14 +24,25 @@ jobs:
       - name: Python tests (the app's files and the sync server)
         run: python3 -m unittest discover -s tests
 
+      # The page's own test suites run in real time (about a minute), so Chrome is left running and its tab title is
+      # read until it says OK or FAIL: tests/tests.html ends the title with the result, for example "OK 761/761".
       - name: Browser tests (the page's own test suites, run in headless Chrome)
         run: |
           python3 -m http.server 8000 &
           sleep 2
-          google-chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=180000 \
-            --dump-dom http://localhost:8000/tests/tests.html > tests-result.html
-          grep -o '<title>[^<]*</title>' tests-result.html
-          grep -q '<title>Budget tests - OK [0-9]*/[0-9]*</title>' tests-result.html
+          google-chrome --headless=new --no-sandbox --disable-gpu --remote-debugging-port=9222 \
+            http://localhost:8000/tests/tests.html > /dev/null 2>&1 &
+          for i in $(seq 1 120); do
+            title=$(curl -s http://localhost:9222/json | python3 -c "import sys, json; print(' '.join(t['title'] for t in json.load(sys.stdin) if t['type'] == 'page'))" 2>/dev/null || true)
+            echo "after $((i * 2))s: $title"
+            case "$title" in
+              *"Budget tests - OK"*) exit 0 ;;
+              *"Budget tests - FAIL"*) exit 1 ;;
+            esac
+            sleep 2
+          done
+          echo "The browser tests did not finish in four minutes"
+          exit 1
 
   deploy:
     needs: test
