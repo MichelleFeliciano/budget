@@ -2891,8 +2891,12 @@ function renderPlan() {
     const notesBox = node.querySelector('.plan-edit-notes');
     const rolloverBox = node.querySelector('.plan-edit-rollover');
     const mergeSelect = node.querySelector('.plan-merge-target');
-    node.querySelector('.plan-merge-btn').addEventListener('click', () => {
+    const mergeBtn = node.querySelector('.plan-merge-btn');
+    let mergeArmed = false; // the first tap asks, the second merges
+    mergeSelect.addEventListener('change', () => { mergeArmed = false; mergeBtn.textContent = 'Merge into it'; });
+    mergeBtn.addEventListener('click', () => {
       if (!mergeSelect.value) { editError.textContent = 'Choose a category to merge into.'; editError.hidden = false; return; }
+      if (!mergeArmed) { mergeArmed = true; mergeBtn.textContent = 'Tap again to merge for good'; return; }
       const result = mergePlanCategory(record.id, mergeSelect.value);
       if (!result.ok) { editError.textContent = result.error; editError.hidden = false; return; }
       const status = document.getElementById('plan-status');
@@ -3706,6 +3710,7 @@ function renderBudget() {
   renderSetupChecklist();
   renderSearchResults();
   renderIncomeQuickAdd();
+  renderMore();
   restoreOpenCardForms(openCardForms);
 
   renderBackupNotes();
@@ -6406,7 +6411,7 @@ function renderSearchResults() {
 }
 
 // The names of the tabs, for the search results' buttons.
-const TAB_NAMES = { home: 'Home', income: 'Income', bills: 'Bills', plan: 'Plan', expenses: 'Expenses', business: 'Business', money: 'Money' };
+const TAB_NAMES = { home: 'Home', income: 'Income', bills: 'Bills', plan: 'Plan', expenses: 'Expenses', business: 'Business', money: 'Money', more: 'Help' };
 
 // Typing in the box searches as you go.
 document.getElementById('global-search-input').addEventListener('input', renderSearchResults);
@@ -6592,6 +6597,208 @@ function mergePlanCategory(fromId, toId) {
   return { ok: true, moved, from: from.planName, to: to.planName };
 }
 
+// ---- Help, history and settings (the page the Menu's "Help, history & settings" button opens) ----
+// Not one of the tab-bar tabs: it is the 'more' tab, shown by showTab like the others. It holds a settings check, what is
+// new in this version, a list of recent changes, the records deleted lately (each with a Restore button) and a short help.
+
+// The settings check: one line for each thing that can be on or off, as { on, text }.
+function settingsCheckLines() {
+  const lines = [];
+  const config = loadSyncConfig();
+  const last = lastSyncTime();
+  lines.push({ on: !!config, text: config ? `Sync is on${last ? `, last synced ${formatAgo(last)}` : ', not synced yet: tap Sync now'}.` : 'Sync is off: your data is only on this device.' });
+  const backupDays = daysSinceBackup(EXPORT_AT_KEY);
+  lines.push({ on: backupDays !== null && backupDays < EXPORT_DUE_DAYS, text: backupDays === null ? 'No backup file has been saved yet.' : `Last backup file ${backupDays === 0 ? 'today' : `${backupDays} day${backupDays === 1 ? '' : 's'} ago`}${backupDays >= EXPORT_DUE_DAYS ? ': time for a new one' : ''}.` });
+  lines.push({ on: !!loadLock(), text: loadLock() ? 'App lock is on.' : 'App lock is off.' });
+  const offlineReady = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+  lines.push({ on: offlineReady, text: offlineReady ? 'Works offline: the app opens without a connection.' : 'Offline use is not ready yet: open the app once with a connection and let it finish loading.' });
+  lines.push({ on: navigator.onLine !== false, text: navigator.onLine === false ? 'This device is offline right now.' : 'This device is online.' });
+  let canSave = true;
+  try { localStorage.setItem('budgetApp.check.v1', '1'); localStorage.removeItem('budgetApp.check.v1'); } catch { canSave = false; }
+  lines.push({ on: canSave, text: canSave ? 'This browser can save your data.' : 'This browser cannot save your data: nothing will be kept.' });
+  lines.push({ on: true, text: `${document.getElementById('theme-btn').textContent}. ${document.getElementById('text-size-btn').textContent}.` });
+  return lines;
+}
+
+// A name for any record, for lists such as History and Recently deleted: its own name, or what kind of record it is.
+function recordLabel(collectionName, source) {
+  const labelField = RECORD_LABEL_FIELD[collectionName];
+  return source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.recurPlanId ? 'repeating expense' : '') || source.acctName || source.ruleText || (source.balFor ? 'balance' : '') || (source.taxPercent !== undefined ? 'tax setting' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+}
+
+// How many days back the Recently Deleted list goes.
+const RECENTLY_DELETED_DAYS = 60;
+
+// The records deleted in the last RECENTLY_DELETED_DAYS days, newest first, as { collection, record, label }.
+function recentlyDeleted() {
+  const cutoff = new Date(Date.now() - RECENTLY_DELETED_DAYS * 86400000).toISOString();
+  const found = [];
+  SYNC_COLLECTIONS.forEach((c) => {
+    c.get().filter((r) => r.deleted && (r.updatedAt || '') >= cutoff).forEach((record) => {
+      const label = recordLabel(c.name, record);
+      if (label) found.push({ collection: c, record, label });
+    });
+  });
+  return found.sort((a, b) => (b.record.updatedAt || '').localeCompare(a.record.updatedAt || '')).slice(0, 50);
+}
+
+// Draws the whole help page.
+function renderMore() {
+  const check = document.getElementById('settings-check-list');
+  check.innerHTML = '';
+  settingsCheckLines().forEach((line) => {
+    const item = document.createElement('li');
+    item.textContent = `${line.on ? '✓' : '○'} ${line.text}`;
+    if (!line.on) item.className = 'setting-off';
+    check.appendChild(item);
+  });
+
+  const news = document.getElementById('whatsnew-list');
+  news.innerHTML = '';
+  Object.keys(WHATS_NEW).map(Number).sort((a, b) => b - a).forEach((version) => {
+    const entry = WHATS_NEW[version];
+    const item = document.createElement('li');
+    const title = document.createElement('strong');
+    title.textContent = `Version ${version}${version === APP_VERSION ? ' (this one)' : ''}, ${formatDateKeyLong(entry.date)}`;
+    const notes = document.createElement('ul');
+    entry.notes.forEach((text) => {
+      const note = document.createElement('li');
+      note.textContent = text;
+      notes.appendChild(note);
+    });
+    item.append(title, notes);
+    news.appendChild(item);
+  });
+
+  const history = document.getElementById('history-list');
+  history.innerHTML = '';
+  undoStack.slice().reverse().slice(0, 30).forEach((entry) => {
+    const item = document.createElement('li');
+    const text = describeEntry(entry);
+    item.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    history.appendChild(item);
+  });
+  document.getElementById('history-empty').hidden = undoStack.length !== 0;
+
+  const deleted = recentlyDeleted();
+  const list = document.getElementById('deleted-list');
+  list.innerHTML = '';
+  deleted.forEach(({ collection, record, label }) => {
+    const item = document.createElement('li');
+    const text = document.createElement('span');
+    const amount = typeof record.amount === 'number' ? ` · ${formatMoney(record.amount)}` : '';
+    text.textContent = `${label}${amount} · deleted ${formatAgo(new Date(record.updatedAt))}`;
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'small-btn';
+    restore.textContent = 'Restore';
+    restore.setAttribute('aria-label', `Restore ${label}`);
+    restore.addEventListener('click', () => { collection.restore(record.id); renderBudget(); });
+    item.append(text, restore);
+    list.appendChild(item);
+  });
+  document.getElementById('deleted-empty').hidden = deleted.length !== 0;
+}
+
+// The Menu button opens the help page (and closes the Menu on a phone); its Back button returns to Home.
+document.getElementById('more-btn').addEventListener('click', () => {
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.classList.remove('sidebar-open');
+  showTab('more');
+  window.scrollTo({ top: 0, behavior: scrollBehavior() });
+});
+document.getElementById('more-back-btn').addEventListener('click', () => {
+  showTab('home');
+  window.scrollTo({ top: 0, behavior: scrollBehavior() });
+});
+
+// ---- Saying so when the device is offline ----
+
+// Shows the offline bar while the device has no connection, and redraws the settings check.
+function updateOfflineNote() {
+  document.getElementById('offline-note').hidden = navigator.onLine !== false;
+  renderMore();
+}
+window.addEventListener('online', updateOfflineNote);
+window.addEventListener('offline', updateOfflineNote);
+
+// ---- Check an import before it is saved ----
+// Choosing a backup file does not change anything: it first shows what the file holds and what would happen to each
+// record (new, updated, already here, unreadable), worked out on copies, and only the Import button saves it.
+
+// The file chosen and waiting for the Import button, or null.
+let pendingImport = null;
+
+// What importing a parsed file would do, as { problem, lines, info }: problem is a sentence when the file is not a backup,
+// lines is one sentence per list, info says which app version made the file and when.
+function previewImport(parsed) {
+  const collections = extractImportCollections(parsed);
+  if (!collections) return { problem: "That file doesn't look like a Budget or Second Memory export.", lines: [], info: '' };
+  const lines = [];
+  SYNC_COLLECTIONS.forEach((c) => {
+    const raw = collections[c.name];
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    const valid = raw.filter((rec) => isValidImportRecord(c.name, rec));
+    const result = mergeCollectionFromImport(structuredClone(c.get()), structuredClone(valid), c.name);
+    const parts = [`${result.added} new`, `${result.updated} updated`, `${result.unchanged + result.duplicated} already here`];
+    if (raw.length - valid.length) parts.push(`${raw.length - valid.length} unreadable (skipped)`);
+    lines.push(`${c.label}: ${raw.length} in the file: ${parts.join(', ')}.`);
+  });
+  const info = parsed && parsed.appVersion ? `Made by Budget version ${parsed.appVersion}${parsed.exportedAt ? ` on ${formatDateKeyLong(String(parsed.exportedAt).slice(0, 10))}` : ''}.` : '';
+  return { problem: lines.length ? '' : 'That file has nothing to import.', lines, info };
+}
+
+// Shows the check-first box for a parsed file.
+function showImportPreview(parsed) {
+  const preview = previewImport(parsed);
+  const box = document.getElementById('import-preview');
+  const list = document.getElementById('import-preview-list');
+  list.innerHTML = '';
+  if (preview.problem) {
+    pendingImport = null;
+    box.hidden = true;
+    setDataIoStatus(`Import failed — ${preview.problem.charAt(0).toLowerCase()}${preview.problem.slice(1)}`, 'failed');
+    return;
+  }
+  pendingImport = parsed;
+  [...preview.lines, ...(preview.info ? [preview.info] : [])].forEach((text) => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    list.appendChild(item);
+  });
+  box.hidden = false;
+  setDataIoStatus('Nothing has been imported yet. Check the counts, then tap Import.', null);
+}
+
+// Import saves the checked file (see importData); Cancel drops it.
+document.getElementById('import-preview-btn').addEventListener('click', () => {
+  const parsed = pendingImport;
+  pendingImport = null;
+  document.getElementById('import-preview').hidden = true;
+  if (parsed) importData(parsed);
+});
+document.getElementById('import-cancel-btn').addEventListener('click', () => {
+  pendingImport = null;
+  document.getElementById('import-preview').hidden = true;
+  setDataIoStatus('Import cancelled: nothing was changed.', null);
+});
+
+// ---- "Add one now" on empty screens ----
+// An empty list has a button that takes you to the box that adds the first one: it names the tab and the box, and may
+// tick another box on the way (data-also).
+document.addEventListener('click', (e) => {
+  const button = e.target.closest('.empty-add');
+  if (!button) return;
+  showTab(button.dataset.addTab);
+  const target = document.getElementById(button.dataset.addTarget);
+  if (button.dataset.also) document.getElementById(button.dataset.also).checked = true;
+  if (button.dataset.addTarget === 'budget-name-input' && isPhoneLayout()) { openAddBillSheet(); return; }
+  if (target) {
+    target.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+    target.focus({ preventScroll: true });
+  }
+});
+
 // The expense date starts on today.
 document.getElementById('expense-date-input').value = todayKey();
 
@@ -6635,6 +6842,10 @@ let backupNotesDismissed = false;
 function renderBackupNotes() {
   const box = document.getElementById('backup-notes');
   if (!box) return;
+  const exportedAt = (() => { try { return localStorage.getItem(EXPORT_AT_KEY); } catch { return null; } })();
+  const exportedDate = exportedAt ? new Date(exportedAt) : null;
+  document.getElementById('last-backup').textContent = exportedDate && Number.isFinite(exportedDate.getTime())
+    ? `Last backup file: ${formatDateKeyLong(dateKeyFromLocalDate(exportedDate))}` : 'Last backup file: none yet';
   box.innerHTML = '';
   const reminders = [];
   const hasAnyData = SYNC_COLLECTIONS.some((c) => c.get().some((r) => !r.deleted));
@@ -6930,9 +7141,7 @@ const RECORD_LABEL_FIELD = {
 
 // Plain-English summary of an undo entry, e.g. "deleted 'Rent'", for the button tooltips.
 function describeEntry(entry) {
-  const labelField = RECORD_LABEL_FIELD[entry.collection];
-  const source = entry.after || entry.before;
-  const identifier = source && labelField ? (source[labelField] || source.projectedFor || source.planName || source.guessName || source.goalName || source.itemName || (source.adjustWeek ? 'carry-forward' : '') || (source.recurPlanId ? 'repeating expense' : '') || source.acctName || source.ruleText || (source.balFor ? 'balance' : '') || (source.taxPercent !== undefined ? 'tax setting' : '') || (source.savedFor ? 'savings' : '') || source.categoryName || source.spentOn) : null;
+  const identifier = recordLabel(entry.collection, entry.after || entry.before);
   let action;
   if (entry.before === null) action = 'added';
   else if (entry.after.deleted && !entry.before.deleted) action = 'deleted';
@@ -7585,7 +7794,8 @@ function buildExportPayload() {
   const local = {};
   const payday = loadPaydaySettings();
   if (payday.payDateKey) local.paydaySettings = payday;
-  return { collections, local };
+  // The format and version let any copy of the app (or a person) tell what a file is and which version made it.
+  return { format: 'budget-export', formatVersion: 1, appVersion: APP_VERSION, exportedAt: new Date().toISOString(), collections, local };
 }
 
 // Saves a file to the device by clicking a temporary link to it. The link is kept for a while: revoking it at once can
@@ -8047,7 +8257,7 @@ document.getElementById('import-file-input').addEventListener('change', (e) => {
       setDataIoStatus('Import failed — that file is not valid JSON.', 'failed');
       return;
     }
-    importData(parsed);
+    showImportPreview(parsed);
   };
   reader.onerror = () => {
     setDataIoStatus('Import failed — could not read that file.', 'failed');
@@ -8083,7 +8293,22 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 52;
+const APP_VERSION = 53;
+
+// What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
+// here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
+// version (a test checks that both exist).
+const WHATS_NEW = {
+  53: { date: '2026-10-26', notes: ['A Help, history & settings page (Menu): a settings check, what is new, recent changes, recently deleted things you can restore, and help.', 'Importing a backup now shows what it would do first, and only saves when you tap Import.', 'The Menu shows the date of your last backup file and of this version, and backup files carry the app version and format.', 'An offline bar when the device has no connection, and Add one now buttons on empty screens.', 'Merging two categories asks for a second tap.'] },
+  52: { date: '2026-10-26', notes: ['The Business tab is only business bills now.'] },
+  51: { date: '2026-10-24', notes: ['Business bills: tick Business on a bill.'] },
+  50: { date: '2026-10-23', notes: ['Paid by Mom on an expense: it does not come out of your money.'] },
+  49: { date: '2026-10-23', notes: ['Bills can end (a last payment date or a number of payments), a printable report, search, Where It Goes, set-asides for yearly bills, import from other banks, and merging categories.'] },
+  48: { date: '2026-10-23', notes: ['Balance from the Chase file, splitting a transaction, carrying unspent plan money forward, Last Week, the Paycheck Planner and a setup checklist.'] },
+  47: { date: '2026-10-23', notes: ['The Money tab (accounts and net worth, debt payoff, forecast, trends, subscriptions) and Chase rules.'] },
+  46: { date: '2026-10-23', notes: ['This week on Home, savings goals on Home, and Quick Add for income.'] },
+};
+
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.
@@ -8151,7 +8376,8 @@ document.getElementById('text-size-btn').addEventListener('click', () => {
 });
 applyTextSize(loadTextSize());
 // Show the version number in the Menu.
-document.getElementById('app-version').textContent = `Version ${APP_VERSION}`;
+updateOfflineNote();
+document.getElementById('app-version').textContent = `Version ${APP_VERSION}, updated ${formatDateKeyLong(WHATS_NEW[APP_VERSION].date)}`;
 
 // ---- App lock ----
 // A PIN that hides the app until it is typed. It keeps other people out of the screen; it does
@@ -8446,7 +8672,7 @@ document.querySelectorAll('details.fold').forEach((fold) => {
 
 // localStorage key for the last tab used, and the tabs in order.
 const TAB_KEY = 'budgetApp.tab.v1';
-const TABS = ['home', 'income', 'bills', 'plan', 'expenses', 'business', 'money'];
+const TABS = ['home', 'income', 'bills', 'plan', 'expenses', 'business', 'money', 'more'];
 // The tab on screen.
 let currentTab = 'home';
 
@@ -8491,7 +8717,7 @@ let addFormOnScreen = false;
 
 // Shows or hides the + button for the current tab.
 function updateAddFab() {
-  addBillFab.hidden = ['income', 'plan', 'expenses', 'business', 'money'].includes(currentTab) || (currentTab === 'bills' && addFormOnScreen);
+  addBillFab.hidden = ['income', 'plan', 'expenses', 'business', 'money', 'more'].includes(currentTab) || (currentTab === 'bills' && addFormOnScreen);
 }
 
 if (addBillFab && addBillForm) {

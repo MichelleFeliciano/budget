@@ -25,19 +25,25 @@ Budget began as a tab of another app (Second Memory) and is now fully separate f
   the real copy and re-send everything after a reset (`runSync` does this in one tap). Never add a disk or a paid
   plan back without being asked, and never default `DATA_DIR` to a path that needs a disk. Pushing changes
   `render.yaml`, which Render applies automatically, so ask before pushing.
+- Every shipped version gets a dated entry in `CHANGELOG.md` and an entry in `WHATS_NEW` in app.js (the same date); a test checks both for the current version.
 - Comments must say what the rule is. Do not cite design notes that are not in this repo.
 - Every top-level function in app.js has a comment directly above it (a test checks), and every CSS rule has one too.
   A reduced-motion rule must come after the rule it turns off (a test checks that as well).
 
 ## Testing
 - Browser: `python -m http.server 5191` in this folder, open http://localhost:5191/tests/tests.html and wait
-  about 15 seconds. The title ends `OK n/n` (currently 741/741).
+  about 15 seconds. The title ends `OK n/n` (currently 761/761).
 - Python: `python -m unittest discover -s tests` (app file checks plus the sync server tests).
 - Clear service workers, caches and localStorage in the test browser before and after each run.
 - Stop the server with PowerShell:
   `Get-CimInstance Win32_Process | Where CommandLine -match 'http.server 5191' | Stop-Process`
   (no pkill/kill).
 - Write patch scripts as files with the Write tool, not heredocs.
+
+## Continuous integration
+`.github/workflows/ci.yml` runs the Python and browser tests on every push and pull request. It deploys the site only after they pass,
+and only once Pages is set to publish from "GitHub Actions" and the repository variable `DEPLOY_VIA_ACTIONS` is `true` (until then Pages
+publishes straight from the branch as before).
 
 ## Git
 Commit in small steps. Ask before pushing.

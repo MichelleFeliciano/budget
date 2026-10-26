@@ -17,7 +17,7 @@ check('a Second Memory theme on the same site is not picked up', loadTheme() ===
 localStorage.removeItem('secondMemory.theme.v1');
 
 // ---- version label ----
-check('the Menu shows the version', $('app-version').textContent === 'Version ' + APP_VERSION && Number.isInteger(APP_VERSION));
+check('the Menu shows the version', $('app-version').textContent.startsWith('Version ' + APP_VERSION + ',') && Number.isInteger(APP_VERSION));
 
 // ---- backup reminder ----
 const noteText = () => $('backup-notes').hidden ? '' : $('backup-notes').textContent;

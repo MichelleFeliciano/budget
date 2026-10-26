@@ -202,5 +202,24 @@ class AppFiles(unittest.TestCase):
                     self.assertGreaterEqual(ratio(colours[foreground], colours[background]), needed)
 
 
+class Release(unittest.TestCase):
+    """Every shipped version is written down, and the tests run on GitHub before anything is published."""
+
+    def test_this_version_is_in_whats_new_and_the_dated_change_log(self):
+        version = re.search(r"const APP_VERSION = (\d+);", APP).group(1)
+        self.assertRegex(APP, r"const WHATS_NEW = \{[^}]*?\b" + version + r": \{ date: '\d{4}-\d{2}-\d{2}', notes: \[")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertRegex(changelog, r"(?m)^## v" + version + r" \(\d{4}-\d{2}-\d{2}\)$")
+        # the same date in both places
+        whats_new_date = re.search(r"\b" + version + r": \{ date: '(\d{4}-\d{2}-\d{2})'", APP).group(1)
+        self.assertIn(f"## v{version} ({whats_new_date})", changelog)
+
+    def test_github_runs_every_test_and_only_deploys_when_they_pass(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python3 -m unittest discover -s tests", workflow)
+        self.assertIn("tests/tests.html", workflow)
+        self.assertRegex(workflow, r"(?s)deploy:\s+needs: test")
+
+
 if __name__ == "__main__":
     unittest.main()

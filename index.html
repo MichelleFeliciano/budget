@@ -74,9 +74,17 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <!-- Only shown where the browser can share a file (most phones); app.js decides. -->
         <button type="button" id="share-data-btn" class="data-io-btn" hidden>Share backup</button>
         <button type="button" id="calendar-export-btn" class="data-io-btn" title="Download a calendar file with your bills, to add reminders to your phone's calendar">Calendar reminders</button>
+        <button type="button" id="more-btn" class="data-io-btn">Help, history &amp; settings</button>
       </div>
       <input type="file" id="import-file-input" accept="application/json,.json" aria-label="Choose a backup file to import" hidden>
       <p class="sync-status-text data-io-status" id="data-io-status" role="status" hidden></p>
+      <!-- Check first: what a chosen backup file would do, before anything is saved (showImportPreview). -->
+      <div class="import-preview" id="import-preview" hidden>
+        <p class="stats-line">Check first: nothing is saved until you tap Import.</p>
+        <ul class="flat-list" id="import-preview-list"></ul>
+        <button type="button" id="import-preview-btn" class="small-btn">Import</button>
+        <button type="button" id="import-cancel-btn" class="small-btn">Cancel</button>
+      </div>
     </div>
 
     <!-- Menu footer: Theme (Auto / Light / Dark), Text size, App lock and Lock now buttons, and the app version; labels filled by app.js. -->
@@ -88,6 +96,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <button type="button" id="lock-now-btn" class="data-io-btn" hidden>Lock now</button>
       </div>
       <p class="app-version" id="app-version"></p>
+      <p class="app-version" id="last-backup"></p>
     </div>
   </nav>
 
@@ -109,6 +118,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
          renderPaidHistory, renderBudgetList, renderRecurringIncomeList, the income lists, renderPlan, renderGuesses,
          renderGoals and renderExpenses); each tab shows its own part. -->
     <section class="collection" id="budget-collection">
+      <!-- Shown while the device has no connection (updateOfflineNote). -->
+      <div class="offline-note" id="offline-note" role="status" hidden>You are offline. Everything still works and is saved on this device; Sync waits until you are back online.</div>
       <!-- Shown when a newer copy of the app has been installed in the background; Update now reloads into it. -->
       <div class="reminder-banner update-banner" id="update-banner" role="status" hidden>
         <span class="reminder-banner-text">A new version of Budget is ready.</span>
@@ -136,7 +147,8 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
         <!-- A short list of first steps, shown until every one is done or it is closed on this device (renderSetupChecklist). -->
         <div class="setup-checklist" id="setup-checklist" hidden>
-          <h3 class="chart-title">Getting set up</h3>
+          <h3 class="chart-title">Welcome! Getting set up</h3>
+          <p class="stats-line">Everything you enter is saved on this device. Syncing and backups are optional; Help, history &amp; settings in the Menu explains how it all works.</p>
           <ul class="flat-list" id="setup-list"></ul>
           <button type="button" class="small-btn" id="setup-close-btn">Hide this</button>
         </div>
@@ -224,7 +236,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <button type="submit">Add income</button>
           </form>
           <ul class="card-list flat-list" id="received-income-list"></ul>
-          <p class="empty-state" id="received-income-empty-state" hidden>No income entered yet.</p>
+          <p class="empty-state" id="received-income-empty-state" hidden>No income entered yet. <button type="button" class="small-btn empty-add" data-add-tab="income" data-add-target="received-income-amount-input">Add one now</button></p>
         </details>
 
         <details class="fold" id="fold-projected-income" open>
@@ -272,7 +284,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <button type="submit">Add recurring income</button>
           </form>
           <ul class="card-list flat-list" id="recurring-income-list"></ul>
-          <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet.</p>
+          <p class="empty-state" id="recurring-income-empty-state" hidden>No recurring income sources yet. <button type="button" class="small-btn empty-add" data-add-tab="income" data-add-target="recurring-income-name-input">Add one now</button></p>
         </details>
       </div>
 
@@ -288,7 +300,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line" id="plan-scenario-line"></p>
           <ul class="card-list flat-list" id="plan-list"></ul>
           <p class="sync-status" id="plan-status" hidden></p>
-          <p class="empty-state" id="plan-empty-state" hidden>No categories yet. Add one below.</p>
+          <p class="empty-state" id="plan-empty-state" hidden>No categories yet. Add one below. <button type="button" class="small-btn empty-add" data-add-tab="plan" data-add-target="plan-name-input">Add one now</button></p>
           <form id="plan-add-form" class="add-form add-form-stacked">
             <input type="text" id="plan-name-input" maxlength="60" placeholder="Category (e.g. Groceries)" required aria-label="Category name">
             <input type="number" inputmode="decimal" id="plan-amount-input" placeholder="Amount" min="0.01" step="0.01" required aria-label="Amount">
@@ -313,7 +325,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line">Guesses for things you expect to pay in a certain month, like car maintenance. This month's guesses come off "left after plan" on Home. Replace a guess with the real number once you know it.</p>
           <p class="stats-line" id="guess-total-line"></p>
           <ul class="card-list flat-list" id="guess-list"></ul>
-          <p class="empty-state" id="guess-empty-state" hidden>No expected costs yet. Add one below.</p>
+          <p class="empty-state" id="guess-empty-state" hidden>No expected costs yet. Add one below. <button type="button" class="small-btn empty-add" data-add-tab="plan" data-add-target="guess-name-input">Add one now</button></p>
           <form id="guess-add-form" class="add-form add-form-stacked">
             <input type="text" id="guess-name-input" maxlength="60" placeholder="What for (e.g. Car maintenance)" required aria-label="What the cost is for">
             <input type="number" inputmode="decimal" id="guess-amount-input" placeholder="Estimated amount" min="0.01" step="0.01" required aria-label="Estimated amount">
@@ -330,7 +342,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <summary class="fold-summary"><h2>Savings Goals</h2></summary>
           <p class="stats-line">Save up for a large purchase. Add a goal with a target (and a date if you have one), then record each amount you put aside. With a date, the goal shows what to set aside per month to get there.</p>
           <ul class="card-list flat-list" id="goal-list"></ul>
-          <p class="empty-state" id="goal-empty-state" hidden>No savings goals yet. Add one below.</p>
+          <p class="empty-state" id="goal-empty-state" hidden>No savings goals yet. Add one below. <button type="button" class="small-btn empty-add" data-add-tab="plan" data-add-target="goal-name-input">Add one now</button></p>
           <form id="goal-add-form" class="add-form add-form-stacked">
             <input type="text" id="goal-name-input" maxlength="60" placeholder="Saving for (e.g. New laptop)" required aria-label="What you are saving for">
             <input type="number" inputmode="decimal" id="goal-target-input" placeholder="Target amount (or split into costs after adding)" min="0.01" step="0.01" required aria-label="Target amount">
@@ -378,7 +390,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line">Costs that come around again, like a weekly coffee run or a monthly top-up. When one is due, tap Log it to record it (or Skip), so nothing logs itself by mistake.</p>
           <ul class="card-list flat-list" id="repeat-due-list"></ul>
           <ul class="card-list flat-list" id="repeat-list"></ul>
-          <p class="empty-state" id="repeat-empty-state" hidden>No repeating expenses yet. Add one below.</p>
+          <p class="empty-state" id="repeat-empty-state" hidden>No repeating expenses yet. Add one below. <button type="button" class="small-btn empty-add" data-add-tab="expenses" data-add-target="repeat-amount-input">Add one now</button></p>
           <form id="repeat-add-form" class="add-form add-form-stacked">
             <select id="repeat-category-input" aria-label="Spending Plan category"></select>
             <input type="number" inputmode="decimal" id="repeat-amount-input" placeholder="Amount each time" min="0.01" step="0.01" required aria-label="Amount each time">
@@ -482,7 +494,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line" id="expense-filter-total"></p>
           <ul class="card-list flat-list" id="expense-list"></ul>
           <p class="stats-line" id="expense-list-note" hidden></p>
-          <p class="empty-state" id="expense-empty-state" hidden>No expenses logged yet.</p>
+          <p class="empty-state" id="expense-empty-state" hidden>No expenses logged yet. <button type="button" class="small-btn empty-add" data-add-tab="expenses" data-add-target="expense-amount-input">Add one now</button></p>
         </details>
       </div>
 
@@ -493,7 +505,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line">The bills you pay yourself for the business (tick Business when you add or edit a bill): what they cost in an average month, and what is due next. They are ordinary bills everywhere else, so the calendar, the forecast and your totals count them.</p>
           <p class="stats-line" id="business-bill-line"></p>
           <ul class="card-list flat-list" id="business-bill-list"></ul>
-          <p class="empty-state" id="business-bill-empty" hidden>No business bills yet. Tick Business on a bill.</p>
+          <p class="empty-state" id="business-bill-empty" hidden>No business bills yet. Tick Business on a bill. <button type="button" class="small-btn empty-add" data-add-tab="bills" data-add-target="budget-name-input" data-also="budget-business-input">Add one now</button></p>
         </details>
 
       </div>
@@ -505,7 +517,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <p class="stats-line">What you have in each account and what you owe. Edit an account to change its balance whenever you like: each change is kept as a dated entry, so net worth over time builds up. Net worth is what you have minus what you owe.</p>
           <p class="stats-line" id="networth-line"></p>
           <ul class="card-list flat-list" id="account-list"></ul>
-          <p class="empty-state" id="account-empty" hidden>No accounts yet. Add one below.</p>
+          <p class="empty-state" id="account-empty" hidden>No accounts yet. Add one below. <button type="button" class="small-btn empty-add" data-add-tab="money" data-add-target="account-name-input">Add one now</button></p>
           <ul class="flat-list" id="networth-history"></ul>
           <form id="account-add-form" class="add-form add-form-stacked">
             <input type="text" id="account-name-input" maxlength="60" placeholder="Account (e.g. Checking, Car loan)" required aria-label="Account name">
@@ -564,6 +576,50 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
           <h3 class="chart-title" id="setaside-heading" hidden>Set aside for yearly bills</h3>
           <p class="stats-line" id="setaside-line"></p>
           <ul class="card-list flat-list" id="setaside-list"></ul>
+        </details>
+      </div>
+
+      <!-- Help, history and settings: not in the tab bar; the Menu's button opens it (renderMore). -->
+      <div class="tab-panel" id="tab-more" hidden>
+        <button type="button" class="small-btn" id="more-back-btn">Back to Home</button>
+
+        <details class="fold" id="fold-settings-check" open>
+          <summary class="fold-summary"><h2>Settings Check</h2></summary>
+          <p class="stats-line">What is on and what is off.</p>
+          <ul class="flat-list plain-list" id="settings-check-list"></ul>
+        </details>
+
+        <details class="fold" id="fold-whatsnew" open>
+          <summary class="fold-summary"><h2>What's New</h2></summary>
+          <ul class="flat-list" id="whatsnew-list"></ul>
+        </details>
+
+        <details class="fold" id="fold-history">
+          <summary class="fold-summary"><h2>History</h2></summary>
+          <p class="stats-line">Your recent changes, newest first. Undo and Redo are in the Menu, and the bar at the bottom after a delete.</p>
+          <ul class="flat-list" id="history-list"></ul>
+          <p class="empty-state" id="history-empty" hidden>Nothing has been changed since the app was opened.</p>
+        </details>
+
+        <details class="fold" id="fold-deleted">
+          <summary class="fold-summary"><h2>Recently Deleted</h2></summary>
+          <p class="stats-line">Anything you deleted in the last two months, with a button to bring it back.</p>
+          <ul class="flat-list" id="deleted-list"></ul>
+          <p class="empty-state" id="deleted-empty" hidden>Nothing was deleted lately.</p>
+        </details>
+
+        <details class="fold" id="fold-help">
+          <summary class="fold-summary"><h2>Help</h2></summary>
+          <h3 class="chart-title">Getting started</h3>
+          <p class="stats-line">Add a bill on the Bills tab, your paycheck under Recurring Income on the Income tab, and a few categories on the Plan tab. The Home tab then shows your weeks, what is left, and your savings goals.</p>
+          <h3 class="chart-title">Your data</h3>
+          <p class="stats-line">Everything is saved on this device. Sync (in the Menu) is optional and copies your data to your other devices through your own server; the server forgets it when it restarts, so your devices keep the real copy. Export or Share backup saves a file you can keep, and Import checks a file before it adds anything: it never replaces newer work or brings back something you deleted.</p>
+          <h3 class="chart-title">Mistakes</h3>
+          <p class="stats-line">Undo (and Redo) are in the Menu, and a bar with Undo appears after a delete. Recently Deleted on this page brings back anything deleted in the last two months.</p>
+          <h3 class="chart-title">On your phone</h3>
+          <p class="stats-line">Open the site in your phone's browser and choose Add to Home Screen. After the first visit it works with no connection. When a new version is ready a bar says so: tap Update now.</p>
+          <h3 class="chart-title">Privacy</h3>
+          <p class="stats-line">Nothing is sent anywhere except when you tap Sync, and then only to your own server. A bank file you import is read on this device only. App lock in the Menu hides everything behind a PIN.</p>
         </details>
       </div>
 
@@ -631,7 +687,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
         <ul class="card-list flat-list" id="budget-list"></ul>
 
-        <p class="empty-state" id="budget-empty-state" hidden>No bills yet — add your first one above.</p>
+        <p class="empty-state" id="budget-empty-state" hidden>No bills yet — add your first one above. <button type="button" class="small-btn empty-add" data-add-tab="bills" data-add-target="budget-name-input">Add one now</button></p>
         <p class="empty-state" id="budget-filter-empty" hidden>No bills are overdue or due in the next two weeks.</p>
 
         <details class="fold" id="fold-paid-history">

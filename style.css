@@ -1404,6 +1404,40 @@ input[type="date"]::-webkit-date-and-time-value {
   .print-report td:last-child { text-align: right; }
 }
 
+/* The bar shown while the device is offline: a quiet notice above the page. */
+
+.offline-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Hidden while online (the block display above would otherwise show it). */
+
+.offline-note[hidden] { display: none; }
+
+/* The Check first box under the Import button in the Menu. */
+
+.import-preview {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  font-size: 0.85rem;
+}
+
+/* A list whose lines carry their own tick or circle, so it needs no bullets. */
+
+.plain-list { list-style: none; padding-left: 0; }
+
+/* A setting that is off or not ready, in the muted colour. */
+
+.setting-off { color: var(--muted); }
+
 /* The split editor under a spending row: one line per part (category and amount), then what is left to place. */
 
 .bank-split {
