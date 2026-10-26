@@ -265,3 +265,7 @@ An expense with `paidByMom: true` is kept (it happened, and it can be edited or 
 
 A bill with `business: true` is a business cost but otherwise an ordinary bill: it is scheduled, due and marked paid on the Bills tab and counted by the calendar, forecast and totals, so nothing about your own money changes. The flag only feeds the Business tab. What counts as business bill spending in a period is what was actually paid (the dates marked paid, at the amount paid, skipped dates excluded), not what was due, because that is the figure a tax preparer needs; it is added to the business expenses in the summary line, the tax profit, the report and the CSV (as rows of type Business bill). The Business and Personal split of expenses is unchanged: it still comes from the Spending Plan category's flag.
 
+## The Business tab is only business bills (v52)
+
+The business is funded out of your own money, so there is nothing to keep apart: the Business tab now holds only the bills marked Business, as a list with their cost and what is due next. The business expense log, the Business Summary, the business CSV and the tax set-aside were removed (a Spending Plan category can still be marked Business or Personal, and the printable report still splits spending that way and shows what was paid on business bills). Old backups that hold a tax setting still import: the record is accepted and ignored.
+

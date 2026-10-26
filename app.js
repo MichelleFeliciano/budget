@@ -3603,7 +3603,7 @@ document.getElementById('goal-add-form').addEventListener('submit', (e) => {
 
 // The lists whose cards each have an Edit form (and a data-record-id): they are rebuilt on every redraw, so an
 // open form has to be captured first and put back after.
-const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'account-list', 'expense-list', 'business-expense-list', 'received-income-list', 'projected-income-list'];
+const EDIT_CARD_LIST_IDS = ['plan-list', 'guess-list', 'goal-list', 'repeat-list', 'account-list', 'expense-list', 'received-income-list', 'projected-income-list'];
 
 // Notes every open card edit form (in the given lists, by default all of them): which record, what is typed in
 // each box, and which box had focus. The Bills and Recurring Income lists are not here: renderBudget captures
@@ -3698,7 +3698,7 @@ function renderBudget() {
   renderGuesses();
   renderGoals();
   renderExpenses();
-  renderBusiness();
+  renderBusinessBills();
   renderMoney();
   renderGoalsOnHome();
   renderWeeklyReview();
@@ -4864,13 +4864,13 @@ document.getElementById('repeat-add-form').addEventListener('submit', (e) => {
 // The first date of a new repeating expense starts on today.
 document.getElementById('repeat-start-input').value = todayKey();
 
-// ---- Business summary and the expenses spreadsheet (CSV) ----
+// ---- Periods, and Business or Personal spending ----
 // A Spending Plan category is marked Business or Personal on the Plan tab, and each expense belongs to a category, so
 // an expense is Business or Personal by its category (an expense whose category was deleted counts as Personal when
-// the category cannot be found at all). The summary adds them up for a period, and the CSV lists every expense in it
-// for a spreadsheet or a tax preparer. Nothing is stored: it is worked out from the expenses each time.
+// the category cannot be found at all). The printable report adds them up for a period. Nothing is stored: it is
+// worked out from the expenses each time.
 
-// The periods the summary can show, as { value, label }.
+// The periods the report can show, as { value, label }.
 const SUMMARY_PERIODS = [
   { value: 'month', label: 'This month' },
   { value: 'lastMonth', label: 'Last month' },
@@ -4962,125 +4962,6 @@ function expensesInSummaryPeriod(kind) {
   const [start, end] = summaryPeriodBounds(kind);
   return expenseRecords().filter((r) => r.spentOn >= start && r.spentOn <= end).sort((a, b) => a.spentOn.localeCompare(b.spentOn));
 }
-
-// One cell of a CSV line: wrapped in quotes with inner quotes doubled, and a text that starts with =, +, - or @ gets a
-// leading apostrophe so a spreadsheet shows it as text instead of running it as a formula.
-function csvCell(value) {
-  let text = String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-// The spreadsheet text for a list of expenses (and, for the business file, the payments made on business bills): a header
-// line, then date, category, Business, Personal or Business bill, amount, note.
-function buildExpenseCsv(expenses, billPayments = []) {
-  const lines = [['Date', 'Category', 'Type', 'Amount', 'Note'].map(csvCell).join(',')];
-  expenses.forEach((r) => {
-    lines.push([r.spentOn, expenseCategoryName(r), isBusinessExpense(r) ? 'Business' : 'Personal', r.amount.toFixed(2), r.notes || ''].map(csvCell).join(','));
-  });
-  billPayments.forEach((p) => lines.push([p.dateKey, p.bill.name, 'Business bill', p.amount.toFixed(2), 'Bill payment'].map(csvCell).join(',')));
-  return lines.join('\r\n');
-}
-
-// Draws the Business Summary fold for the chosen period: the totals, the Business categories, and the CSV button.
-function renderBusinessSummary() {
-  const kind = document.getElementById('business-period-input').value || 'month';
-  const expenses = expensesInSummaryPeriod(kind);
-  const business = expenses.filter(isBusinessExpense);
-  const businessTotal = business.reduce((sum, r) => sum + r.amount, 0);
-  const total = expenses.reduce((sum, r) => sum + r.amount, 0);
-  document.getElementById('business-total-line').textContent = expenses.length
-    ? `Business: ${formatMoney(businessTotal)} · Personal: ${formatMoney(total - businessTotal)} · Total: ${formatMoney(total)} (${expenses.length} expense${expenses.length === 1 ? '' : 's'}).`
-    : '';
-  const byCategory = new Map();
-  business.forEach((r) => byCategory.set(expenseCategoryName(r), (byCategory.get(expenseCategoryName(r)) || 0) + r.amount));
-  const list = document.getElementById('business-category-list');
-  list.innerHTML = '';
-  [...byCategory.entries()].sort((a, b) => b[1] - a[1]).forEach(([name, amount]) => {
-    const row = document.createElement('li');
-    row.textContent = `${name}: ${formatMoney(amount)}`;
-    list.appendChild(row);
-  });
-  const payments = businessBillPayments(kind);
-  const paidTotal = payments.reduce((sum, p) => sum + p.amount, 0);
-  const billsLine = document.getElementById('business-bills-line');
-  billsLine.hidden = payments.length === 0;
-  billsLine.textContent = `Business bills paid: ${formatMoney(paidTotal)} (${payments.length} payment${payments.length === 1 ? '' : 's'}).`;
-  document.getElementById('business-empty').hidden = business.length !== 0 || payments.length !== 0;
-  document.getElementById('business-csv-btn').disabled = business.length === 0 && payments.length === 0;
-}
-
-// Downloads the business expenses of the chosen period as a CSV file.
-function downloadExpenseCsv() {
-  const select = document.getElementById('business-period-input');
-  const expenses = expensesInSummaryPeriod(select.value || 'month').filter(isBusinessExpense);
-  const payments = businessBillPayments(select.value || 'month');
-  if (!expenses.length && !payments.length) return;
-  const label = SUMMARY_PERIODS.find((p) => p.value === select.value);
-  downloadBlob(new Blob([buildExpenseCsv(expenses, payments)], { type: 'text/csv' }), `budget-business-expenses-${(label ? label.label : 'this month').toLowerCase().replace(/\s+/g, '-')}-${todayKey()}.csv`);
-}
-
-// Draws the Business tab: the Log form's categories (the ones marked Business), the summary and the business expenses
-// of the chosen period, newest first. Open Edit forms in the list are kept.
-function renderBusiness() {
-  const openForms = captureOpenCardForms(['business-expense-list']);
-  const select = document.getElementById('business-category-input');
-  const keep = select.value;
-  select.innerHTML = '';
-  const categories = planCategories().filter((plan) => plan.business);
-  categories.forEach((plan) => {
-    const option = document.createElement('option');
-    option.value = plan.id;
-    option.textContent = plan.planName;
-    select.appendChild(option);
-  });
-  if (!categories.length) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'Mark a Plan category as Business first';
-    select.appendChild(option);
-  }
-  if (keep && categories.some((plan) => plan.id === keep)) select.value = keep;
-  renderBusinessSummary();
-  renderTax();
-  renderBusinessBills();
-  const list = document.getElementById('business-expense-list');
-  list.innerHTML = '';
-  const rows = expensesInSummaryPeriod(document.getElementById('business-period-input').value || 'month').filter(isBusinessExpense).reverse();
-  appendExpenseCards(list, rows.slice(0, MAX_EXPENSES_SHOWN));
-  restoreOpenCardForms(openForms);
-}
-
-// Log a business expense form: validate, save, and clear the amount and note when it worked.
-document.getElementById('business-add-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById('business-form-error');
-  const problem = saveExpense({
-    dateKey: document.getElementById('business-date-input').value,
-    amountRaw: document.getElementById('business-amount-input').value,
-    planId: document.getElementById('business-category-input').value,
-    notes: document.getElementById('business-notes-input').value,
-  });
-  if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
-  errorEl.hidden = true;
-  document.getElementById('business-amount-input').value = '';
-  document.getElementById('business-notes-input').value = '';
-  document.getElementById('business-amount-input').focus();
-});
-document.getElementById('business-date-input').value = todayKey();
-
-// The period choices, filled once, and the summary redrawing when the choice changes or the button is pressed.
-(function initBusinessSummary() {
-  const select = document.getElementById('business-period-input');
-  SUMMARY_PERIODS.forEach((p) => {
-    const option = document.createElement('option');
-    option.value = p.value;
-    option.textContent = p.label;
-    select.appendChild(option);
-  });
-  select.addEventListener('change', renderBusiness);
-  document.getElementById('business-csv-btn').addEventListener('click', downloadExpenseCsv);
-})();
 
 // ---- Import from Chase (a downloaded CSV of transactions) ----
 // The app never connects to a bank. You download your transactions from Chase as a CSV file (checking or credit
@@ -6091,103 +5972,6 @@ function renderMoney() {
   restoreOpenCardForms(openForms);
 }
 
-// ---- Tax set-aside for business income ----
-// What to put aside for taxes on business profit, as a rough planning aid (not tax advice). The setting is one record in
-// the `income` list, { id: 'tax-<id>', taxPercent, taxSources: [income sources that count as business income],
-// ...sync fields }; the newest live record counts, so two devices that both change it settle on the later change. The
-// figure for a period is the percentage of (income from those sources minus the business expenses and the business bills
-// paid), never below zero.
-
-// The current tax setting, or null when none has been saved.
-function taxSetting() {
-  return income.filter((r) => r.taxPercent !== undefined && !r.deleted)
-    .reduce((best, r) => (!best || (r.updatedAt || '') > (best.updatedAt || '') ? r : best), null);
-}
-
-// Saves the percentage and the sources (typed as a comma-separated list). Returns the problem as a sentence, or ''.
-function saveTaxSetting(percentRaw, sourcesRaw) {
-  const percent = Number(percentRaw);
-  if (percentRaw === '' || !Number.isFinite(percent) || percent < 0 || percent > 100) return 'Enter a percentage from 0 to 100.';
-  const sources = [];
-  String(sourcesRaw).split(',').map(cleanSource).filter(Boolean).forEach((s) => { if (!sources.some((t) => t.toLowerCase() === s.toLowerCase())) sources.push(s); }); // each once, the first spelling
-  const existing = taxSetting();
-  if (existing) {
-    const before = structuredClone(existing);
-    existing.taxPercent = percent;
-    existing.taxSources = sources;
-    stampSync(existing);
-    saveCollection(INCOME_KEY, income);
-    recordUndo('income', existing.id, before, structuredClone(existing));
-  } else {
-    const now = new Date().toISOString();
-    const record = {
-      id: `tax-${makeId()}`, taxPercent: percent, taxSources: sources,
-      dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
-    };
-    income.push(record);
-    saveCollection(INCOME_KEY, income);
-    recordUndo('income', record.id, null, structuredClone(record));
-  }
-  renderBudget();
-  return '';
-}
-
-// The tax figures for a summary period: { income, expenses, profit, setAside }, or null with no setting.
-function taxFigures(kind) {
-  const setting = taxSetting();
-  if (!setting) return null;
-  const [start, end] = summaryPeriodBounds(kind);
-  const sources = new Set(setting.taxSources.map((s) => s.toLowerCase()));
-  const businessIncome = uniqueIncomeEntries(income)
-    .filter((r) => !r.deleted && r.dateKey >= start && r.dateKey <= end && sources.has(cleanSource(r.source).toLowerCase()))
-    .reduce((sum, r) => sum + r.amount, 0);
-  const expenses = expensesInSummaryPeriod(kind).filter(isBusinessExpense).reduce((sum, r) => sum + r.amount, 0);
-  const billsPaid = businessBillPayments(kind).reduce((sum, p) => sum + p.amount, 0);
-  const profit = businessIncome - expenses - billsPaid;
-  return {
-    income: Math.round(businessIncome * 100) / 100, expenses: Math.round(expenses * 100) / 100, bills: Math.round(billsPaid * 100) / 100, profit: Math.round(profit * 100) / 100,
-    setAside: Math.round(Math.max(0, profit) * setting.taxPercent) / 100,
-  };
-}
-
-// Draws the tax fold: the saved setting in its boxes (while they are not being typed in) and the figures for the
-// chosen period.
-function renderTax() {
-  const setting = taxSetting();
-  const percentBox = document.getElementById('tax-percent-input');
-  const sourcesBox = document.getElementById('tax-sources-input');
-  if (document.activeElement !== percentBox && document.activeElement !== sourcesBox) {
-    percentBox.value = setting ? String(setting.taxPercent) : '';
-    sourcesBox.value = setting ? setting.taxSources.join(', ') : '';
-  }
-  const figures = taxFigures(document.getElementById('business-period-input').value || 'month');
-  const list = document.getElementById('tax-result-list');
-  list.innerHTML = '';
-  if (!figures) { document.getElementById('tax-note').textContent = 'Set a percentage and the income sources that count as business income to see what to put aside.'; return; }
-  [
-    `Business income: ${formatMoney(figures.income)}`,
-    `Business expenses: ${formatMoney(figures.expenses)}`,
-    ...(figures.bills > 0 ? [`Business bills paid: ${formatMoney(figures.bills)}`] : []),
-    `Profit: ${formatSignedCurrency(figures.profit)}`,
-    `Put aside at ${setting.taxPercent}%: ${formatMoney(figures.setAside)}`,
-  ].forEach((text) => {
-    const row = document.createElement('li');
-    row.textContent = text;
-    list.appendChild(row);
-  });
-  document.getElementById('tax-note').textContent = setting.taxSources.length
-    ? 'A rough planning figure, not tax advice. Check the percentage with whoever does your taxes.'
-    : 'No income sources are chosen yet, so no income is counted. Type the source names (for example Side gig) in the box above.';
-}
-
-// The Save button for the tax setting.
-document.getElementById('tax-save-btn').addEventListener('click', () => {
-  const errorEl = document.getElementById('tax-error');
-  const problem = saveTaxSetting(document.getElementById('tax-percent-input').value, document.getElementById('tax-sources-input').value);
-  errorEl.textContent = problem;
-  errorEl.hidden = !problem;
-});
-
 // ---- Chase rules (text in a description means a category) ----
 // A rule is a record in the `income` list, { id: 'rule-<id>', ruleText, rulePlanId, ...sync fields }: when a spending
 // row's description contains the text (any case), its category starts as that Spending Plan category, ahead of the
@@ -6486,7 +6270,7 @@ document.getElementById('setup-close-btn').addEventListener('click', () => {
 // asked for and drawn into a block that is hidden on screen and is the only thing shown when printing.
 
 // What the report holds for a summary period (see SUMMARY_PERIODS): { label, start, end, income, bills, spending, saved,
-// left, categories ([{ name, total }], biggest first), businessTotal, personalTotal, tax (taxFigures or null), accounts
+// left, categories ([{ name, total }], biggest first), businessTotal, personalTotal, accounts
 // (net worth now, or null) }.
 function reportData(kind) {
   const [start, end] = summaryPeriodBounds(kind);
@@ -6507,7 +6291,6 @@ function reportData(kind) {
     categories: [...byCategory.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total),
     businessTotal, personalTotal: spending - businessTotal,
     businessBills: businessBillPayments(kind).reduce((sum, p) => sum + p.amount, 0),
-    tax: taxFigures(kind),
     accounts: accountRecords().length ? netWorthOn(todayKey()) : null,
   };
 }
@@ -6540,10 +6323,6 @@ function renderPrintReport(kind) {
   else add('p', 'No spending was logged in this period.');
   add('h2', 'Business and personal');
   table([['Business spending', formatMoney(data.businessTotal)], ['Personal spending', formatMoney(data.personalTotal)], ...(data.businessBills > 0 ? [['Business bills paid', formatMoney(data.businessBills)]] : [])]);
-  if (data.tax) {
-    add('h2', 'Tax set-aside (a planning figure, not tax advice)');
-    table([['Business income', formatMoney(data.tax.income)], ['Business expenses', formatMoney(data.tax.expenses)], ['Profit', formatSignedCurrency(data.tax.profit)], ['To put aside', formatMoney(data.tax.setAside)]]);
-  }
   if (data.accounts) {
     add('h2', 'Net worth today');
     table([['What you have', formatMoney(data.accounts.assets)], ['What you owe', formatMoney(data.accounts.debts)], ['Net worth', formatSignedCurrency(data.accounts.net)]]);
@@ -8304,7 +8083,7 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 51;
+const APP_VERSION = 52;
 // localStorage key for the chosen theme.
 const THEME_KEY = 'budgetApp.theme.v1';
 // The theme choices, in the order the Theme button cycles through them.

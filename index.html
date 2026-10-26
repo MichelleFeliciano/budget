@@ -486,59 +486,16 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         </details>
       </div>
 
-      <!-- Business: log and review the expenses of Spending Plan categories marked Business, with a summary and a CSV for a tax preparer. -->
+      <!-- Business: the bills you pay personally for the business. -->
       <div class="tab-panel" id="tab-business" hidden>
-        <details class="fold" id="fold-business-log" open>
-          <summary class="fold-summary"><h2>Log a Business Expense</h2></summary>
-          <form id="business-add-form" class="add-form add-form-stacked">
-            <label class="date-field">Date
-              <input type="date" id="business-date-input" min="1990-01-01" max="2100-12-31" required aria-label="Date of the business expense">
-            </label>
-            <button type="button" class="today-btn" data-date-input="business-date-input">Today</button>
-            <input type="number" inputmode="decimal" id="business-amount-input" placeholder="Amount spent" min="0.01" step="0.01" required aria-label="Amount spent">
-            <select id="business-category-input" aria-label="Business category"></select>
-            <input type="text" id="business-notes-input" maxlength="200" placeholder="Note (optional, e.g. where or why)" aria-label="Note">
-            <p class="form-error" id="business-form-error" hidden></p>
-            <button type="submit">Add business expense</button>
-          </form>
-        </details>
-
-        <details class="fold" id="fold-business-summary" open>
-          <summary class="fold-summary"><h2>Business Summary</h2></summary>
-          <p class="stats-line">What you spent on Business and Personal categories (set on the Plan tab) over a period, and a spreadsheet file (CSV) of the business expenses in it, for a tax preparer.</p>
-          <select id="business-period-input" aria-label="Period"></select>
-          <p class="stats-line" id="business-total-line"></p>
-          <p class="stats-line" id="business-bills-line" hidden></p>
-          <ul class="card-list flat-list" id="business-category-list"></ul>
-          <p class="empty-state" id="business-empty" hidden>No business expenses in this period.</p>
-          <button type="button" class="small-btn" id="business-csv-btn">Download business CSV</button>
-        </details>
-
         <details class="fold" id="fold-business-bills" open>
           <summary class="fold-summary"><h2>Business Bills</h2></summary>
-          <p class="stats-line">Bills marked Business (tick the box when you add or edit a bill): what they cost in an average month, and what is due next. What you pay on them counts in the summary, the tax figure and the CSV below.</p>
+          <p class="stats-line">The bills you pay yourself for the business (tick Business when you add or edit a bill): what they cost in an average month, and what is due next. They are ordinary bills everywhere else, so the calendar, the forecast and your totals count them.</p>
           <p class="stats-line" id="business-bill-line"></p>
           <ul class="card-list flat-list" id="business-bill-list"></ul>
           <p class="empty-state" id="business-bill-empty" hidden>No business bills yet. Tick Business on a bill.</p>
         </details>
 
-        <details class="fold" id="fold-business-list" open>
-          <summary class="fold-summary"><h2>Business Expenses</h2></summary>
-          <ul class="card-list flat-list" id="business-expense-list"></ul>
-        </details>
-
-        <details class="fold" id="fold-business-tax">
-          <summary class="fold-summary"><h2>Tax Set-Aside</h2></summary>
-          <p class="stats-line">A share of your business profit (income from the sources below minus business expenses) to put aside for taxes, for the period chosen in the summary above.</p>
-          <div class="add-form add-form-stacked">
-            <input type="number" inputmode="decimal" id="tax-percent-input" min="0" max="100" step="0.1" placeholder="Percent to set aside (e.g. 25)" aria-label="Percent of profit to set aside for taxes">
-            <input type="text" id="tax-sources-input" list="income-source-options" autocomplete="off" placeholder="Business income sources, separated by commas" aria-label="Income sources that count as business income">
-            <p class="form-error" id="tax-error" hidden></p>
-            <button type="button" id="tax-save-btn">Save</button>
-          </div>
-          <ul class="flat-list" id="tax-result-list"></ul>
-          <p class="stats-line" id="tax-note"></p>
-        </details>
       </div>
 
       <!-- Money: accounts and net worth, debt payoff, a cash-flow forecast, month-by-month trends and subscriptions. -->
