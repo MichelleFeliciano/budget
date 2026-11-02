@@ -1945,8 +1945,9 @@ const MAX_ROLLOVER_WEEKS = 104;
 
 // The Net and Projected net carried into the week that starts on thisWeekKey: every earlier week's income minus
 // its bills, added up from the Monday of the earliest income there is (a typed entry or a recurring source) so
-// money left over, or a shortfall, rolls forward. Projected net also counts the projected income of earlier days
-// that have no real income. Each earlier week's carry-forward adjustment (see weekAdjustments) is added at the start
+// money left over, or a shortfall, rolls forward. Projected net also counts the projected income of those weeks' days
+// that are today or later and have no real income: a projection for a day that has passed and was never replaced by
+// real income did not happen, so it is not carried forward as money. Each earlier week's carry-forward adjustment (see weekAdjustments) is added at the start
 // of that week. Both are 0 when there is no earlier income to start from.
 function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecurringIncome, projectedMap, incomeDates, adjustments = new Map()) {
   const firstDates = [
@@ -1967,7 +1968,7 @@ function netCarriedInto(thisWeekKey, allBills, nonDeletedIncome, nonDeletedRecur
     const due = amountDueInRange(ws, we, allBills);
     let projected = 0;
     for (let dateKey = ws; dateKey <= we; dateKey = shiftDateKey(dateKey, 1)) {
-      if (projectedMap.has(dateKey) && !incomeDates.has(dateKey)) {
+      if (projectedMap.has(dateKey) && !incomeDates.has(dateKey) && dateKey >= todayKey()) {
         projected += projectedMap.get(dateKey).reduce((sum, r) => sum + r.projected, 0);
       }
     }
@@ -2325,16 +2326,17 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     leftEl.innerHTML = `Due: <strong>${formatMoney(weekLeft)}</strong>`;
     weekEl.appendChild(leftEl);
 
-    // Projected income, shown once any day of the week has one. A day's projection stops counting as soon as
-    // real income is entered for that day, so typing the real figure replaces the guess instead of adding to it.
+    // Projected income, shown once a day of the week that is today or later has one. A day's projection stops counting
+    // as soon as real income is entered for that day, so typing the real figure replaces the guess instead of adding to
+    // it, and a day that has passed no longer counts at all (it did not arrive, so it is not expected any more).
     const weekProjected = weekDays.reduce((sum, dateKey) => (
-      projectedMap.has(dateKey) && !incomeDates.has(dateKey)
+      projectedMap.has(dateKey) && !incomeDates.has(dateKey) && dateKey >= todayK
         ? sum + projectedMap.get(dateKey).reduce((daySum, r) => daySum + r.projected, 0) : sum
     ), 0);
     const carriedProjectedNet = rolledProjectedNet;
     const weekProjectedNet = carriedProjectedNet + weekIncome + weekProjected - weekTotalDue;
     rolledProjectedNet = weekProjectedNet;
-    if (weekDays.some((dateKey) => projectedMap.has(dateKey))) {
+    if (weekDays.some((dateKey) => projectedMap.has(dateKey) && dateKey >= todayK)) {
       const projectedEl = document.createElement('p');
       projectedEl.className = 'budget-week-projected-total';
       projectedEl.innerHTML = `Projected: <strong>${formatSignedCurrency(weekProjected)}</strong>`;
@@ -8293,12 +8295,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 53;
+const APP_VERSION = 54;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  54: { date: '2026-11-02', notes: ['Projected income for a day that has passed and never got real income no longer counts in Projected net or in the weekly Projected line.'] },
   53: { date: '2026-10-26', notes: ['A Help, history & settings page (Menu): a settings check, what is new, recent changes, recently deleted things you can restore, and help.', 'Importing a backup now shows what it would do first, and only saves when you tap Import.', 'The Menu shows the date of your last backup file and of this version, and backup files carry the app version and format.', 'An offline bar when the device has no connection, and Add one now buttons on empty screens.', 'Merging two categories asks for a second tap.'] },
   52: { date: '2026-10-26', notes: ['The Business tab is only business bills now.'] },
   51: { date: '2026-10-24', notes: ['Business bills: tick Business on a bill.'] },

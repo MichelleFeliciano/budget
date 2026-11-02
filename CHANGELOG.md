@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v54 (2026-11-02)
+- Projected income for a day that has passed, and never got real income, no longer counts in Projected net or the weekly Projected line (only today and later projections do)
+
 ## v53 (2026-10-26)
 - Help, history & settings page: settings check, what is new, recent changes, recently deleted things with a Restore button, and help
 - Importing a backup shows what it would do first (new, updated, already here, unreadable) and saves only when you tap Import
