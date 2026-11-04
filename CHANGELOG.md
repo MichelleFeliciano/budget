@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v55 (2026-11-03)
+- Recurring income can end: a last payday, or a number of paydays that works the date out; after it the income stops counting in the weeks, the forecast, the pay period and the Paycheck Planner
+
 ## v54 (2026-11-02)
 - Projected income for a day that has passed, and never got real income, no longer counts in Projected net or the weekly Projected line (only today and later projections do)
 

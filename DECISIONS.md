@@ -269,6 +269,10 @@ A bill with `business: true` is a business cost but otherwise an ordinary bill: 
 
 The business is funded out of your own money, so there is nothing to keep apart: the Business tab now holds only the bills marked Business, as a list with their cost and what is due next. The business expense log, the Business Summary, the business CSV and the tax set-aside were removed (a Spending Plan category can still be marked Business or Personal, and the printable report still splits spending that way and shows what was paid on business bills). Old backups that hold a tax setting still import: the record is accepted and ignored.
 
+## Recurring income can end (v55)
+
+A recurring income source takes the same optional `endDate` a bill does (the last payday), with the same shortcut of typing a number of paydays that works the date out and is not stored. Both go through one `resolveScheduleEnd`, and the schedule functions already treated `endDate` as the last date for anything with a schedule, so income totals, the forecast and the calendar stop there with no further change. An ended source no longer supplies the payday for the pay period or appears in the Paycheck Planner.
+
 ## Projected income only counts from today (v54)
 
 A projection is a guess about a day that has not happened yet. Once its day has passed without real income being entered for it, it did not arrive, so it no longer counts: not in the weekly Projected line, and not in the Projected net carried into later weeks (which, before, kept adding every old unreplaced projection to every later week for good). Today still counts, and real income entered for a day still replaces that day's projection. Net itself never included projections and still does not.

@@ -385,14 +385,14 @@ const BILL_FREQUENCY_LABELS = {
 // A custom bill repeats every `every` weeks or months: a whole number from 1 up to this.
 const MAX_REPEAT_EVERY = 99;
 
-// The end of a repeating bill in words, to follow its frequency: " · last payment Mar 5, 2027 (6 left)", or
-// " · ended" once the last date has passed; '' for a bill that never ends.
-function billEndNote(bill) {
+// The end of a repeating bill (or income source) in words, to follow its frequency: " · last payment Mar 5, 2027
+// (6 left)" (noun says "payment" or "payday"), or " · ended" once the last date has passed; '' when it never ends.
+function billEndNote(bill, noun = 'payment') {
   if (!bill.endDate) return '';
   const todayK = todayKey();
   if (bill.endDate < todayK) return ' \u00b7 ended';
   const left = occurrenceCountThrough(bill, bill.endDate) - occurrenceCountThrough(bill, shiftDateKey(todayK, -1));
-  return ` \u00b7 last payment ${formatDateKeyShort(bill.endDate)} (${left} left)`;
+  return ` \u00b7 last ${noun} ${formatDateKeyShort(bill.endDate)} (${left} left)`;
 }
 
 // How often a bill repeats, in words: "Monthly", or "Every 6 weeks" for a custom one.
@@ -939,6 +939,24 @@ const DATE_RANGE_MESSAGE = `Pick a date between the years ${DATE_YEAR_MIN} and $
 // The largest amount accepted for a bill or income entry (keeps totals and displays sane).
 const MAX_MONEY = 1000000000;
 
+// Works out the optional end of a repeating schedule ({ dueDate, frequency, every, unit }) from form fields: a last date
+// (fields.endDate), or a number of payments (fields.payments) that gives the date. Returns { ok: true, endDate }
+// (endDate is undefined when it does not end) or { ok: false, error }.
+function resolveScheduleEnd(fields, schedule) {
+  let endDate = fields.endDate || undefined;
+  const paymentsRaw = fields.payments === undefined || fields.payments === null ? '' : String(fields.payments).trim();
+  if (paymentsRaw !== '') {
+    const count = Number(paymentsRaw);
+    if (!Number.isInteger(count) || count < 1 || count > 999) return { ok: false, error: 'The number of payments must be a whole number from 1 to 999.' };
+    endDate = nthOccurrenceDate(schedule, count - 1) || undefined;
+  }
+  if (endDate) {
+    if (!isRealDateKey(endDate) || !isReasonableDateKey(endDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
+    if (endDate < schedule.dueDate) return { ok: false, error: 'The last date cannot be before the first date.' };
+  }
+  return { ok: true, endDate };
+}
+
 // Checks and cleans a bill's form values (name, amount above $0, due date); unknown frequency becomes monthly.
 function validateBillFields(fields) {
   const trimmedName = fields.name.trim();
@@ -957,19 +975,11 @@ function validateBillFields(fields) {
     return { ok: false, error: `Repeat every needs a whole number from 1 to ${MAX_REPEAT_EVERY}, in weeks or months.` };
   }
   // A repeating bill may stop: on a last payment date, or after a number of payments (which works the date out).
-  let endDate = fields.endDate || undefined;
-  if (frequency === 'one_time') endDate = undefined;
-  else {
-    const paymentsRaw = fields.payments === undefined || fields.payments === null ? '' : String(fields.payments).trim();
-    if (paymentsRaw !== '') {
-      const count = Number(paymentsRaw);
-      if (!Number.isInteger(count) || count < 1 || count > 999) return { ok: false, error: 'The number of payments must be a whole number from 1 to 999.' };
-      endDate = nthOccurrenceDate({ dueDate, frequency, every, unit }, count - 1) || undefined;
-    }
-    if (endDate) {
-      if (!isRealDateKey(endDate) || !isReasonableDateKey(endDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
-      if (endDate < dueDate) return { ok: false, error: 'The last payment date cannot be before the first due date.' };
-    }
+  let endDate;
+  if (frequency !== 'one_time') {
+    const end = resolveScheduleEnd(fields, { dueDate, frequency, every, unit });
+    if (!end.ok) return end;
+    endDate = end.endDate;
   }
   return { ok: true, name: trimmedName, amount, dueDate, frequency, every, unit, endDate, category: canonicalCategory(fields.category.trim()), autopay: !!fields.autopay, business: !!fields.business };
 }
@@ -1223,7 +1233,9 @@ function validateRecurringIncomeFields(fields) {
   if (!dueDate) return { ok: false, error: 'First occurrence date is required.' };
   if (!isReasonableDateKey(dueDate)) return { ok: false, error: DATE_RANGE_MESSAGE };
   const frequency = RECURRING_INCOME_FREQUENCIES.includes(fields.frequency) ? fields.frequency : 'biweekly';
-  return { ok: true, name: trimmedName, amount, dueDate, frequency, category: fields.category.trim() };
+  const end = resolveScheduleEnd(fields, { dueDate, frequency });
+  if (!end.ok) return end;
+  return { ok: true, name: trimmedName, amount, dueDate, frequency, endDate: end.endDate, category: fields.category.trim() };
 }
 
 // Adds a recurring income source (e.g. a paycheck). Returns { ok } or { ok: false, error }.
@@ -1244,6 +1256,7 @@ function addRecurringIncome(fields) {
     deleted: false,
     version: 0,
   };
+  if (result.endDate) source.endDate = result.endDate;
   recurringIncome.push(source);
   saveCollection(RECURRING_INCOME_KEY, recurringIncome);
   recordUndo('recurringIncome', source.id, null, structuredClone(source));
@@ -1262,6 +1275,7 @@ function updateRecurringIncome(id, fields) {
   source.amount = result.amount;
   source.dueDate = result.dueDate;
   source.frequency = result.frequency;
+  if (result.endDate) source.endDate = result.endDate; else delete source.endDate;
   source.category = result.category;
   stampSync(source);
   saveCollection(RECURRING_INCOME_KEY, recurringIncome);
@@ -1515,7 +1529,7 @@ function effectivePaydaySettings() {
   if (saved.payDateKey) return saved;
   const todayK = todayKey();
   const paycheck = recurringIncome
-    .filter((r) => !r.deleted && PAY_PERIOD_FREQUENCIES.includes(r.frequency) && r.dueDate <= todayK)
+    .filter((r) => !r.deleted && PAY_PERIOD_FREQUENCIES.includes(r.frequency) && r.dueDate <= todayK && !(r.endDate && r.endDate < todayK))
     .sort((a, b) => b.amount - a.amount)[0];
   return paycheck ? { payDateKey: paycheck.dueDate, frequency: paycheck.frequency, derivedFrom: paycheck.name } : saved;
 }
@@ -2578,7 +2592,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     node.querySelector('.recurring-income-amount').textContent = formatMoney(source.amount);
     node.querySelector('.recurring-income-start').textContent = `Starts: ${formatDateKeyShort(source.dueDate)}`;
     node.querySelector('.recurring-income-frequency').textContent =
-      RECURRING_INCOME_FREQUENCY_LABELS[source.frequency] || source.frequency;
+      (RECURRING_INCOME_FREQUENCY_LABELS[source.frequency] || source.frequency) + billEndNote(source, 'payday');
 
     const categoryEl = node.querySelector('.recurring-income-category');
     if (source.category) {
@@ -2590,6 +2604,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
     const editAmountInput = node.querySelector('.recurring-income-edit-amount');
     const editStartDateInput = node.querySelector('.recurring-income-edit-startdate');
     const editFrequencyInput = node.querySelector('.recurring-income-edit-frequency');
+    const editEndDateInput = node.querySelector('.recurring-income-edit-enddate');
     const editCategoryInput = node.querySelector('.recurring-income-edit-category');
     const editError = node.querySelector('.recurring-income-edit-error');
 
@@ -2604,6 +2619,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
       editAmountInput.value = String(source.amount);
       editStartDateInput.value = source.dueDate;
       editFrequencyInput.value = source.frequency;
+      editEndDateInput.value = source.endDate || '';
       editCategoryInput.value = source.category || '';
       editError.hidden = true;
       viewSection.hidden = true;
@@ -2625,6 +2641,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
         amount: editAmountInput.value,
         dueDate: editStartDateInput.value,
         frequency: editFrequencyInput.value,
+        endDate: editEndDateInput.value,
         category: editCategoryInput.value,
       });
       if (!result.ok) {
@@ -2642,6 +2659,7 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
       editAmountInput.value = openEdit.amount;
       editStartDateInput.value = openEdit.dueDate;
       editFrequencyInput.value = openEdit.frequency;
+      editEndDateInput.value = openEdit.endDate;
       editCategoryInput.value = openEdit.category;
       viewSection.hidden = true;
       editForm.hidden = false;
@@ -3685,6 +3703,7 @@ function renderBudget() {
         amount: openRecurringIncomeForm.querySelector('.recurring-income-edit-amount').value,
         dueDate: openRecurringIncomeForm.querySelector('.recurring-income-edit-startdate').value,
         frequency: openRecurringIncomeForm.querySelector('.recurring-income-edit-frequency').value,
+        endDate: openRecurringIncomeForm.querySelector('.recurring-income-edit-enddate').value,
         category: openRecurringIncomeForm.querySelector('.recurring-income-edit-category').value,
       }
     : null;
@@ -3909,6 +3928,8 @@ document.getElementById('recurring-income-add-form').addEventListener('submit', 
     amount: amountInput.value,
     dueDate: startDateInput.value,
     frequency: frequencyInput.value,
+    endDate: document.getElementById('recurring-income-enddate-input').value,
+    payments: document.getElementById('recurring-income-payments-input').value,
     category: categoryInput.value,
   });
 
@@ -3922,6 +3943,8 @@ document.getElementById('recurring-income-add-form').addEventListener('submit', 
   nameInput.value = '';
   amountInput.value = '';
   startDateInput.value = '';
+  document.getElementById('recurring-income-enddate-input').value = '';
+  document.getElementById('recurring-income-payments-input').value = '';
   frequencyInput.value = 'biweekly';
   categoryInput.value = '';
   nameInput.focus();
@@ -6186,7 +6209,7 @@ function paycheckPlan(source) {
 // Draws the Paycheck Planner on the Income tab for the chosen recurring income source.
 function renderPaycheckPlanner() {
   const select = document.getElementById('planner-source-input');
-  const sources = recurringIncome.filter((r) => !r.deleted && ['weekly', 'biweekly', 'monthly'].includes(r.frequency)).sort((a, b) => a.name.localeCompare(b.name));
+  const sources = recurringIncome.filter((r) => !r.deleted && ['weekly', 'biweekly', 'monthly'].includes(r.frequency) && !(r.endDate && r.endDate < todayKey())).sort((a, b) => a.name.localeCompare(b.name));
   const keep = select.value;
   select.innerHTML = '';
   sources.forEach((source) => {
@@ -8121,7 +8144,7 @@ function isValidImportRecord(collectionName, rec) {
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
   if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean') && (rec.business === undefined || typeof rec.business === 'boolean');
-  if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency);
+  if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate));
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
     if (rec.spentOn !== undefined) {
@@ -8295,12 +8318,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 54;
+const APP_VERSION = 55;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  55: { date: '2026-11-03', notes: ['Recurring income can end: give a source a last payday, or a number of paydays, for a contract or a job that stops. After it, the income stops counting everywhere.'] },
   54: { date: '2026-11-02', notes: ['Projected income for a day that has passed and never got real income no longer counts in Projected net or in the weekly Projected line.'] },
   53: { date: '2026-10-26', notes: ['A Help, history & settings page (Menu): a settings check, what is new, recent changes, recently deleted things you can restore, and help.', 'Importing a backup now shows what it would do first, and only saves when you tap Import.', 'The Menu shows the date of your last backup file and of this version, and backup files carry the app version and format.', 'An offline bar when the device has no connection, and Add one now buttons on empty screens.', 'Merging two categories asks for a second tap.'] },
   52: { date: '2026-10-26', notes: ['The Business tab is only business bills now.'] },

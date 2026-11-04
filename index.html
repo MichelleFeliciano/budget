@@ -279,6 +279,11 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
               <option value="monthly">Monthly</option>
               <option value="yearly">Yearly</option>
             </select>
+            <!-- When the income stops (a contract or a job that ends): a last date, or a number of payments that works the date out. -->
+            <label class="date-field">Last payday (optional)
+              <input type="date" id="recurring-income-enddate-input" min="1990-01-01" max="2100-12-31" aria-label="Last payday">
+            </label>
+            <input type="number" inputmode="numeric" id="recurring-income-payments-input" min="1" max="999" step="1" placeholder="Or the number of paydays (optional)" aria-label="Number of paydays">
             <input type="text" id="recurring-income-category-input" placeholder="Category (optional)" aria-label="Income category">
             <p class="form-error" id="recurring-income-form-error" hidden></p>
             <button type="submit">Add recurring income</button>
@@ -804,6 +809,9 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
         <option value="monthly">Monthly</option>
         <option value="yearly">Yearly</option>
       </select>
+      <label class="date-field">Last payday (optional)
+        <input type="date" class="recurring-income-edit-enddate" min="1990-01-01" max="2100-12-31" aria-label="Edit last payday">
+      </label>
       <input type="text" class="recurring-income-edit-category" placeholder="Category (optional)" aria-label="Edit income category">
       <p class="form-error recurring-income-edit-error" hidden></p>
       <div class="recurring-income-actions">
