@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v60 (2026-11-03)
+- Changing a debt's payment for one month also changes that month's bill on the Bills list (the bill called "<debt> payment", unpaid occurrences only; shown on the calendar, in the week totals and used when marking it paid); Remove puts the usual amount back
+
 ## v59 (2026-11-03)
 - Debt Payoff: a debt with a monthly payment can pay a different amount in one coming month (Change that month; $0 skips the month, Remove puts the usual payment back); the payoff date and interest follow it
 

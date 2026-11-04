@@ -550,9 +550,17 @@ function paymentIdentity(bill, dateKey) {
   return `${origin}|${paidAmountFor(bill, dateKey)}|${dateKey}`;
 }
 
-// What one occurrence is worth: the recorded amount if it was paid, the current amount if not.
+// What an unpaid occurrence is due for: the amount planned for that one date (`plannedAmounts`, { "2026-12-01": 300 },
+// set by a debt's one-month payment change) if there is one, otherwise the bill's amount.
+function plannedAmountFor(bill, dateKey) {
+  const map = bill.plannedAmounts;
+  if (map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, dateKey) && typeof map[dateKey] === 'number' && Number.isFinite(map[dateKey])) return map[dateKey];
+  return bill.amount;
+}
+
+// What one occurrence is worth: the recorded amount if it was paid, the planned amount for that date if not.
 function occurrenceAmount(bill, dateKey) {
-  return (bill.paidDates || []).includes(dateKey) ? paidAmountFor(bill, dateKey) : bill.amount;
+  return (bill.paidDates || []).includes(dateKey) ? paidAmountFor(bill, dateKey) : plannedAmountFor(bill, dateKey);
 }
 
 // Total still owed for a bill's occurrences up to a date (occurrences so far minus paid ones, times the amount).
@@ -1078,7 +1086,7 @@ function catchUpBill(billId, throughKey) {
   const amounts = { ...(bill.paidAmounts || {}) };
   occurrenceDatesThrough(bill, throughKey).forEach((dateKey) => {
     paidSet.add(dateKey);
-    if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = bill.amount;
+    if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = plannedAmountFor(bill, dateKey);
   });
   bill.paidDates = [...paidSet];
   bill.paidAmounts = amounts;
@@ -1182,7 +1190,7 @@ function toggleBillPaid(billId, dateKey, paid, paidAmount) {
     // Remember what this payment was worth: the amount given (0 means the date was skipped), otherwise the
     // bill's amount (keeping one already recorded for this date).
     if (typeof paidAmount === 'number') amounts[dateKey] = paidAmount;
-    else if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = bill.amount;
+    else if (!Object.prototype.hasOwnProperty.call(amounts, dateKey)) amounts[dateKey] = plannedAmountFor(bill, dateKey);
   } else {
     paidSet.delete(dateKey);
     delete amounts[dateKey];
@@ -2252,7 +2260,7 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = bill.name;
 
-          const amountText = skipped ? 'skipped' : formatMoney(paid ? paidAmountFor(bill, dateKey) : bill.amount);
+          const amountText = skipped ? 'skipped' : formatMoney(occurrenceAmount(bill, dateKey));
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
           daySummary.push(`${bill.name}${skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
@@ -5919,8 +5927,37 @@ function setDebtMonthPayment(debtId, monthKey, amountRaw) {
   stampSync(debt);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', debt.id, before, structuredClone(debt));
+  setLinkedBillMonthAmount(debt, monthKey, amount);
   renderBudget();
   return '';
+}
+
+// The bill on the Bills list that carries a debt's payment: the live bill called "<debt name> payment" (the one the
+// "add to your bills list?" question makes), or undefined.
+function linkedDebtBill(debt) {
+  return bills.find((b) => !b.deleted && b.name === `${debt.acctName} payment`);
+}
+
+// Changes what the debt's linked bill is due for in one month (amount) or puts the usual amount back (null): each
+// unpaid occurrence of the bill in that "YYYY-MM" gets a planned amount. Paid occurrences keep what was paid.
+function setLinkedBillMonthAmount(debt, monthKey, amount) {
+  const bill = linkedDebtBill(debt);
+  if (!bill) return;
+  const before = structuredClone(bill);
+  const planned = { ...(bill.plannedAmounts || {}) };
+  const paid = new Set(bill.paidDates || []);
+  const [y, m] = monthKey.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  for (let d = 1; d <= last; d += 1) {
+    const dateKey = `${monthKey}-${String(d).padStart(2, '0')}`;
+    if (!occursOnDate(bill, dateKey) || paid.has(dateKey)) continue;
+    if (amount === null) delete planned[dateKey]; else planned[dateKey] = amount;
+  }
+  if (Object.keys(planned).length) bill.plannedAmounts = planned; else delete bill.plannedAmounts;
+  if (JSON.stringify(before.plannedAmounts) === JSON.stringify(bill.plannedAmounts)) return;
+  stampSync(bill);
+  saveCollection(BILLS_KEY, bills);
+  recordUndo('bills', bill.id, before, structuredClone(bill));
 }
 
 // Takes back a debt's one-month payment for a month, so it pays the usual amount again.
@@ -5934,6 +5971,7 @@ function clearDebtMonthPayment(debtId, monthKey) {
   stampSync(debt);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', debt.id, before, structuredClone(debt));
+  setLinkedBillMonthAmount(debt, monthKey, null);
   renderBudget();
 }
 
@@ -5945,7 +5983,7 @@ function buildMonthPaymentForm(debt) {
   Object.keys(debt.monthPayments || {}).filter((key) => monthsFromNow(key) >= 1).sort().forEach((monthKey) => {
     const line = document.createElement('p');
     line.className = 'stats-line';
-    line.textContent = `${monthKeyLabel(monthKey)}: pay ${formatMoney(debt.monthPayments[monthKey])} instead of ${formatMoney(debt.payment)} `;
+    line.textContent = `${monthKeyLabel(monthKey)}: pay ${formatMoney(debt.monthPayments[monthKey])} instead of ${formatMoney(debt.payment)}${linkedDebtBill(debt) ? ' (on your bills list too)' : ''} `;
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'cancel-btn';
@@ -8562,12 +8600,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 59;
+const APP_VERSION = 60;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  60: { date: '2026-11-03', notes: ['Changing a debt\'s payment for one month now changes that month\'s bill on your Bills list too (the bill called "<debt> payment"); Remove puts the usual amount back.'] },
   59: { date: '2026-11-03', notes: ['A debt can pay a different amount in one coming month (Change that month under the debt) instead of an extra payment: the payoff date and interest follow it, and Remove puts the usual payment back.'] },
   58: { date: '2026-11-03', notes: ['Pay extra on a debt now has a date, so you can record an extra payment made on an earlier day. Adding a monthly payment to a debt you already have also asks whether to add it to your bills list.'] },
   57: { date: '2026-11-03', notes: ['Debt Payoff has a Pay extra button on each debt: it takes an extra payment off what you owe today and keeps a running total of the extra you have paid. Adding a debt with a monthly payment now asks whether to add that payment to your bills list.'] },
