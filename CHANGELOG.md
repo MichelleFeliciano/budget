@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v62 (2026-11-04)
+- Fixed: Sync and Import rejected a debt whose payment change is on a chosen day (the v61 form), because the check only allowed a month; such a debt now syncs and imports, the older month form still works, and a bad day is still refused
+
 ## v61 (2026-11-03)
 - A debt's different payment takes a specific day (this month or later, one per month) instead of a month; this month's counts as paid now in the payoff plan, and the linked bill follows
 - Extra payments are listed under their debt with a Remove button that takes the amount back off what has been paid (a debt paid off by extra payments stays listed so one can be removed)

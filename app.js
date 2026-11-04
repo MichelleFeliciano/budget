@@ -5545,7 +5545,7 @@ document.getElementById('bank-undo-btn').addEventListener('click', () => {
 
 // ---- The Money tab: accounts and net worth, debt payoff, a cash-flow forecast, trends and subscriptions ----
 // Accounts are records in the `income` list, { id: 'acct-<id>', acctName, acctKind ('asset' or 'debt'), apr and payment
-// (debts, optional), monthPayments ({ 'YYYY-MM': amount }, a debt's payment for single months), ...sync fields }. What an account holds is a series of dated records, { id: 'bal-<id>', balFor:
+// (debts, optional), monthPayments ({ 'YYYY-MM-DD': amount }, or the older 'YYYY-MM', a debt's payment for single months), ...sync fields }. What an account holds is a series of dated records, { id: 'bal-<id>', balFor:
 // <account id>, balOn, amount, and extraPaid on an extra debt payment }, and the current balance is the newest one, so two devices that both update a
 // balance never overwrite each other and the history of net worth comes for free. For a debt the amount is what is
 // owed (positive). None of these has a `dateKey`, so income totals ignore them, and the sync server needs no change.
@@ -8497,7 +8497,7 @@ function isValidImportRecord(collectionName, rec) {
         && (rec.altAmount === undefined || rec.altAmount === null || (isNum(rec.altAmount) && rec.altAmount >= 0 && rec.altAmount <= MAX_MONEY));
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
-    if (rec.acctName !== undefined) return nonEmptyText(rec.acctName) && ACCOUNT_KINDS.includes(rec.acctKind) && (rec.apr === undefined || (isNum(rec.apr) && rec.apr >= 0 && rec.apr <= 100)) && (rec.payment === undefined || (isNum(rec.payment) && rec.payment >= 0 && rec.payment <= MAX_MONEY)) && (rec.monthPayments === undefined || (typeof rec.monthPayments === 'object' && rec.monthPayments !== null && Object.entries(rec.monthPayments).every(([key, amount]) => /^\d{4}-(0[1-9]|1[0-2])$/.test(key) && isNum(amount) && amount >= 0 && amount <= MAX_MONEY)));
+    if (rec.acctName !== undefined) return nonEmptyText(rec.acctName) && ACCOUNT_KINDS.includes(rec.acctKind) && (rec.apr === undefined || (isNum(rec.apr) && rec.apr >= 0 && rec.apr <= 100)) && (rec.payment === undefined || (isNum(rec.payment) && rec.payment >= 0 && rec.payment <= MAX_MONEY)) && (rec.monthPayments === undefined || (typeof rec.monthPayments === 'object' && rec.monthPayments !== null && Object.entries(rec.monthPayments).every(([key, amount]) => (/^\d{4}-(0[1-9]|1[0-2])$/.test(key) || isDate(key)) && isNum(amount) && amount >= 0 && amount <= MAX_MONEY)));
     if (rec.balFor !== undefined) return nonEmptyText(rec.balFor) && isDate(rec.balOn) && isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && (rec.extraPaid === undefined || (isNum(rec.extraPaid) && rec.extraPaid > 0 && rec.extraPaid <= MAX_MONEY));
     if (rec.taxPercent !== undefined) return isNum(rec.taxPercent) && rec.taxPercent >= 0 && rec.taxPercent <= 100 && Array.isArray(rec.taxSources) && rec.taxSources.every(isText);
     if (rec.ruleText !== undefined) return nonEmptyText(rec.ruleText) && nonEmptyText(rec.rulePlanId);
@@ -8659,12 +8659,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 61;
+const APP_VERSION = 62;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  62: { date: '2026-11-04', notes: ['Fixed Sync and Import skipping a debt that has a payment change on a chosen day, so those debts now reach your other devices and come back after the server resets.'] },
   61: { date: '2026-11-03', notes: ['A debt\'s different payment now has a specific day and can be this month (Change that payment), and an extra payment made by mistake can be removed (Remove beside it under the debt).'] },
   60: { date: '2026-11-03', notes: ['Changing a debt\'s payment for one month now changes that month\'s bill on your Bills list too (the bill called "<debt> payment"); Remove puts the usual amount back.'] },
   59: { date: '2026-11-03', notes: ['A debt can pay a different amount in one coming month (Change that month under the debt) instead of an extra payment: the payoff date and interest follow it, and Remove puts the usual payment back.'] },
