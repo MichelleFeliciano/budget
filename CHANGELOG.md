@@ -2,6 +2,10 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v61 (2026-11-03)
+- A debt's different payment takes a specific day (this month or later, one per month) instead of a month; this month's counts as paid now in the payoff plan, and the linked bill follows
+- Extra payments are listed under their debt with a Remove button that takes the amount back off what has been paid (a debt paid off by extra payments stays listed so one can be removed)
+
 ## v60 (2026-11-03)
 - Changing a debt's payment for one month also changes that month's bill on the Bills list (the bill called "<debt> payment", unpaid occurrences only; shown on the calendar, in the week totals and used when marking it paid); Remove puts the usual amount back
 

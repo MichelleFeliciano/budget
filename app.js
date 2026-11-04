@@ -5814,12 +5814,13 @@ document.getElementById('debt-bill-no').addEventListener('click', closeDebtBillP
 // How a debt pays off at a fixed monthly payment: { months, interest } (interest is the total paid on top of the
 // balance), or null when the payment never gets ahead of the interest. apr is a percentage a year, compounded
 // monthly; the last payment may be smaller than the rest. overrides maps a month number (1 = next month) to the amount
-// paid in that month instead of the usual payment; extra is added to every month's payment.
+// paid in that month instead of the usual payment (0 = this month: an amount paid now, before month 1); extra is added to every month's payment.
 function debtPayoff(balance, apr, payment, overrides = {}, extra = 0) {
   if (!(balance > 0)) return { months: 0, interest: 0 };
   if (!(payment > 0)) return null;
   const rate = (apr || 0) / 100 / 12;
-  let owed = balance;
+  let owed = balance - (overrides[0] || 0); // a payment set for this month is paid before the plan's first month
+  if (owed <= 0.005) return { months: 0, interest: 0 };
   let interest = 0;
   for (let months = 1; months <= 1200; months += 1) {
     const charge = owed * rate;
@@ -5849,15 +5850,18 @@ function renderDebts() {
   let anyShown = false;
   debts.forEach((debt) => {
     const balance = accountBalanceOn(debt.id, todayKey());
-    if (!balance || balance.amount <= 0) return;
+    // A debt that is paid off stays listed while it has extra payments, so a mistaken one can still be removed.
+    if (!balance || (balance.amount <= 0 && extraPaymentEntries(debt.id).length === 0)) return;
     anyShown = true;
     const item = document.createElement('li');
     item.className = 'debt-row';
     const title = document.createElement('strong');
-    title.textContent = `${debt.acctName}: ${formatMoney(balance.amount)} owed`;
+    title.textContent = balance.amount > 0 ? `${debt.acctName}: ${formatMoney(balance.amount)} owed` : `${debt.acctName}: paid off`;
     const lines = document.createElement('span');
     const parts = [];
-    if (typeof debt.payment !== 'number' || debt.payment <= 0) {
+    if (balance.amount <= 0) {
+      parts.push('Nothing owed.');
+    } else if (typeof debt.payment !== 'number' || debt.payment <= 0) {
       parts.push('Add a monthly payment (Edit on the account) to see the payoff date.');
     } else {
       const overrides = debtPaymentOverrides(debt);
@@ -5879,55 +5883,61 @@ function renderDebts() {
     if (paidSoFar > 0) parts.push(`Extra payments so far: ${formatMoney(paidSoFar)}.`);
     lines.textContent = parts.join(' ');
     item.append(title, lines);
-    if (typeof debt.payment === 'number' && debt.payment > 0) item.append(buildMonthPaymentForm(debt));
-    item.append(buildExtraPaymentForm(debt));
+    if (balance.amount > 0 && typeof debt.payment === 'number' && debt.payment > 0) item.append(buildMonthPaymentForm(debt));
+    if (balance.amount > 0) item.append(buildExtraPaymentForm(debt));
+    item.append(buildExtraPaymentList(debt));
     list.appendChild(item);
   });
   document.getElementById('debt-empty').hidden = anyShown;
 }
 
-// The month a "YYYY-MM" key names, as "March 2027".
-function monthKeyLabel(monthKey) {
-  const [y, m] = monthKey.split('-').map(Number);
+// What a one-month payment key names, as "March 2027" for a month key ("YYYY-MM", from older versions) or "Mar 15,
+// 2027" for a date key ("YYYY-MM-DD").
+function monthKeyLabel(key) {
+  if (key.length === 10) return formatDateKeyShort(key);
+  const [y, m] = key.split('-').map(Number);
   return `${MONTH_NAMES[m - 1]} ${y}`;
 }
 
-// How many months after this one a "YYYY-MM" key is (next month is 1).
-function monthsFromNow(monthKey) {
-  const [y, m] = monthKey.split('-').map(Number);
+// How many months after this one a "YYYY-MM" or "YYYY-MM-DD" key is (this month is 0, next month is 1).
+function monthsFromNow(key) {
+  const [y, m] = key.split('-').map(Number);
   const today = parseDateKey(todayKey());
   return (y - today.y) * 12 + (m - 1 - today.m);
 }
 
-// A debt's one-month payment changes (debt.monthPayments, { 'YYYY-MM': amount }) from next month on, as the map of
-// month number (1 = next month) to amount that debtPayoff takes. Months that have started are no longer a plan.
+// A debt's one-month payment changes (debt.monthPayments, { 'YYYY-MM-DD': amount }, one per month) from this month on,
+// as the map of month number (0 = this month, 1 = next month) to amount that debtPayoff takes. Months that are over
+// are no longer a plan.
 function debtPaymentOverrides(debt) {
   const overrides = {};
-  Object.entries(debt.monthPayments || {}).forEach(([monthKey, amount]) => {
-    const index = monthsFromNow(monthKey);
-    if (index >= 1 && typeof amount === 'number') overrides[index] = amount;
+  Object.entries(debt.monthPayments || {}).forEach(([key, amount]) => {
+    const index = monthsFromNow(key);
+    if (index >= 0 && typeof amount === 'number') overrides[index] = amount;
   });
   return overrides;
 }
 
-// Sets what a debt pays in one month (YYYY-MM, from next month and within ten years) instead of its usual monthly
-// payment; $0 skips the month. Returns the problem as a sentence, or '' when it was saved.
-function setDebtMonthPayment(debtId, monthKey, amountRaw) {
+// Sets what a debt pays on one day (this month or later, within ten years) instead of its usual monthly payment, which
+// replaces any other change in the same month; $0 skips the month. A month key ("YYYY-MM") is also accepted. Returns
+// the problem as a sentence, or '' when it was saved.
+function setDebtMonthPayment(debtId, key, amountRaw) {
   const debt = income.find((r) => r.id === debtId && r.acctName && r.acctKind === 'debt' && !r.deleted);
   if (!debt) return 'That debt no longer exists.';
   if (!(debt.payment > 0)) return 'Add a monthly payment to this debt first (Edit on the account).';
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) return 'Choose the month.';
-  const index = monthsFromNow(monthKey);
-  if (index < 1) return 'Choose a month after this one. For this month, use Pay extra.';
-  if (index > 120) return 'Choose a month within the next ten years.';
+  if (!/^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(key) || (key.length === 10 && !isRealDateKey(key))) return 'Choose the date.';
+  const index = monthsFromNow(key);
+  if (index < 0) return 'Choose a date in this month or later.';
+  if (index > 120) return 'Choose a date within the next ten years.';
   const amount = Math.round(Number(amountRaw) * 100) / 100;
-  if (amountRaw === '' || !Number.isFinite(amount) || amount < 0 || amount > MAX_MONEY) return 'Enter the amount for that month ($0 or more).';
+  if (amountRaw === '' || !Number.isFinite(amount) || amount < 0 || amount > MAX_MONEY) return 'Enter the amount for that day ($0 or more).';
   const before = structuredClone(debt);
-  debt.monthPayments = { ...(debt.monthPayments || {}), [monthKey]: amount };
+  const others = Object.fromEntries(Object.entries(debt.monthPayments || {}).filter(([k]) => k.slice(0, 7) !== key.slice(0, 7)));
+  debt.monthPayments = { ...others, [key]: amount };
   stampSync(debt);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', debt.id, before, structuredClone(debt));
-  setLinkedBillMonthAmount(debt, monthKey, amount);
+  setLinkedBillMonthAmount(debt, key.slice(0, 7), amount);
   renderBudget();
   return '';
 }
@@ -5971,16 +5981,16 @@ function clearDebtMonthPayment(debtId, monthKey) {
   stampSync(debt);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', debt.id, before, structuredClone(debt));
-  setLinkedBillMonthAmount(debt, monthKey, null);
+  setLinkedBillMonthAmount(debt, monthKey.slice(0, 7), null);
   renderBudget();
 }
 
-// The "change one month's payment" part under a debt: the months already changed (each with a Remove button), and a
-// month, an amount and a button to change another, with a line for any problem.
+// The "change one month's payment" part under a debt: the days already changed (each with a Remove button), and a
+// date, an amount and a button to change another, with a line for any problem.
 function buildMonthPaymentForm(debt) {
   const wrap = document.createElement('div');
   wrap.className = 'debt-month-payments';
-  Object.keys(debt.monthPayments || {}).filter((key) => monthsFromNow(key) >= 1).sort().forEach((monthKey) => {
+  Object.keys(debt.monthPayments || {}).filter((key) => monthsFromNow(key) >= 0).sort().forEach((monthKey) => {
     const line = document.createElement('p');
     line.className = 'stats-line';
     line.textContent = `${monthKeyLabel(monthKey)}: pay ${formatMoney(debt.monthPayments[monthKey])} instead of ${formatMoney(debt.payment)}${linkedDebtBill(debt) ? ' (on your bills list too)' : ''} `;
@@ -5996,18 +6006,20 @@ function buildMonthPaymentForm(debt) {
   const form = document.createElement('form');
   form.className = 'add-form debt-month-form';
   const monthInput = document.createElement('input');
-  monthInput.type = 'month';
-  monthInput.setAttribute('aria-label', `Month to change the payment for ${debt.acctName}`);
+  monthInput.type = 'date';
+  monthInput.min = `${todayKey().slice(0, 7)}-01`;
+  monthInput.max = '2100-12-31';
+  monthInput.setAttribute('aria-label', `Date to pay a different amount toward ${debt.acctName}`);
   const amountInput = document.createElement('input');
   amountInput.type = 'number';
   amountInput.inputMode = 'decimal';
   amountInput.min = '0';
   amountInput.step = '0.01';
-  amountInput.placeholder = 'Payment that month';
-  amountInput.setAttribute('aria-label', `Payment for that month toward ${debt.acctName}`);
+  amountInput.placeholder = 'Payment that day';
+  amountInput.setAttribute('aria-label', `Payment for that day toward ${debt.acctName}`);
   const button = document.createElement('button');
   button.type = 'submit';
-  button.textContent = 'Change that month';
+  button.textContent = 'Change that payment';
   const error = document.createElement('p');
   error.className = 'form-error';
   error.hidden = true;
@@ -6059,6 +6071,53 @@ function addExtraDebtPayment(debtId, amountRaw, dateKey = todayKey()) {
 function extraPaidTotal(debtId) {
   const total = income.filter((r) => r.balFor === debtId && !r.deleted && typeof r.extraPaid === 'number').reduce((sum, r) => sum + r.extraPaid, 0);
   return Math.round(total * 100) / 100;
+}
+
+// A debt's extra payments, oldest first (the balance entries tagged extraPaid that are not deleted).
+function extraPaymentEntries(debtId) {
+  return accountBalanceEntries(debtId).filter((r) => typeof r.extraPaid === 'number');
+}
+
+// Takes back an extra payment made by mistake: its entry is deleted and the amount is added back to every balance
+// recorded after it (the ones it lowered, and those worked out from them), so what is owed goes back up. Returns the
+// problem as a sentence, or '' when it was removed.
+function removeExtraDebtPayment(entryId) {
+  const entry = income.find((r) => r.id === entryId && r.balFor && typeof r.extraPaid === 'number' && !r.deleted);
+  if (!entry) return 'That extra payment no longer exists.';
+  const after = accountBalanceEntries(entry.balFor).filter((r) => r.id !== entry.id
+    && (r.balOn > entry.balOn || (r.balOn === entry.balOn && (r.dateAdded || '') > (entry.dateAdded || ''))));
+  const before = structuredClone(entry);
+  entry.deleted = true;
+  stampSync(entry);
+  recordUndo('income', entry.id, before, structuredClone(entry));
+  after.forEach((later) => {
+    const laterBefore = structuredClone(later);
+    later.amount = Math.round((later.amount + entry.extraPaid) * 100) / 100;
+    stampSync(later);
+    recordUndo('income', later.id, laterBefore, structuredClone(later));
+  });
+  saveCollection(INCOME_KEY, income);
+  renderBudget();
+  return '';
+}
+
+// The list of a debt's extra payments, each with a Remove button (nothing when there are none).
+function buildExtraPaymentList(debt) {
+  const fragment = document.createDocumentFragment();
+  extraPaymentEntries(debt.id).forEach((entry) => {
+    const line = document.createElement('p');
+    line.className = 'stats-line';
+    line.textContent = `Extra payment ${formatDateKeyShort(entry.balOn)}: ${formatMoney(entry.extraPaid)} `;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'cancel-btn debt-extra-remove';
+    remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove the ${formatMoney(entry.extraPaid)} extra payment on ${formatDateKeyShort(entry.balOn)} toward ${debt.acctName}`);
+    remove.addEventListener('click', () => removeExtraDebtPayment(entry.id));
+    line.append(remove);
+    fragment.append(line);
+  });
+  return fragment;
 }
 
 // The small "pay extra" form under a debt: an amount, the day it was paid (today to start) and a button, with a line
@@ -8600,12 +8659,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 60;
+const APP_VERSION = 61;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  61: { date: '2026-11-03', notes: ['A debt\'s different payment now has a specific day and can be this month (Change that payment), and an extra payment made by mistake can be removed (Remove beside it under the debt).'] },
   60: { date: '2026-11-03', notes: ['Changing a debt\'s payment for one month now changes that month\'s bill on your Bills list too (the bill called "<debt> payment"); Remove puts the usual amount back.'] },
   59: { date: '2026-11-03', notes: ['A debt can pay a different amount in one coming month (Change that month under the debt) instead of an extra payment: the payoff date and interest follow it, and Remove puts the usual payment back.'] },
   58: { date: '2026-11-03', notes: ['Pay extra on a debt now has a date, so you can record an extra payment made on an earlier day. Adding a monthly payment to a debt you already have also asks whether to add it to your bills list.'] },
