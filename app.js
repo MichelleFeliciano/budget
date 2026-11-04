@@ -5825,7 +5825,7 @@ document.getElementById('debt-extra-input').addEventListener('input', renderDebt
 
 // The weeks ahead, from this week: for each, what comes in (recurring and typed income), what the bills take, what
 // the Spending Plan sets aside and the expected one-time costs of its month (each month's costs land in the first
-// forecast week that ends in that month), and, starting from what your asset accounts hold, the balance left. This
+// forecast week that ends in that month; "what comes in" also counts projected income for days still to come), and, starting from what your asset accounts hold, the balance left. This
 // week counts only from today (income and unpaid bills still to come, and the plan not yet spent). Returns { rows,
 // startBalance, hasBalance }.
 function forecastRows(weekCount) {
@@ -5833,6 +5833,8 @@ function forecastRows(weekCount) {
   const bills_ = bills.filter((b) => !b.deleted);
   const incomeNow = uniqueIncomeEntries(income).filter((r) => !r.deleted);
   const recurringNow = recurringIncome.filter((r) => !r.deleted);
+  const projected = projectedByDate(income);
+  const incomeDates = new Set(incomeNow.map((r) => r.dateKey));
   const plannedWeek = planCategories().reduce((sum, r) => sum + planWeekly(planAmount(r), r.frequency), 0);
   const firstWeek = weekStartKey(todayK);
   const assets = accountRecords().filter((a) => a.acctKind === 'asset').map((a) => accountBalanceOn(a.id, todayK)).filter(Boolean);
@@ -5845,7 +5847,11 @@ function forecastRows(weekCount) {
     const weekStart = shiftDateKey(firstWeek, 7 * i);
     const weekEnd = shiftDateKey(weekStart, 6);
     const from = i === 0 ? todayK : weekStart;
-    const inflow = totalIncomeInRange(from, weekEnd, incomeNow, recurringNow);
+    let inflow = totalIncomeInRange(from, weekEnd, incomeNow, recurringNow);
+    // Projected income counts for a day that has not passed and has no real income typed yet (as in the weekly Projected line).
+    projected.forEach((records, dateKey) => {
+      if (dateKey >= from && dateKey <= weekEnd && dateKey >= todayK && !incomeDates.has(dateKey)) inflow += records.reduce((sum, r) => sum + r.projected, 0);
+    });
     const due = amountDueInRange(from, weekEnd, bills_, i === 0);
     const spending = i === 0 ? Math.max(0, plannedWeek - sumExpensesIn(expenseRecords(), weekStart, weekEnd)) : plannedWeek;
     const monthKey = weekEnd.slice(0, 7);
@@ -5870,7 +5876,7 @@ function renderForecast() {
     const label = document.createElement('strong');
     label.textContent = row.label;
     const detail = document.createElement('span');
-    detail.textContent = `In ${formatMoney(row.inflow)} · bills ${formatMoney(row.due)} · spending ${formatMoney(row.spending)}${row.costs ? ` · expected costs ${formatMoney(row.costs)}` : ''}`;
+    detail.textContent = `In ${formatMoney(row.inflow)} · bills ${formatMoney(row.due)} · Spending Plan ${formatMoney(row.spending)}${row.costs ? ` · expected costs ${formatMoney(row.costs)}` : ''}`;
     const result = document.createElement('span');
     const figure = hasBalance ? row.balance : row.net;
     result.className = signedAmountClass(figure);
@@ -8318,12 +8324,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 55;
+const APP_VERSION = 56;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  56: { date: '2026-11-03', notes: ['The cash-flow forecast now counts projected income for days still to come, and its spending figure is labelled Spending Plan.'] },
   55: { date: '2026-11-03', notes: ['Recurring income can end: give a source a last payday, or a number of paydays, for a contract or a job that stops. After it, the income stops counting everywhere.'] },
   54: { date: '2026-11-02', notes: ['Projected income for a day that has passed and never got real income no longer counts in Projected net or in the weekly Projected line.'] },
   53: { date: '2026-10-26', notes: ['A Help, history & settings page (Menu): a settings check, what is new, recent changes, recently deleted things you can restore, and help.', 'Importing a backup now shows what it would do first, and only saves when you tap Import.', 'The Menu shows the date of your last backup file and of this version, and backup files carry the app version and format.', 'An offline bar when the device has no connection, and Add one now buttons on empty screens.', 'Merging two categories asks for a second tap.'] },

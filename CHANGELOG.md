@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v56 (2026-11-03)
+- The cash-flow forecast counts projected income for days still to come (when no real income is typed for that day); its "spending" figure is now labelled "Spending Plan"
+
 ## v55 (2026-11-03)
 - Recurring income can end: a last payday, or a number of paydays that works the date out; after it the income stops counting in the weeks, the forecast, the pay period and the Paycheck Planner
 

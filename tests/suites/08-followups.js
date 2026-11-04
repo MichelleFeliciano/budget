@@ -1344,3 +1344,13 @@ check('an ended source no longer supplies the payday or shows in the Paycheck Pl
 check('import accepts a good end date and refuses one before the start', isValidImportRecord('recurringIncome', { id: 'r1', name: 'a', amount: 5, dueDate: '2026-01-05', frequency: 'weekly', endDate: '2026-03-01' }) && !isValidImportRecord('recurringIncome', { id: 'r1', name: 'a', amount: 5, dueDate: '2026-05-05', frequency: 'weekly', endDate: '2026-03-01' }));
 check('bills still end the same way after the shared end rule', !validateBillFields({ name: 'a', amount: '5', dueDate: '2026-05-01', frequency: 'monthly', endDate: '2026-04-01', category: '' }).ok && validateBillFields({ name: 'a', amount: '5', dueDate: '2026-05-01', frequency: 'weekly', payments: '4', category: '' }).endDate === '2026-05-22');
 recurringIncome.length = 0; income.length = 0; bills.length = 0; hideUndoToast(); showTab('home'); renderBudget();
+
+// ---- the forecast counts projected income ----
+bills.length = 0; income.length = 0; recurringIncome.length = 0; hideUndoToast(); renderBudget();
+const fcBase = forecastRows(4).rows.map((r) => r.inflow);
+const fcDay = shiftDateKey(todayKey(), 8);
+setProjectedForDate(fcDay, '250'); await sleep(40);
+check('the forecast counts projected income for a coming day', (() => { const rows = forecastRows(4).rows; return rows.reduce((s, r) => s + r.inflow, 0) - fcBase.reduce((s, v) => s + v, 0) === 250; })());
+check('real income typed for that day replaces the projection in the forecast', await (async () => { setIncomeForDate(fcDay, '90'); await sleep(40); const rows = forecastRows(4).rows; return rows.reduce((s, r) => s + r.inflow, 0) - fcBase.reduce((s, v) => s + v, 0) === 90; })());
+check('the forecast row calls the plan figure Spending Plan', (() => { renderForecast(); return /Spending Plan \$/.test($('forecast-list').textContent); })());
+income.length = 0; bills.length = 0; hideUndoToast(); renderBudget();
