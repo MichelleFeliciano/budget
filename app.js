@@ -5706,13 +5706,18 @@ function renderAccounts() {
       e.preventDefault();
       editForm.hidden = true; // closed before saving, so the redraw after a save does not reopen it
       viewSection.hidden = false;
+      const hadPayment = account.payment > 0; // read before saving: the save changes this same record
       const problem = saveAccount({ name: nameBox.value, kind: kindBox.value, balanceRaw: balanceBox.value, aprRaw: aprBox.value, paymentRaw: paymentBox.value }, account.id);
       if (problem) {
         viewSection.hidden = true;
         editForm.hidden = false;
         editError.textContent = problem;
         editError.hidden = false;
+        return;
       }
+      // A monthly payment added to a debt that had none asks about the bills list, like adding a debt with one does.
+      const newPayment = Number(paymentBox.value);
+      if (kindBox.value === 'debt' && !hadPayment && newPayment > 0) offerDebtBill(nameBox.value.trim(), newPayment);
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(account.id));
     list.appendChild(node);
@@ -5755,8 +5760,10 @@ document.getElementById('account-add-form').addEventListener('submit', (e) => {
 // The debt whose monthly payment the "add to your bills?" question is about, as { name, payment }, or null.
 let pendingDebtBill = null;
 
-// Asks whether to add a new debt's monthly payment to the Bills list (the question stays until Yes or No).
+// Asks whether to add a debt's new monthly payment to the Bills list (the question stays until Yes or No). Nothing is
+// asked when a bill called "<name> payment" is already on the list.
 function offerDebtBill(name, payment) {
+  if (bills.some((b) => !b.deleted && b.name === `${name} payment`)) return; // already on the list
   pendingDebtBill = { name, payment: Math.round(payment * 100) / 100 };
   document.getElementById('debt-bill-question').textContent = `Do you want to add ${name}'s ${formatMoney(pendingDebtBill.payment)} monthly payment to your bills list?`;
   document.getElementById('debt-bill-date').value = todayKey();
@@ -5866,22 +5873,33 @@ function renderDebts() {
   document.getElementById('debt-empty').hidden = anyShown;
 }
 
-// Pays extra toward a debt today: the amount is taken off what is owed as a new balance entry dated today (tagged
-// extraPaid so the total paid can be shown), never merged into another entry of the day. The amount must be more than
-// $0 and no more than what is owed. Returns the problem as a sentence, or '' when it was saved.
-function addExtraDebtPayment(debtId, amountRaw) {
+// Pays extra toward a debt on a day (today unless given; not a future day): the amount is taken off what was owed on
+// that day as a new balance entry dated that day (tagged extraPaid so the total paid can be shown), never merged into
+// another entry of the day. Balance entries recorded after that day are lowered by the same amount (not below $0), so
+// a payment dated in the past still shows in what is owed now. The amount must be more than $0 and no more than what
+// was owed that day. Returns the problem as a sentence, or '' when it was saved.
+function addExtraDebtPayment(debtId, amountRaw, dateKey = todayKey()) {
   const debt = income.find((r) => r.id === debtId && r.acctName && r.acctKind === 'debt' && !r.deleted);
   if (!debt) return 'That debt no longer exists.';
-  const balance = accountBalanceOn(debtId, todayKey());
-  if (!balance || balance.amount <= 0) return 'There is nothing owed on this debt.';
+  if (!isRealDateKey(dateKey) || !isReasonableDateKey(dateKey)) return DATE_RANGE_MESSAGE;
+  if (dateKey > todayKey()) return 'The payment date cannot be in the future.';
+  const balance = accountBalanceOn(debtId, dateKey);
+  if (!balance) return 'No balance was recorded on or before that date.';
+  if (balance.amount <= 0) return 'There was nothing owed on this debt on that date.';
   const amount = Math.round(Number(amountRaw) * 100) / 100;
   if (amountRaw === '' || !Number.isFinite(amount) || amount <= 0) return 'Enter the extra payment as more than $0.';
-  if (amount > balance.amount) return `That is more than the ${formatMoney(balance.amount)} owed.`;
+  if (amount > balance.amount) return `That is more than the ${formatMoney(balance.amount)} owed on that date.`;
   const now = new Date().toISOString();
   const record = {
-    id: `bal-${makeId()}`, balFor: debtId, balOn: todayKey(), amount: Math.round((balance.amount - amount) * 100) / 100, extraPaid: amount,
+    id: `bal-${makeId()}`, balFor: debtId, balOn: dateKey, amount: Math.round((balance.amount - amount) * 100) / 100, extraPaid: amount,
     dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
   };
+  accountBalanceEntries(debtId).filter((r) => r.balOn > dateKey).forEach((later) => {
+    const before = structuredClone(later);
+    later.amount = Math.max(0, Math.round((later.amount - amount) * 100) / 100);
+    stampSync(later);
+    recordUndo('income', later.id, before, structuredClone(later));
+  });
   income.push(record);
   saveCollection(INCOME_KEY, income);
   recordUndo('income', record.id, null, structuredClone(record));
@@ -5895,7 +5913,8 @@ function extraPaidTotal(debtId) {
   return Math.round(total * 100) / 100;
 }
 
-// The small "pay extra" form under a debt: an amount and a button, with a line for any problem.
+// The small "pay extra" form under a debt: an amount, the day it was paid (today to start) and a button, with a line
+// for any problem.
 function buildExtraPaymentForm(debt) {
   const form = document.createElement('form');
   form.className = 'add-form debt-extra-form';
@@ -5906,16 +5925,22 @@ function buildExtraPaymentForm(debt) {
   input.step = '0.01';
   input.placeholder = 'Extra payment today';
   input.setAttribute('aria-label', `Extra payment toward ${debt.acctName}`);
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.min = '1990-01-01';
+  dateInput.max = todayKey();
+  dateInput.value = todayKey();
+  dateInput.setAttribute('aria-label', `Date of the extra payment toward ${debt.acctName}`);
   const button = document.createElement('button');
   button.type = 'submit';
   button.textContent = 'Pay extra';
   const error = document.createElement('p');
   error.className = 'form-error';
   error.hidden = true;
-  form.append(input, button, error);
+  form.append(input, dateInput, button, error);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const problem = addExtraDebtPayment(debt.id, input.value);
+    const problem = addExtraDebtPayment(debt.id, input.value, dateInput.value);
     if (problem) { error.textContent = problem; error.hidden = false; }
   });
   return form;
@@ -8427,12 +8452,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 57;
+const APP_VERSION = 58;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  58: { date: '2026-11-03', notes: ['Pay extra on a debt now has a date, so you can record an extra payment made on an earlier day. Adding a monthly payment to a debt you already have also asks whether to add it to your bills list.'] },
   57: { date: '2026-11-03', notes: ['Debt Payoff has a Pay extra button on each debt: it takes an extra payment off what you owe today and keeps a running total of the extra you have paid. Adding a debt with a monthly payment now asks whether to add that payment to your bills list.'] },
   56: { date: '2026-11-03', notes: ['The cash-flow forecast now counts projected income for days still to come, and its spending figure is labelled Spending Plan.'] },
   55: { date: '2026-11-03', notes: ['Recurring income can end: give a source a last payday, or a number of paydays, for a contract or a job that stops. After it, the income stops counting everywhere.'] },

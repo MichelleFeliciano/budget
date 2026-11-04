@@ -2,6 +2,10 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v58 (2026-11-03)
+- Pay extra on a debt takes a date (today to start, never in the future); a payment dated in the past also lowers the balances recorded after it, so what is owed now is right
+- Adding a monthly payment to an existing debt by editing it also asks "add this to your bills list?" (not asked when a bill called "<debt> payment" is already there)
+
 ## v57 (2026-11-03)
 - Debt Payoff: a Pay extra form on each debt takes an extra payment off what is owed today (it cannot be more than is owed) and shows the extra paid so far
 - Adding a debt with a monthly payment asks "add this to your bills list?" (Yes adds a monthly bill from a chosen date, No adds nothing)
