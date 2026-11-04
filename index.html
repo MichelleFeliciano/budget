@@ -536,11 +536,23 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <p class="form-error" id="account-form-error" hidden></p>
             <button type="submit">Add account</button>
           </form>
+          <!-- Shown after adding a debt that has a monthly payment: offers to add that payment to the Bills list. -->
+          <div id="debt-bill-prompt" hidden>
+            <p class="stats-line" id="debt-bill-question"></p>
+            <form class="add-form" id="debt-bill-form">
+              <label class="date-field">Next payment date
+                <input type="date" id="debt-bill-date" min="1990-01-01" max="2100-12-31" aria-label="Next payment date">
+              </label>
+              <button type="submit" id="debt-bill-yes">Yes, add it</button>
+              <button type="button" id="debt-bill-no">No</button>
+            </form>
+            <p class="form-error" id="debt-bill-error" hidden></p>
+          </div>
         </details>
 
         <details class="fold" id="fold-debts" open>
           <summary class="fold-summary"><h2>Debt Payoff</h2></summary>
-          <p class="stats-line">When each debt is paid off at its monthly payment, and about how much interest that costs. Type an extra amount to see what paying more would change.</p>
+          <p class="stats-line">When each debt is paid off at its monthly payment, and about how much interest that costs. Type an extra amount to see what paying more would change, or use Pay extra on a debt to take an extra payment off what you owe today.</p>
           <input type="number" inputmode="decimal" id="debt-extra-input" min="0" step="0.01" placeholder="Extra per month (optional)" aria-label="Extra amount to pay each month">
           <ul class="card-list flat-list" id="debt-list"></ul>
           <p class="empty-state" id="debt-empty" hidden>No debts with a balance. Add an account you owe above.</p>

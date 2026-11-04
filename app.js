@@ -5538,7 +5538,7 @@ document.getElementById('bank-undo-btn').addEventListener('click', () => {
 // ---- The Money tab: accounts and net worth, debt payoff, a cash-flow forecast, trends and subscriptions ----
 // Accounts are records in the `income` list, { id: 'acct-<id>', acctName, acctKind ('asset' or 'debt'), apr and payment
 // (debts, optional), ...sync fields }. What an account holds is a series of dated records, { id: 'bal-<id>', balFor:
-// <account id>, balOn, amount }, and the current balance is the newest one, so two devices that both update a
+// <account id>, balOn, amount, and extraPaid on an extra debt payment }, and the current balance is the newest one, so two devices that both update a
 // balance never overwrite each other and the history of net worth comes for free. For a debt the amount is what is
 // owed (positive). None of these has a `dateKey`, so income totals ignore them, and the sync server needs no change.
 
@@ -5744,9 +5744,55 @@ document.getElementById('account-add-form').addEventListener('submit', (e) => {
   });
   if (problem) { errorEl.textContent = problem; errorEl.hidden = false; return; }
   errorEl.hidden = true;
+  const addedName = document.getElementById('account-name-input').value.trim();
+  const addedPayment = Number(document.getElementById('account-payment-input').value);
+  const addedDebt = document.getElementById('account-kind-input').value === 'debt';
   e.target.reset();
   document.getElementById('account-name-input').focus();
+  if (addedDebt && addedPayment > 0) offerDebtBill(addedName, addedPayment);
 });
+
+// The debt whose monthly payment the "add to your bills?" question is about, as { name, payment }, or null.
+let pendingDebtBill = null;
+
+// Asks whether to add a new debt's monthly payment to the Bills list (the question stays until Yes or No).
+function offerDebtBill(name, payment) {
+  pendingDebtBill = { name, payment: Math.round(payment * 100) / 100 };
+  document.getElementById('debt-bill-question').textContent = `Do you want to add ${name}'s ${formatMoney(pendingDebtBill.payment)} monthly payment to your bills list?`;
+  document.getElementById('debt-bill-date').value = todayKey();
+  document.getElementById('debt-bill-error').hidden = true;
+  document.getElementById('debt-bill-prompt').hidden = false;
+}
+
+// Closes the "add to your bills?" question without adding anything.
+function closeDebtBillPrompt() {
+  pendingDebtBill = null;
+  document.getElementById('debt-bill-prompt').hidden = true;
+}
+
+// Yes: adds the debt's payment as a monthly bill starting on the chosen date, then closes the question.
+document.getElementById('debt-bill-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!pendingDebtBill) return;
+  const result = addBill({
+    name: `${pendingDebtBill.name} payment`,
+    amount: String(pendingDebtBill.payment),
+    dueDate: document.getElementById('debt-bill-date').value,
+    frequency: 'monthly',
+    category: '',
+  });
+  if (!result.ok) {
+    const errorEl = document.getElementById('debt-bill-error');
+    errorEl.textContent = result.error;
+    errorEl.hidden = false;
+    return;
+  }
+  closeDebtBillPrompt();
+  renderBudget();
+});
+
+// No: closes the question and adds nothing.
+document.getElementById('debt-bill-no').addEventListener('click', closeDebtBillPrompt);
 
 // ---- Debt payoff ----
 
@@ -5811,11 +5857,68 @@ function renderDebts() {
         }
       }
     }
+    const paidSoFar = extraPaidTotal(debt.id);
+    if (paidSoFar > 0) parts.push(`Extra payments so far: ${formatMoney(paidSoFar)}.`);
     lines.textContent = parts.join(' ');
-    item.append(title, lines);
+    item.append(title, lines, buildExtraPaymentForm(debt));
     list.appendChild(item);
   });
   document.getElementById('debt-empty').hidden = anyShown;
+}
+
+// Pays extra toward a debt today: the amount is taken off what is owed as a new balance entry dated today (tagged
+// extraPaid so the total paid can be shown), never merged into another entry of the day. The amount must be more than
+// $0 and no more than what is owed. Returns the problem as a sentence, or '' when it was saved.
+function addExtraDebtPayment(debtId, amountRaw) {
+  const debt = income.find((r) => r.id === debtId && r.acctName && r.acctKind === 'debt' && !r.deleted);
+  if (!debt) return 'That debt no longer exists.';
+  const balance = accountBalanceOn(debtId, todayKey());
+  if (!balance || balance.amount <= 0) return 'There is nothing owed on this debt.';
+  const amount = Math.round(Number(amountRaw) * 100) / 100;
+  if (amountRaw === '' || !Number.isFinite(amount) || amount <= 0) return 'Enter the extra payment as more than $0.';
+  if (amount > balance.amount) return `That is more than the ${formatMoney(balance.amount)} owed.`;
+  const now = new Date().toISOString();
+  const record = {
+    id: `bal-${makeId()}`, balFor: debtId, balOn: todayKey(), amount: Math.round((balance.amount - amount) * 100) / 100, extraPaid: amount,
+    dateAdded: now, updatedAt: now, deviceId: getDeviceId(), deleted: false, version: 0,
+  };
+  income.push(record);
+  saveCollection(INCOME_KEY, income);
+  recordUndo('income', record.id, null, structuredClone(record));
+  renderBudget();
+  return '';
+}
+
+// The total of the extra payments made toward a debt (the balance entries tagged extraPaid that are not deleted).
+function extraPaidTotal(debtId) {
+  const total = income.filter((r) => r.balFor === debtId && !r.deleted && typeof r.extraPaid === 'number').reduce((sum, r) => sum + r.extraPaid, 0);
+  return Math.round(total * 100) / 100;
+}
+
+// The small "pay extra" form under a debt: an amount and a button, with a line for any problem.
+function buildExtraPaymentForm(debt) {
+  const form = document.createElement('form');
+  form.className = 'add-form debt-extra-form';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.inputMode = 'decimal';
+  input.min = '0';
+  input.step = '0.01';
+  input.placeholder = 'Extra payment today';
+  input.setAttribute('aria-label', `Extra payment toward ${debt.acctName}`);
+  const button = document.createElement('button');
+  button.type = 'submit';
+  button.textContent = 'Pay extra';
+  const error = document.createElement('p');
+  error.className = 'form-error';
+  error.hidden = true;
+  form.append(input, button, error);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const problem = addExtraDebtPayment(debt.id, input.value);
+    if (problem) { error.textContent = problem; error.hidden = false; }
+  });
+  return form;
 }
 
 // The extra-payment box redraws the debts as it is typed in.
@@ -8163,7 +8266,7 @@ function isValidImportRecord(collectionName, rec) {
     }
     if (rec.goalName !== undefined) return nonEmptyText(rec.goalName) && isPositiveMoney(rec.target) && (rec.goalDate === undefined || isDate(rec.goalDate)) && textOrMissing(rec.notes);
     if (rec.acctName !== undefined) return nonEmptyText(rec.acctName) && ACCOUNT_KINDS.includes(rec.acctKind) && (rec.apr === undefined || (isNum(rec.apr) && rec.apr >= 0 && rec.apr <= 100)) && (rec.payment === undefined || (isNum(rec.payment) && rec.payment >= 0 && rec.payment <= MAX_MONEY));
-    if (rec.balFor !== undefined) return nonEmptyText(rec.balFor) && isDate(rec.balOn) && isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY;
+    if (rec.balFor !== undefined) return nonEmptyText(rec.balFor) && isDate(rec.balOn) && isNum(rec.amount) && Math.abs(rec.amount) <= MAX_MONEY && (rec.extraPaid === undefined || (isNum(rec.extraPaid) && rec.extraPaid > 0 && rec.extraPaid <= MAX_MONEY));
     if (rec.taxPercent !== undefined) return isNum(rec.taxPercent) && rec.taxPercent >= 0 && rec.taxPercent <= 100 && Array.isArray(rec.taxSources) && rec.taxSources.every(isText);
     if (rec.ruleText !== undefined) return nonEmptyText(rec.ruleText) && nonEmptyText(rec.rulePlanId);
     if (rec.recurPlanId !== undefined) return nonEmptyText(rec.recurPlanId) && isPositiveMoney(rec.amount) && REPEAT_FREQUENCIES.includes(rec.frequency) && isDate(rec.recurStart) && dateListOrMissing(rec.skippedDates) && textOrMissing(rec.notes);
@@ -8324,12 +8427,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 56;
+const APP_VERSION = 57;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  57: { date: '2026-11-03', notes: ['Debt Payoff has a Pay extra button on each debt: it takes an extra payment off what you owe today and keeps a running total of the extra you have paid. Adding a debt with a monthly payment now asks whether to add that payment to your bills list.'] },
   56: { date: '2026-11-03', notes: ['The cash-flow forecast now counts projected income for days still to come, and its spending figure is labelled Spending Plan.'] },
   55: { date: '2026-11-03', notes: ['Recurring income can end: give a source a last payday, or a number of paydays, for a contract or a job that stops. After it, the income stops counting everywhere.'] },
   54: { date: '2026-11-02', notes: ['Projected income for a day that has passed and never got real income no longer counts in Projected net or in the weekly Projected line.'] },

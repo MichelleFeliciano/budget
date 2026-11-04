@@ -2,6 +2,10 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v57 (2026-11-03)
+- Debt Payoff: a Pay extra form on each debt takes an extra payment off what is owed today (it cannot be more than is owed) and shows the extra paid so far
+- Adding a debt with a monthly payment asks "add this to your bills list?" (Yes adds a monthly bill from a chosen date, No adds nothing)
+
 ## v56 (2026-11-03)
 - The cash-flow forecast counts projected income for days still to come (when no real income is typed for that day); its "spending" figure is now labelled "Spending Plan"
 
