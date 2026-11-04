@@ -552,7 +552,7 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
 
         <details class="fold" id="fold-debts" open>
           <summary class="fold-summary"><h2>Debt Payoff</h2></summary>
-          <p class="stats-line">When each debt is paid off at its monthly payment, and about how much interest that costs. Type an extra amount to see what paying more would change, or use Pay extra on a debt to take an extra payment off what you owe today.</p>
+          <p class="stats-line">When each debt is paid off at its monthly payment, and about how much interest that costs. Type an extra amount to see what paying more would change, or use Pay extra on a debt to take an extra payment off what you owe. To pay a different amount in one coming month, use Change that month.</p>
           <input type="number" inputmode="decimal" id="debt-extra-input" min="0" step="0.01" placeholder="Extra per month (optional)" aria-label="Extra amount to pay each month">
           <ul class="card-list flat-list" id="debt-list"></ul>
           <p class="empty-state" id="debt-empty" hidden>No debts with a balance. Add an account you owe above.</p>

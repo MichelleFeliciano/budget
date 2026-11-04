@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v59 (2026-11-03)
+- Debt Payoff: a debt with a monthly payment can pay a different amount in one coming month (Change that month; $0 skips the month, Remove puts the usual payment back); the payoff date and interest follow it
+
 ## v58 (2026-11-03)
 - Pay extra on a debt takes a date (today to start, never in the future); a payment dated in the past also lowers the balances recorded after it, so what is owed now is right
 - Adding a monthly payment to an existing debt by editing it also asks "add this to your bills list?" (not asked when a bill called "<debt> payment" is already there)
