@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v63 (2026-11-05)
+- Adding a repeating expense (Money tab) asks Yes or No whether to put it on the Bills list too, with the same amount and how often it repeats; a repeating expense or a debt's monthly payment that is not on the Bills list has an Add to bills button, for when the question was missed or answered No
+
 ## v62 (2026-11-04)
 - Fixed: Sync and Import rejected a debt whose payment change is on a chosen day (the v61 form), because the check only allowed a month; such a debt now syncs and imports, the older month form still works, and a bad day is still refused
 

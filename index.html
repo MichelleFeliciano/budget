@@ -412,6 +412,18 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <p class="form-error" id="repeat-form-error" hidden></p>
             <button type="submit">Add repeating expense</button>
           </form>
+          <!-- Shown after adding a repeating expense or tapping its Add to bills button: offers to put it on the Bills list. -->
+          <div id="repeat-bill-prompt" hidden>
+            <p class="stats-line" id="repeat-bill-question"></p>
+            <form class="add-form" id="repeat-bill-form">
+              <label class="date-field">First bill date
+                <input type="date" id="repeat-bill-date" min="1990-01-01" max="2100-12-31" aria-label="First bill date">
+              </label>
+              <button type="submit" id="repeat-bill-yes">Yes, add it</button>
+              <button type="button" id="repeat-bill-no">No</button>
+            </form>
+            <p class="form-error" id="repeat-bill-error" hidden></p>
+          </div>
         </details>
 
         <details class="fold" id="fold-expense-shops">

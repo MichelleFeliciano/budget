@@ -4875,6 +4875,16 @@ function renderRepeats() {
       }
     });
     node.querySelector('.delete-btn').addEventListener('click', () => deleteIncome(repeat.id));
+    // Not on the Bills list yet: a button to add it (the question may have been missed or answered No).
+    if (!repeatLinkedBill(repeat)) {
+      const billBtn = document.createElement('button');
+      billBtn.type = 'button';
+      billBtn.className = 'small-btn repeat-bill-btn';
+      billBtn.textContent = 'Add to bills';
+      billBtn.setAttribute('aria-label', `Add repeating ${name} to your bills list`);
+      billBtn.addEventListener('click', () => offerRepeatBill(repeat.id));
+      node.querySelector('.recurring-income-actions').append(billBtn);
+    }
     list.appendChild(node);
   });
   document.getElementById('repeat-empty-state').hidden = records.length !== 0;
@@ -4886,6 +4896,7 @@ function renderRepeats() {
 document.getElementById('repeat-add-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const errorEl = document.getElementById('repeat-form-error');
+  const knownRepeats = new Set(repeatRecords().map((r) => r.id));
   const problem = saveRepeat({
     planId: document.getElementById('repeat-category-input').value,
     amountRaw: document.getElementById('repeat-amount-input').value,
@@ -4897,7 +4908,82 @@ document.getElementById('repeat-add-form').addEventListener('submit', (e) => {
   errorEl.hidden = true;
   document.getElementById('repeat-amount-input').value = '';
   document.getElementById('repeat-notes-input').value = '';
+  const added = repeatRecords().find((r) => !knownRepeats.has(r.id));
+  if (added) offerRepeatBill(added.id);
 });
+
+// The repeating expense the "add to your bills?" question is about, as { id, name, amount, frequency }, or null.
+let pendingRepeatBill = null;
+
+// The name a repeating expense gets on the Bills list: its Spending Plan category.
+function repeatBillName(repeat) {
+  return expenseCategoryName({ planId: repeat.recurPlanId, categoryName: '' });
+}
+
+// The live bill already standing for a repeating expense (same name as its category), or undefined.
+function repeatLinkedBill(repeat) {
+  const name = repeatBillName(repeat);
+  return bills.find((b) => !b.deleted && b.name === name);
+}
+
+// The date a repeating expense next comes due, today included: its first date when that is still ahead.
+function nextRepeatDateKey(repeat) {
+  const todayK = todayKey();
+  if (repeat.recurStart >= todayK) return repeat.recurStart;
+  const schedule = { dueDate: repeat.recurStart, frequency: repeat.frequency };
+  for (let ahead = 0; ahead <= 400; ahead += 1) {
+    const dateKey = shiftDateKey(todayK, ahead);
+    if (occursOnDate(schedule, dateKey)) return dateKey;
+  }
+  return todayK;
+}
+
+// Asks whether to add a repeating expense to the Bills list (the question stays until Yes or No, and the Add to bills
+// button on the expense asks it again later). Nothing is asked when a bill with the category's name is already listed.
+function offerRepeatBill(repeatId) {
+  const repeat = income.find((r) => r.id === repeatId && r.recurPlanId && !r.deleted);
+  if (!repeat || repeatLinkedBill(repeat)) return;
+  pendingRepeatBill = { id: repeat.id, name: repeatBillName(repeat), amount: repeat.amount, frequency: repeat.frequency };
+  const word = { weekly: 'weekly', biweekly: 'every-2-weeks', monthly: 'monthly' }[repeat.frequency];
+  document.getElementById('repeat-bill-question').textContent = `Do you want to add ${pendingRepeatBill.name}'s ${formatMoney(repeat.amount)} ${word} payment to your bills list? It would then show as a bill as well as under spending.`;
+  document.getElementById('repeat-bill-date').value = nextRepeatDateKey(repeat);
+  document.getElementById('repeat-bill-error').hidden = true;
+  const prompt = document.getElementById('repeat-bill-prompt');
+  prompt.hidden = false;
+  const fold = prompt.closest('details');
+  if (fold) fold.open = true;
+  if (prompt.scrollIntoView) prompt.scrollIntoView({ block: 'center' });
+}
+
+// Closes the "add to your bills?" question for a repeating expense without adding anything.
+function closeRepeatBillPrompt() {
+  pendingRepeatBill = null;
+  document.getElementById('repeat-bill-prompt').hidden = true;
+}
+
+// Yes: adds the repeating expense as a bill with the same amount and frequency from the chosen date, then closes the question.
+document.getElementById('repeat-bill-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!pendingRepeatBill) return;
+  const result = addBill({
+    name: pendingRepeatBill.name,
+    amount: String(pendingRepeatBill.amount),
+    dueDate: document.getElementById('repeat-bill-date').value,
+    frequency: pendingRepeatBill.frequency,
+    category: '',
+  });
+  if (!result.ok) {
+    const errorEl = document.getElementById('repeat-bill-error');
+    errorEl.textContent = result.error;
+    errorEl.hidden = false;
+    return;
+  }
+  closeRepeatBillPrompt();
+  renderBudget();
+});
+
+// No: closes the question and adds nothing.
+document.getElementById('repeat-bill-no').addEventListener('click', closeRepeatBillPrompt);
 
 // The first date of a new repeating expense starts on today.
 document.getElementById('repeat-start-input').value = todayKey();
@@ -5776,7 +5862,11 @@ function offerDebtBill(name, payment) {
   document.getElementById('debt-bill-question').textContent = `Do you want to add ${name}'s ${formatMoney(pendingDebtBill.payment)} monthly payment to your bills list?`;
   document.getElementById('debt-bill-date').value = todayKey();
   document.getElementById('debt-bill-error').hidden = true;
-  document.getElementById('debt-bill-prompt').hidden = false;
+  const prompt = document.getElementById('debt-bill-prompt');
+  prompt.hidden = false;
+  const fold = prompt.closest('details'); // the question lives in Accounts & Net Worth, which may be closed or off screen
+  if (fold) fold.open = true;
+  if (prompt.scrollIntoView) prompt.scrollIntoView({ block: 'center' });
 }
 
 // Closes the "add to your bills?" question without adding anything.
@@ -5883,6 +5973,16 @@ function renderDebts() {
     if (paidSoFar > 0) parts.push(`Extra payments so far: ${formatMoney(paidSoFar)}.`);
     lines.textContent = parts.join(' ');
     item.append(title, lines);
+    // Not on the Bills list yet: a button to add the payment (the question may have been missed or answered No).
+    if (balance.amount > 0 && typeof debt.payment === 'number' && debt.payment > 0 && !linkedDebtBill(debt)) {
+      const billBtn = document.createElement('button');
+      billBtn.type = 'button';
+      billBtn.className = 'small-btn debt-bill-btn';
+      billBtn.textContent = 'Add payment to bills';
+      billBtn.setAttribute('aria-label', `Add ${debt.acctName} payment to your bills list`);
+      billBtn.addEventListener('click', () => offerDebtBill(debt.acctName, debt.payment));
+      item.append(billBtn);
+    }
     if (balance.amount > 0 && typeof debt.payment === 'number' && debt.payment > 0) item.append(buildMonthPaymentForm(debt));
     if (balance.amount > 0) item.append(buildExtraPaymentForm(debt));
     item.append(buildExtraPaymentList(debt));
@@ -8659,12 +8759,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 62;
+const APP_VERSION = 63;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  63: { date: '2026-11-05', notes: ['Adding a repeating expense now asks whether to put it on your Bills list too (Yes or No), and a repeating expense or a debt payment you missed or said No to has an Add to bills button to do it later.'] },
   62: { date: '2026-11-04', notes: ['Fixed Sync and Import skipping a debt that has a payment change on a chosen day, so those debts now reach your other devices and come back after the server resets.'] },
   61: { date: '2026-11-03', notes: ['A debt\'s different payment now has a specific day and can be this month (Change that payment), and an extra payment made by mistake can be removed (Remove beside it under the debt).'] },
   60: { date: '2026-11-03', notes: ['Changing a debt\'s payment for one month now changes that month\'s bill on your Bills list too (the bill called "<debt> payment"); Remove puts the usual amount back.'] },
