@@ -2679,6 +2679,16 @@ function renderRecurringIncomeList(nonDeletedRecurringIncome, openEdit) {
   document.getElementById('recurring-income-empty-state').hidden = nonDeletedRecurringIncome.length !== 0;
 }
 
+// Turns a projected income entry into real income on its own day and source, then removes the projection (two Undo
+// steps). Nothing happens when that day and source already has real income, so an entered amount is never overwritten.
+function addProjectedToIncome(dateKey, amount, source) {
+  const key = entryKey(dateKey, source);
+  if (uniqueIncomeEntries(income).some((r) => !r.deleted && entryKey(r.dateKey, r.source) === key)) return false;
+  setIncomeForDate(dateKey, String(amount), source);
+  setProjectedForDate(dateKey, '', source);
+  return true;
+}
+
 // Draws the Projected Income list on the Income tab: the projected days from today on, soonest first, each
 // with Edit (the amount) and Delete, plus a line with the total still expected. A day that already has real
 // income entered says so, because its projection no longer counts.
@@ -2753,6 +2763,16 @@ function renderProjectedIncomeList() {
       renderBudget();
     });
     node.querySelector('.delete-btn').addEventListener('click', () => setProjectedForDate(dateKey, '', record.source));
+    // A button to record it as real income (not offered when that day and source already has real income).
+    if (!uniqueIncomeEntries(income).some((r) => !r.deleted && entryKey(r.dateKey, r.source) === entryKey(dateKey, record.source))) {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'projected-add-income-btn';
+      addBtn.textContent = 'Add to income';
+      addBtn.setAttribute('aria-label', `Add projected income for ${formatDateKeyShort(dateKey)} to income received`);
+      addBtn.addEventListener('click', () => addProjectedToIncome(dateKey, record.projected, record.source));
+      node.querySelector('.delete-btn').parentElement.append(addBtn);
+    }
 
     list.appendChild(node);
   });
@@ -8759,12 +8779,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 63;
+const APP_VERSION = 64;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  64: { date: '2026-11-06', notes: ['Projected Income entries have an Add to income button that records the amount as real income on that day and removes the projection.'] },
   63: { date: '2026-11-05', notes: ['Adding a repeating expense now asks whether to put it on your Bills list too (Yes or No), and a repeating expense or a debt payment you missed or said No to has an Add to bills button to do it later.'] },
   62: { date: '2026-11-04', notes: ['Fixed Sync and Import skipping a debt that has a payment change on a chosen day, so those debts now reach your other devices and come back after the server resets.'] },
   61: { date: '2026-11-03', notes: ['A debt\'s different payment now has a specific day and can be this month (Change that payment), and an extra payment made by mistake can be removed (Remove beside it under the debt).'] },
