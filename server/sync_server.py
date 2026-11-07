@@ -386,6 +386,15 @@ def merge_collection(server_items, client_items, collection_name):
         if _content_matches(existing, incoming, collection_name):
             continue
 
+        # A version AHEAD of the server's says nothing about which copy is newer: after a reset the server starts every
+        # record again at version 1 while devices keep their old numbers. The edit times decide, so an older copy never
+        # overwrites a newer one and a stale live copy never undoes a delete. A delete itself is still applied.
+        if client_version > server_version and not incoming.get("deleted"):
+            incoming_time = str(incoming.get("updatedAt", ""))
+            existing_time = str(existing.get("updatedAt", ""))
+            if incoming_time < existing_time or (existing.get("deleted") and incoming_time == existing_time):
+                continue
+
         new_record = dict(incoming)
         new_record["version"] = max(server_version, client_version) + 1
         _replace_record(server_items, by_id, record_id, new_record)

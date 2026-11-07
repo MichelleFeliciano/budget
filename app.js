@@ -563,12 +563,23 @@ function occurrenceAmount(bill, dateKey) {
   return (bill.paidDates || []).includes(dateKey) ? paidAmountFor(bill, dateKey) : plannedAmountFor(bill, dateKey);
 }
 
-// Total still owed for a bill's occurrences up to a date (occurrences so far minus paid ones, times the amount).
-function unpaidAmountThrough(bill, throughKey) {
+// How many of a bill's occurrences up to a date are not marked paid.
+function unpaidCountThrough(bill, throughKey) {
   const totalOccurrences = occurrenceCountThrough(bill, throughKey);
   if (totalOccurrences === 0) return 0;
   const paidCount = new Set((bill.paidDates || []).filter((d) => d <= throughKey && occursOnDate(bill, d))).size;
-  return Math.max(0, totalOccurrences - paidCount) * bill.amount;
+  return Math.max(0, totalOccurrences - paidCount);
+}
+
+// Total still owed for a bill's occurrences up to a date (unpaid occurrences times the amount), with each date that has
+// a planned amount (plannedAmounts, from a debt's one-month change) counted at that amount instead.
+function unpaidAmountThrough(bill, throughKey) {
+  let sum = unpaidCountThrough(bill, throughKey) * bill.amount;
+  const paidSet = new Set(bill.paidDates || []);
+  Object.keys(bill.plannedAmounts || {}).forEach((d) => {
+    if (d <= throughKey && occursOnDate(bill, d) && !paidSet.has(d)) sum += plannedAmountFor(bill, d) - bill.amount;
+  });
+  return Math.max(0, sum);
 }
 
 // Walks forward from the bill's first due date to find the earliest date that really is a due date
@@ -671,6 +682,11 @@ function newEntryId(prefix, dateKey, source) {
   const name = cleanSource(source).toLowerCase();
   const base = `${prefix}${dateKey}${name ? `#${name}` : ''}`;
   return income.some((r) => r.id === base) ? `${prefix}${makeId()}` : base;
+}
+
+// Removes every live adjustment for a week (two devices can each have made one before syncing), so a reset really resets.
+function clearWeekAdjustments(weekKey) {
+  income.filter((r) => r.adjustWeek === weekKey && !r.deleted).forEach((r) => deleteIncome(r.id));
 }
 
 // Sets (or clears, when the value is '') the manual income number for one calendar day and source ('' or
@@ -1144,6 +1160,10 @@ function updateBill(id, fields) {
     });
     bill.paidDates = [...new Set(moved)].sort();
     if (bill.paidAmounts) bill.paidAmounts = movedAmounts;
+    if (bill.plannedAmounts) { // a planned amount belongs to one date, so the ones the new schedule no longer has are dropped
+      const keep = Object.fromEntries(Object.entries(bill.plannedAmounts).filter(([d]) => occursOnDate(bill, d)));
+      if (Object.keys(keep).length) bill.plannedAmounts = keep; else delete bill.plannedAmounts;
+    }
   }
   stampSync(bill);
   saveCollection(BILLS_KEY, bills);
@@ -1869,7 +1889,7 @@ function setWeekCarry(weekKey, calculatedCarry, actualRaw, rawNote) {
   const difference = Math.round((actual - calculatedCarry) * 100) / 100;
   const existing = weekAdjustments().get(weekKey);
   if (difference === 0) {
-    if (existing) deleteIncome(existing.id);
+    if (existing) clearWeekAdjustments(weekKey);
     else renderBudget();
     return '';
   }
@@ -1951,7 +1971,7 @@ function buildWeekAdjust(weekKey, calculatedCarry, shownCarry, adjustment) {
     amountBox.focus();
   });
   cancel.addEventListener('click', () => { form.hidden = true; });
-  reset.addEventListener('click', () => { if (adjustment) deleteIncome(adjustment.id); });
+  reset.addEventListener('click', () => { if (adjustment) clearWeekAdjustments(weekKey); });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const problem = setWeekCarry(weekKey, calculatedCarry, amountBox.value, noteBox.value);
@@ -2452,7 +2472,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
     // Offered when two or more earlier dates are unpaid (a bill added with an old date, say): one tap catches up.
     const catchUpBtn = node.querySelector('.catch-up-btn');
     const yesterdayK = shiftDateKey(todayK, -1);
-    catchUpBtn.hidden = Math.round(unpaidAmountThrough(bill, yesterdayK) / bill.amount) < 2;
+    catchUpBtn.hidden = unpaidCountThrough(bill, yesterdayK) < 2;
     catchUpBtn.addEventListener('click', () => catchUpBill(bill.id, yesterdayK));
 
     // "Other...": pay the oldest unpaid date with a different amount, or skip that date (recorded as a payment of 0).
@@ -3383,7 +3403,7 @@ function saveSavingsEntry(id, dateKey, amountRaw) {
   if (amountRaw === '' || !Number.isFinite(amount) || amount === 0 || Math.abs(amount) > MAX_MONEY) return 'Enter an amount up to $1,000,000,000 (negative for money taken out).';
   const cents = Math.round(amount * 100) / 100;
   if (cents === 0) return 'Enter an amount of at least one cent.';
-  if (goalSaved(entry.savedFor) - entry.amount + cents < 0) return 'That would leave less than nothing saved for this goal.';
+  if (Math.round((goalSaved(entry.savedFor) - entry.amount + cents) * 100) < 0) return 'That would leave less than nothing saved for this goal.';
   if (dateKey !== entry.savedOn || cents !== entry.amount) {
     const before = structuredClone(entry);
     entry.savedOn = dateKey;
@@ -4985,11 +5005,13 @@ function closeRepeatBillPrompt() {
 document.getElementById('repeat-bill-form').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!pendingRepeatBill) return;
+  const repeat = income.find((r) => r.id === pendingRepeatBill.id && r.recurPlanId && !r.deleted);
+  if (!repeat) { closeRepeatBillPrompt(); return; } // it was deleted while the question was open
   const result = addBill({
-    name: pendingRepeatBill.name,
-    amount: String(pendingRepeatBill.amount),
+    name: repeatBillName(repeat),
+    amount: String(repeat.amount),
     dueDate: document.getElementById('repeat-bill-date').value,
-    frequency: pendingRepeatBill.frequency,
+    frequency: repeat.frequency,
     category: '',
   });
   if (!result.ok) {
@@ -5680,7 +5702,8 @@ function accountBalanceOn(acctId, dateKey) {
 // Sets an account's balance for a day: the day's entry is changed when there is one, otherwise a new one is made.
 function setAccountBalance(acctId, amount, dateKey) {
   const rounded = Math.round(amount * 100) / 100;
-  const existing = accountBalanceEntries(acctId).filter((r) => r.balOn === dateKey).pop();
+  const last = accountBalanceEntries(acctId).filter((r) => r.balOn === dateKey).pop();
+  const existing = last && typeof last.extraPaid !== 'number' ? last : null; // an extra payment is never rewritten: a new entry follows it
   if (existing) {
     if (existing.amount === rounded) return;
     const before = structuredClone(existing);
@@ -5935,7 +5958,6 @@ function debtPayoff(balance, apr, payment, overrides = {}, extra = 0) {
   for (let months = 1; months <= 1200; months += 1) {
     const charge = owed * rate;
     const pay = (overrides[months] !== undefined ? overrides[months] : payment) + extra; // a month with its own amount pays that instead
-    if (pay <= charge + 0.005 && rate > 0 && months === 1) return null; // the first month's interest already eats the payment
     interest += charge;
     owed = owed + charge - pay;
     if (owed <= 0.005) return { months, interest: Math.round(interest * 100) / 100 };
@@ -7190,6 +7212,8 @@ function renderMore() {
 document.getElementById('more-btn').addEventListener('click', () => {
   const sidebar = document.querySelector('.sidebar');
   if (sidebar) sidebar.classList.remove('sidebar-open');
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', 'false');
   showTab('more');
   window.scrollTo({ top: 0, behavior: scrollBehavior() });
 });
@@ -7560,6 +7584,9 @@ function applyEntrySnapshot(entry, which) {
     return;
   }
   if (!target.deleted && record.deleted) {
+    // Only an entry that itself deleted or added the record may bring it back; an edit's undo leaves a delete made elsewhere alone.
+    const otherSide = entry[which === 'before' ? 'after' : 'before'];
+    if (otherSide && !otherSide.deleted) return;
     cfg.restore(entry.id); // un-tombstone via restoreX first
   }
 
@@ -8536,8 +8563,8 @@ function mergeCollectionFromImport(localItems, importedItems, collectionName) {
     }
 
     // Same rule as the sync server: a deleted record stays deleted rather than
-    // being brought back as a duplicate by an older backup file.
-    if (existing.deleted && !incoming.deleted) {
+    // being brought back (or copied again) by an older backup file.
+    if (existing.deleted) {
       unchanged += 1;
       return;
     }
@@ -8556,6 +8583,16 @@ function mergeCollectionFromImport(localItems, importedItems, collectionName) {
     if (collectionName === 'income') {
       const index = localItems.findIndex((item) => item.id === incoming.id);
       const record = { ...incoming, version: existing.version };
+      localItems[index] = record;
+      byId.set(record.id, record);
+      updated += 1;
+      return;
+    }
+
+    // A newer delete in the backup deletes the local record, as the server does, instead of adding a deleted copy.
+    if (incoming.deleted) {
+      const index = localItems.findIndex((item) => item.id === incoming.id);
+      const record = { ...existing, deleted: true, updatedAt: incoming.updatedAt, deviceId: incoming.deviceId };
       localItems[index] = record;
       byId.set(record.id, record);
       updated += 1;
@@ -8779,12 +8816,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 64;
+const APP_VERSION = 65;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  65: { date: '2026-11-07', notes: ['Bug fixes from a full code review: a debt month set to $0 no longer says the debt never pays off; editing a debt balance after an extra payment keeps both; unpaid bill totals and Catch up follow a debt-linked bill\'s planned amounts; Undo no longer brings back a record another device deleted; importing a backup applies deletes cleanly; plus smaller fixes.'] },
   64: { date: '2026-11-06', notes: ['Projected Income entries have an Add to income button that records the amount as real income on that day and removes the projection.'] },
   63: { date: '2026-11-05', notes: ['Adding a repeating expense now asks whether to put it on your Bills list too (Yes or No), and a repeating expense or a debt payment you missed or said No to has an Add to bills button to do it later.'] },
   62: { date: '2026-11-04', notes: ['Fixed Sync and Import skipping a debt that has a payment change on a chosen day, so those debts now reach your other devices and come back after the server resets.'] },

@@ -109,7 +109,7 @@ h1, h2, h3 {
 
 /* Keyboard focus ring for every interactive element. */
 
-:is(button, input, select, textarea, a):focus-visible {
+:is(button, input, select, textarea, a, summary):focus-visible {
   outline: 2px solid var(--accent-lavender);
   outline-offset: 2px;
 }
@@ -481,7 +481,7 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
   max-width: 960px;
 }
 
-/* The tabs (Home, Income, Bills, Plan, Expenses): pills above the page on wide screens (wrapping onto a second line
+/* The tabs (Home, Income, Bills, Plan, Expenses, Business, Money): pills above the page on wide screens (wrapping onto a second line
    when the column is narrow); the phone block at the end of the file turns the row into a bar along the bottom
    of the screen. */
 
@@ -1377,6 +1377,9 @@ input[type="date"]::-webkit-date-and-time-value {
 /* When printing the report, everything but the report is hidden and the report is plain black on white. */
 
 @media print {
+  /* The corner vines are background art: they are not printed even when the browser prints backgrounds. */
+  html::before, html::after, body::before, body::after { display: none; }
+
   /* Everything on the page except the report. */
 
   body.printing-report > *:not(.print-report) { display: none !important; }
@@ -1563,7 +1566,7 @@ input[type="date"]::-webkit-date-and-time-value {
 
 /* The line that opens and closes the history. */
 
-.goal-history-summary { cursor: pointer; color: var(--muted); }
+.goal-history-summary { cursor: pointer; color: var(--muted); padding: 10px 0; }
 
 /* The history rows: a plain list, one entry per line with its Delete button at the end. */
 
@@ -1629,6 +1632,18 @@ input[type="date"]::-webkit-date-and-time-value {
   margin: 8px 0;
 }
 
+/* display: flex above would otherwise beat the hidden attribute on the panels that wait for a bank file. */
+
+.bank-bulk[hidden], .bank-map[hidden] { display: none; }
+
+/* A chosen file's box never makes the page scroll sideways on a narrow phone. */
+
+input[type="file"] { max-width: 100%; }
+
+/* The "No" choices in the add-to-bills questions are outlined so "Yes, add it" stays the main action. */
+
+.add-form #repeat-bill-no, .add-form #debt-bill-no { border: 1px solid var(--border); background: transparent; color: var(--text); font-weight: 400; }
+
 /* A repeating expense that is due: what it is, then Log it and Skip. */
 
 .repeat-due {
@@ -1657,10 +1672,12 @@ input[type="date"]::-webkit-date-and-time-value {
 
 .custom-repeat[hidden] { display: none; }
 
-/* The number box is narrow (it only holds one or two digits) and the weeks/months box fits its words; the form rules
-   that stretch every box to the full width are more specific, so these name the type. */
+/* The number box is narrow (it only holds one or two digits); the form rules that stretch every box to the full width
+   are more specific, so this names the type. */
 
 .custom-repeat input[type="number"] { width: 72px; }
+
+/* The weeks/months box is as wide as its words. */
 
 .custom-repeat select { width: auto; }
 
@@ -2916,7 +2933,8 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   /* Finger-sized tap targets for the small buttons. */
 
   .chip, .sync-change-btn, .reminder-banner-btn, .small-btn, .add-form .today-btn, .data-io-btn,
-  .undo-redo-panel button, .paid-history-nav, .sidebar-toggle, .quick-sync-btn:not([hidden]) { min-height: 40px; }
+  .undo-redo-panel button, .paid-history-nav, .sidebar-toggle, .quick-sync-btn:not([hidden]),
+  .budget-day-close, .sync-setup-form button { min-height: 40px; }
 
   /* iOS Safari zooms the page when a text control under 16px gets focus. Many more specific
      rules set their own smaller sizes (add and edit forms, the sync passphrase box), so this one needs !important to win everywhere. */
@@ -2924,6 +2942,6 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea {
-    font-size: 16px !important;
+    font-size: max(16px, 1rem) !important;
   }
 }

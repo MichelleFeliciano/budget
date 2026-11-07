@@ -2,6 +2,18 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v65 (2026-11-07)
+- Fixes from a full code review of the app, style sheet and sync server:
+  - A debt month set to $0 (or below that month's interest) no longer makes the whole debt read "never pays off"
+  - Editing a debt's balance on a day that has an extra payment keeps both (the extra payment is no longer rewritten)
+  - Unpaid totals, Mark oldest paid and Catch up use a debt-linked bill's planned amounts; changing a bill's schedule drops planned amounts for dates it no longer has
+  - Undo/Redo of an edit no longer brings back a record that another device deleted
+  - Import: a backup's delete is applied to the record instead of adding a deleted copy, and an already deleted record is left alone
+  - Resetting a week's carry-over adjustment clears every copy two devices may have made
+  - A savings edit that lands exactly on $0.00 is no longer refused by rounding; the repeating-expense bills question uses the expense as it is now; the phone Menu toggle no longer reads open after Help
+  - Sync server: after the server restarts (versions start again at 1) a device holding an older copy with a higher version no longer overwrites a newer one or undoes a delete
+  - Style sheet: the bank panels stay hidden until a file is loaded, a chosen file no longer widens the page on a small phone, the No buttons are outlined, keyboard focus shows on every summary line, bigger tap targets, text boxes follow the Text size setting, and the corner vines are not printed
+
 ## v64 (2026-11-06)
 - Projected Income: each entry has an Add to income button that records the amount as real income on that day and source and removes the projection (not shown when that day and source already has real income)
 

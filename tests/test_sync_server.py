@@ -68,6 +68,22 @@ class MergeRules(unittest.TestCase):
         items, _ = self.merge([rec("a", 2)], [rec("a", 2, updatedAt="2030-01-01T00:00:00Z", deviceId="B")])
         self.assertEqual(items[0]["version"], 2)
 
+    def test_after_a_server_reset_an_older_copy_with_a_higher_version_does_not_overwrite_a_newer_one(self):
+        items, c = self.merge([rec("a", 1, name="newer", updatedAt="2026-11-05T00:00:00Z")], [rec("a", 9, name="older", updatedAt="2026-09-01T00:00:00Z", deviceId="B")])
+        self.assertEqual((items[0]["name"], len(items), c), ("newer", 1, []))
+
+    def test_after_a_server_reset_a_stale_live_copy_with_a_higher_version_never_undoes_a_delete(self):
+        items, c = self.merge([rec("a", 1, deleted=True, updatedAt="2026-11-05T00:00:00Z")], [rec("a", 5, name="stale", updatedAt="2026-09-01T00:00:00Z", deviceId="B")])
+        self.assertEqual((items[0]["deleted"], len(items), c), (True, 1, []))
+
+    def test_after_a_server_reset_a_newer_edit_with_a_higher_version_still_wins(self):
+        items, c = self.merge([rec("a", 1, name="old", updatedAt="2026-09-01T00:00:00Z")], [rec("a", 9, name="newer", updatedAt="2026-11-05T00:00:00Z", deviceId="B")])
+        self.assertEqual((items[0]["name"], items[0]["version"]), ("newer", 10))
+
+    def test_a_delete_with_a_higher_version_is_still_applied(self):
+        items, c = self.merge([rec("a", 1, name="live", updatedAt="2026-11-05T00:00:00Z")], [rec("a", 9, deleted=True, updatedAt="2026-09-01T00:00:00Z", deviceId="B")])
+        self.assertEqual((items[0]["deleted"], len(items)), (True, 1))
+
     def test_stale_live_copy_never_overwrites_a_delete(self):
         items, c = self.merge([rec("a", 6, deleted=True)], [rec("a", 5)])
         self.assertTrue(items[0]["deleted"])
