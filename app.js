@@ -5175,9 +5175,74 @@ let lastBankIncome = [];
 // The newest balance in the file being reviewed, as { dateKey, cents }, or null.
 let bankBalance = null;
 
-// Splits CSV text into rows of cells: quoted cells may hold commas, doubled quotes and line breaks, a leading byte
-// order mark is ignored, and blank lines are dropped.
+// The column names (lower case) a transactions file may use for each kind of column.
+const BANK_DATE_NAMES = ['transaction date', 'posting date', 'post date', 'posted date', 'trans date', 'booking date', 'date'];
+const BANK_DESC_NAMES = ['description', 'payee', 'merchant', 'name', 'memo', 'transaction description'];
+const BANK_AMOUNT_NAMES = ['amount', 'transaction amount'];
+const BANK_DEBIT_NAMES = ['debit', 'debits', 'withdrawal', 'withdrawals', 'money out'];
+const BANK_CREDIT_NAMES = ['credit', 'credits', 'deposit', 'deposits', 'money in'];
+
+// Which separator a transactions file uses: a comma, a semicolon or a tab, whichever appears most outside quotes in
+// the first lines (a comma when none does).
+function bankDelimiter(text) {
+  const counts = { ',': 0, ';': 0, '\t': 0 };
+  let quoted = false;
+  let lines = 0;
+  for (let i = 0; i < text.length && lines < 10; i += 1) {
+    const ch = text[i];
+    if (ch === '"') quoted = !quoted;
+    else if (!quoted && ch in counts) counts[ch] += 1;
+    else if (!quoted && ch === '\n') lines += 1;
+  }
+  return [';', '\t'].reduce((best, d) => (counts[d] > counts[best] ? d : best), ',');
+}
+
+// Turns a QFX/OFX statement (what banks call "Quicken" or "Money" downloads) into a table with a Date, Description and
+// Amount column, so it is read like a CSV. Dates are the first eight digits of DTPOSTED; the description is NAME
+// (or MEMO). Returns null when the text is not an OFX file.
+function bankOfxTable(text) {
+  if (!/<OFX|OFXHEADER/i.test(text)) return null;
+  const field = (block, tag) => {
+    const found = new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i').exec(block);
+    return found ? found[1].trim() : '';
+  };
+  const table = [['Date', 'Description', 'Amount']];
+  const blocks = text.split(/<STMTTRN>/i).slice(1);
+  blocks.forEach((block) => {
+    const posted = field(block, 'DTPOSTED').replace(/\D/g, '').slice(0, 8);
+    const date = posted.length === 8 ? `${posted.slice(0, 4)}-${posted.slice(4, 6)}-${posted.slice(6, 8)}` : '';
+    table.push([date, field(block, 'NAME') || field(block, 'MEMO'), field(block, 'TRNAMT')]);
+  });
+  return table;
+}
+
+// The rows of a transactions file, starting at its header: an OFX file is converted, the separator is found, and any
+// lines above the header (an account name, a date range) are skipped. The header is the first of the first twenty
+// rows that names a date, a description and an amount (or a debit and a credit); without one, the first row.
+function bankTable(text) {
+  const table = bankOfxTable(text) || parseCsv(text);
+  const lower = (row) => row.map((h) => h.trim().toLowerCase());
+  const looksLikeHeader = (row) => {
+    const names = lower(row);
+    const has = (list) => list.some((n) => names.includes(n));
+    return has(BANK_DATE_NAMES) && has(BANK_DESC_NAMES) && (has(BANK_AMOUNT_NAMES) || (has(BANK_DEBIT_NAMES) && has(BANK_CREDIT_NAMES)));
+  };
+  const at = table.slice(0, 20).findIndex(looksLikeHeader);
+  return at > 0 ? table.slice(at) : table;
+}
+
+// Reads a chosen file's bytes as text: UTF-16 (some bank downloads, marked by a byte order mark) or UTF-8.
+function decodeBankFile(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes);
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+// Splits CSV text into rows of cells: quoted cells may hold the separator, doubled quotes and line breaks, a leading
+// byte order mark is ignored, and blank lines are dropped. The separator is a comma, semicolon or tab (see bankDelimiter).
 function parseCsv(text) {
+  const delimiter = bankDelimiter(text);
   const rows = [];
   let row = [];
   let cell = '';
@@ -5188,7 +5253,7 @@ function parseCsv(text) {
     if (quoted) {
       if (ch === '"' && input[i + 1] === '"') { cell += '"'; i += 1; } else if (ch === '"') quoted = false; else cell += ch;
     } else if (ch === '"') quoted = true;
-    else if (ch === ',') { row.push(cell); cell = ''; } else if (ch === '\n' || ch === '\r') {
+    else if (ch === delimiter) { row.push(cell); cell = ''; } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && input[i + 1] === '\n') i += 1;
       row.push(cell);
       cell = '';
@@ -5203,15 +5268,25 @@ function parseCsv(text) {
 
 // A bank date ("10/20/2026", or "2026-10-20") as a date key, or '' when it is not a real date in the forms' range.
 function bankDateKey(text) {
-  const t = text.trim();
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
-  const key = us ? `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}` : t;
+  const t = text.trim().replace(/[T ]\d{1,2}:\d{2}.*$/, ''); // a time after the date is ignored
+  const pad = (n) => String(n).padStart(2, '0');
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const monthNumber = (name) => months.indexOf(name.slice(0, 3).toLowerCase()) + 1;
+  const fullYear = (y) => (y.length === 2 ? `20${y}` : y);
+  let key = t;
+  let found;
+  if ((found = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/.exec(t))) key = `${fullYear(found[3])}-${pad(found[1])}-${pad(found[2])}`; // 10/20/2026, 10-20-26
+  else if ((found = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/.exec(t))) key = `${found[1]}-${pad(found[2])}-${pad(found[3])}`; // 2026/10/20
+  else if ((found = /^([A-Za-z]{3,9})\.? (\d{1,2}),? (\d{4})$/.exec(t)) && monthNumber(found[1])) key = `${found[3]}-${pad(monthNumber(found[1]))}-${pad(found[2])}`; // Oct 20, 2026
+  else if ((found = /^(\d{1,2})[ -]([A-Za-z]{3,9})\.?[ ,-]*(\d{2}|\d{4})$/.exec(t)) && monthNumber(found[2])) key = `${fullYear(found[3])}-${pad(monthNumber(found[2]))}-${pad(found[1])}`; // 20-Oct-2026
   return isRealDateKey(key) && isReasonableDateKey(key) ? key : '';
 }
 
 // A bank amount ("-12.34", "$1,200.00", "(5.00)") in whole cents, or null when it is not a number.
 function bankCents(text) {
-  let t = text.trim().replace(/[$,\s]/g, '');
+  let t = text.trim().replace(/[$\s]/g, '').replace(/\u2212/g, '-');
+  t = t.replace(/^(-?[^.]*),(\d{1,2})$/, '$1.$2').replace(/,/g, ''); // a comma before the last one or two digits is a decimal point (12,34); otherwise it groups thousands
+  if (/^\d*\.?\d+-$/.test(t)) t = `-${t.slice(0, -1)}`; // a minus sign after the number
   let negative = false;
   if (/^\(.*\)$/.test(t)) { negative = true; t = t.slice(1, -1); }
   if (!/^-?\d*\.?\d+$/.test(t)) return null;
@@ -5256,17 +5331,17 @@ function loadBankSources() {
 // (kind 'in'). Returns { rows, problem, moneyIn }: problem is a sentence when the file is not one it understands,
 // moneyIn counts the money-in rows.
 function parseChaseCsv(text, mapping = null) {
-  const table = parseCsv(text);
+  const table = bankTable(text);
   if (!table.length) return { rows: [], problem: 'That file is empty.', moneyIn: 0 };
   const header = table[0].map((h) => h.trim().toLowerCase());
   // The columns: the ones the caller chose, else found by their usual names (a file with separate Debit and Credit
   // columns instead of one Amount is read too). When none can be found the caller is told to ask which is which.
   const named = (names) => names.map((n) => header.indexOf(n)).find((i) => i >= 0);
-  const dateCol = mapping ? mapping.dateCol : named(['transaction date', 'posting date', 'post date', 'date']);
-  const descCol = mapping ? mapping.descCol : named(['description', 'payee', 'merchant']);
-  const amountCol = mapping ? mapping.amountCol : named(['amount']);
-  const debitCol = header.indexOf('debit');
-  const creditCol = header.indexOf('credit');
+  const dateCol = mapping ? mapping.dateCol : named(BANK_DATE_NAMES);
+  const descCol = mapping ? mapping.descCol : named(BANK_DESC_NAMES);
+  const amountCol = mapping ? mapping.amountCol : named(BANK_AMOUNT_NAMES);
+  const debitCol = named(BANK_DEBIT_NAMES) ?? -1;
+  const creditCol = named(BANK_CREDIT_NAMES) ?? -1;
   const splitAmounts = !mapping && amountCol === undefined && debitCol >= 0 && creditCol >= 0;
   const balanceCol = header.indexOf('balance');
   let balance = null;
@@ -5510,7 +5585,7 @@ function setBankStatus(text, tone) {
 
 // Reads the text of a chosen file into the review list (see parseChaseCsv). Returns the problem as a sentence, or ''.
 function loadBankText(text) {
-  const header = parseCsv(text)[0] || [];
+  const header = bankTable(text)[0] || [];
   const mapping = loadBankMappings()[bankHeaderSignature(header)] || null;
   const parsed = parseChaseCsv(text, mapping);
   pendingBankFile = parsed.needsMapping ? { text, headers: parsed.headers } : null;
@@ -5644,13 +5719,13 @@ function undoBankImport() {
   return result;
 }
 
-// The file box reads the chosen file (up to BANK_MAX_BYTES) as text and shows its rows for review.
+// The file box reads the chosen file (any type: a CSV, text or QFX/OFX statement; up to BANK_MAX_BYTES) as text and shows its rows for review.
 document.getElementById('bank-file-input').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
   if (file.size > BANK_MAX_BYTES) { setBankStatus('That file is too big to be a transactions file.', 'failed'); return; }
   try {
-    const problem = loadBankText(await file.text());
+    const problem = loadBankText(decodeBankFile(await file.arrayBuffer()));
     setBankStatus(problem, problem ? 'failed' : null);
   } catch {
     setBankStatus('Could not read that file.', 'failed');
@@ -8835,12 +8910,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 66;
+const APP_VERSION = 67;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  67: { date: '2026-11-08', notes: ['The bank import reads more files: any file type can be chosen (it was limited to .csv), plus semicolon- and tab-separated files, notes above the column names, dates like 10/20/26, Oct 20, 2026 and 20-Oct-2026, a minus sign after the amount, UTF-16 text, and QFX/OFX statements.'] },
   66: { date: '2026-11-08', notes: ['Bills have a Paid by Mom option (Other... on a bill card): the date leaves the amount due but does not count as money you spent. Also: the income Quick Add says Set when it replaces today\'s amount, the phone tab bar scrolls instead of wrapping, hover looks no longer stick after a tap, phone side margins are smaller, month boxes match other fields, an import refuses a bill or recurring income with no name, and the sync server makes a wrong passphrase wait half a second.'] },
   65: { date: '2026-11-07', notes: ['Bug fixes from a full code review: a debt month set to $0 no longer says the debt never pays off; editing a debt balance after an extra payment keeps both; unpaid bill totals and Catch up follow a debt-linked bill\'s planned amounts; Undo no longer brings back a record another device deleted; importing a backup applies deletes cleanly; plus smaller fixes.'] },
   64: { date: '2026-11-06', notes: ['Projected Income entries have an Add to income button that records the amount as real income on that day and removes the projection.'] },

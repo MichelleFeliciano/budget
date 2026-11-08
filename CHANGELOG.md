@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v67 (2026-11-08)
+- Bank import reads more files: the file box no longer limits the choice to .csv (a phone could grey out a statement saved as .txt, .qfx and so on); comma, semicolon and tab separated files; lines above the column names (an account name, a date range) are skipped; more column names (Posted Date, Payee, Name, Memo, Withdrawals, Deposits...); dates like 10/20/26, 2026/10/20, Oct 20, 2026 and 20-Oct-2026, with or without a time; an amount with the minus after it; UTF-16 text; and QFX/OFX statements
+
 ## v66 (2026-11-08)
 - Bills: a **Paid by Mom** button in a bill card's Other... form marks the oldest unpaid date as paid directly by Mom. It leaves the amount due (and stops being overdue) but is stored as a payment of 0, so it is not money spent: Paid History, the week/month/pay-period totals and the business totals leave it out. The calendar shows it as "paid by Mom", Undo says so, and the amount Mom covered is kept on the bill (`momPaid`). Unticking the date clears it
 - Income Quick Add: tapping an amount when today already has one for that source says it was set, replacing the earlier amount
