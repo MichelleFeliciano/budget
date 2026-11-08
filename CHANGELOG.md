@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v68 (2026-11-08)
+- Bank import reads PDF statements. Choose the PDF in the file box (the app reads the text inside it, with no library: compressed streams, object streams and fonts with a ToUnicode table), or paste text copied from the PDF into the new box and tap Read pasted text. Lines that start with a date (a year is taken from the statement when the date has none) and end with an amount become rows; an amount is negative with a minus sign, brackets or DR, otherwise by the heading above it (withdrawals, purchases and fees go out; deposits, credits and refunds come in); a running balance at the end of a line is ignored. A scanned or protected PDF cannot be read, and says so
+
 ## v67 (2026-11-08)
 - Bank import reads more files: the file box no longer limits the choice to .csv (a phone could grey out a statement saved as .txt, .qfx and so on); comma, semicolon and tab separated files; lines above the column names (an account name, a date range) are skipped; more column names (Posted Date, Payee, Name, Memo, Withdrawals, Deposits...); dates like 10/20/26, 2026/10/20, Oct 20, 2026 and 20-Oct-2026, with or without a time; an amount with the minus after it; UTF-16 text; and QFX/OFX statements
 

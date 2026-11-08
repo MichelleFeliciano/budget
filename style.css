@@ -867,6 +867,19 @@ select[id$="-sort-input"] {
   flex: none;
 }
 
+/* The box for text copied from a statement: full width, in the same look as the other fields. */
+.bank-paste {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+}
+
 /* Phone fix for every date input. iPhone Safari gives date inputs their own minimum width and
    centres the date text, so they could poke out of their box. Dropping the native look and
    letting them shrink fixes it. */

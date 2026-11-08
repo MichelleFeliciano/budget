@@ -446,7 +446,10 @@ try { if (localStorage.getItem('budgetApp.lock.v1')) document.documentElement.se
             <p class="form-error" id="bank-rule-error" hidden></p>
             <button type="submit">Add rule</button>
           </form>
-          <input type="file" id="bank-file-input" aria-label="Bank transactions file (CSV, text or QFX/OFX)">
+          <input type="file" id="bank-file-input" aria-label="Bank transactions file (CSV, text, QFX/OFX or PDF)">
+          <label class="stats-line" for="bank-paste-input">Or paste the text copied from a statement (open the PDF, select all, copy):</label>
+          <textarea id="bank-paste-input" class="bank-paste" rows="4" aria-label="Text copied from a bank statement"></textarea>
+          <button type="button" class="small-btn" id="bank-paste-btn">Read pasted text</button>
           <p class="stats-line" id="bank-summary"></p>
           <div class="bank-bulk" id="bank-balance" hidden>
             <span id="bank-balance-text"></span>

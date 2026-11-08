@@ -5165,6 +5165,8 @@ const BANK_CATEGORIES_KEY = 'budgetApp.bankCategories.v1';
 const BANK_SOURCES_KEY = 'budgetApp.bankSources.v1';
 // The biggest file read, and the most rows taken from it (a bank file for a few months is far smaller).
 const BANK_MAX_BYTES = 2 * 1024 * 1024;
+// A PDF statement can be larger than a text one.
+const BANK_MAX_PDF_BYTES = 10 * 1024 * 1024;
 const BANK_MAX_ROWS = 2000;
 // The rows of the file being reviewed, as { kind: 'out' or 'in', dateKey, desc, cents, key, planId (money out), source
 // (money in), imported, flagged }, the ids of the expenses the last import made, and what its deposits changed (so that
@@ -5216,11 +5218,358 @@ function bankOfxTable(text) {
   return table;
 }
 
+// A PDF's bytes as one character per byte (so positions in the text are positions in the file).
+function pdfLatin(bytes) {
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return text;
+}
+
+// Finds the objects in a PDF file, as a Map of object number to { dict, data }: dict is the text between "obj" and the
+// stream (or "endobj"), data is the stream's bytes (still compressed) or null. The index at the end of the file is not
+// used, so a file with a damaged index still reads.
+function pdfScanObjects(bytes, latin) {
+  const objs = new Map();
+  const pattern = /(\d+) (\d+) obj\b/g;
+  let found;
+  while ((found = pattern.exec(latin))) {
+    const start = found.index + found[0].length;
+    const endObj = latin.indexOf('endobj', start);
+    const streamAt = latin.indexOf('stream', start);
+    let dict;
+    let data = null;
+    if (streamAt !== -1 && (endObj === -1 || streamAt < endObj)) {
+      dict = latin.slice(start, streamAt);
+      let dataStart = streamAt + 6;
+      if (latin[dataStart] === '\r') dataStart += 1;
+      if (latin[dataStart] === '\n') dataStart += 1;
+      const declared = /\/Length\s+(\d+)(?!\s+\d+\s+R)/.exec(dict);
+      let dataEnd = declared && dataStart + Number(declared[1]) <= bytes.length ? dataStart + Number(declared[1]) : latin.indexOf('endstream', dataStart);
+      if (dataEnd === -1) dataEnd = bytes.length;
+      data = bytes.subarray(dataStart, dataEnd);
+      pattern.lastIndex = dataEnd;
+    } else dict = latin.slice(start, endObj === -1 ? latin.length : endObj);
+    objs.set(Number(found[1]), { dict, data });
+  }
+  return objs;
+}
+
+// A stream object's bytes, inflated when it is compressed (the browser's own reader does it); null when it cannot be.
+async function pdfStreamBytes(obj) {
+  if (!obj || !obj.data) return null;
+  if (!/\/FlateDecode|\/Fl\b/.test(obj.dict)) return obj.data;
+  try {
+    const out = new Blob([obj.data]).stream().pipeThrough(new DecompressionStream('deflate'));
+    return new Uint8Array(await new Response(out).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+// The value after /Key in a PDF dictionary's text: a << >> or [ ] block, a reference ("5 0 R"), or the next word.
+// '' when the key is absent.
+function pdfValue(text, key) {
+  const found = new RegExp(`/${key}(?![A-Za-z0-9])\\s*`).exec(text);
+  if (!found) return '';
+  const rest = text.slice(found.index + found[0].length);
+  const pair = rest.startsWith('<<') ? ['<<', '>>'] : rest[0] === '[' ? ['[', ']'] : null;
+  if (pair) {
+    let depth = 0;
+    for (let i = 0; i < rest.length; i += 1) {
+      if (rest.startsWith(pair[0], i)) { depth += 1; i += pair[0].length - 1; } else if (rest.startsWith(pair[1], i)) {
+        depth -= 1;
+        i += pair[1].length - 1;
+        if (depth === 0) return rest.slice(0, i + 1);
+      }
+    }
+    return rest;
+  }
+  const reference = /^(\d+)\s+\d+\s+R/.exec(rest);
+  return reference ? reference[0] : /^[^\s/<>[\]]*/.exec(rest)[0];
+}
+
+// The text of an object when the value is a reference to it, otherwise the value itself.
+function pdfResolve(objs, value) {
+  const reference = /^(\d+)\s+\d+\s+R/.exec(value);
+  if (!reference) return value;
+  const obj = objs.get(Number(reference[1]));
+  return obj ? obj.dict : '';
+}
+
+// The object numbers of every reference ("5 0 R") in some text, in order.
+function pdfRefs(text) {
+  return [...text.matchAll(/(\d+)\s+\d+\s+R\b/g)].map((m) => Number(m[1]));
+}
+
+// The pages of a PDF, in reading order: down the page tree from the catalog (or, when it cannot be followed, every
+// page object by number).
+function pdfPageList(objs) {
+  const isPage = (obj) => /\/Type\s*\/Page(?![A-Za-z])/.test(obj.dict);
+  const catalog = [...objs.values()].find((o) => /\/Type\s*\/Catalog/.test(o.dict));
+  const pages = [];
+  const visit = (num, depth) => {
+    const obj = objs.get(num);
+    if (!obj || depth > 12) return;
+    if (/\/Type\s*\/Pages/.test(obj.dict)) pdfRefs(pdfResolve(objs, pdfValue(obj.dict, 'Kids'))).forEach((kid) => visit(kid, depth + 1));
+    else if (isPage(obj)) pages.push(obj);
+  };
+  if (catalog) pdfRefs(pdfValue(catalog.dict, 'Pages')).slice(0, 1).forEach((root) => visit(root, 0));
+  if (pages.length) return pages;
+  return [...objs.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]).filter(isPage);
+}
+
+// What a font's ToUnicode table says: { map, width } where map turns a character code into text and width is how many
+// bytes one code takes in a string.
+function pdfParseCMap(text) {
+  const map = new Map();
+  let width = 1;
+  const toText = (hex) => {
+    const padded = hex.padStart(Math.ceil(hex.length / 4) * 4, '0');
+    let out = '';
+    for (let i = 0; i < padded.length; i += 4) out += String.fromCharCode(parseInt(padded.slice(i, i + 4), 16));
+    return out;
+  };
+  for (const block of text.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const pair of block[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g)) {
+      map.set(parseInt(pair[1], 16), toText(pair[2]));
+      width = Math.max(1, Math.round(pair[1].length / 2));
+    }
+  }
+  for (const block of text.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    for (const range of block[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<[0-9A-Fa-f]+>|\[[^\]]*\])/g)) {
+      const low = parseInt(range[1], 16);
+      const high = Math.min(parseInt(range[2], 16), low + 65535);
+      width = Math.max(1, Math.round(range[1].length / 2));
+      if (range[3].startsWith('[')) {
+        [...range[3].matchAll(/<([0-9A-Fa-f]+)>/g)].forEach((item, k) => map.set(low + k, toText(item[1])));
+      } else {
+        const base = toText(range[3].slice(1, -1));
+        for (let code = low; code <= high; code += 1) map.set(code, base.slice(0, -1) + String.fromCharCode(base.charCodeAt(base.length - 1) + (code - low)));
+      }
+    }
+  }
+  return { map, width };
+}
+
+// The fonts a page uses, as { resource name: { map, width } or null (a plain one-byte font) }. cache holds fonts already
+// read, by object number.
+async function pdfPageFonts(objs, resources, cache) {
+  const fonts = {};
+  const table = pdfResolve(objs, pdfValue(resources, 'Font'));
+  for (const entry of table.matchAll(/\/([^\s/<>[\]()]+)\s+(\d+)\s+\d+\s+R/g)) {
+    const num = Number(entry[2]);
+    if (!cache.has(num)) {
+      const font = objs.get(num);
+      const unicode = font ? pdfRefs(pdfValue(font.dict, 'ToUnicode'))[0] : undefined;
+      const bytes = unicode ? await pdfStreamBytes(objs.get(unicode)) : null;
+      cache.set(num, bytes ? pdfParseCMap(pdfLatin(bytes)) : null);
+    }
+    fonts[entry[1]] = cache.get(num);
+  }
+  return fonts;
+}
+
+// Reads a page's drawing commands and returns the pieces of text with where they sit, as { x, y, text }, and whether
+// the page's y axis runs downward (flipped).
+function pdfPageItems(content, fonts) {
+  const items = [];
+  const stack = [];
+  let font = null;
+  let x = 0;
+  let y = 0;
+  let leading = 12;
+  let flipped = false;
+  const space = /[\s\0]/;
+  const delimiter = /[\s()<>[\]{}/%]/;
+  const show = (bytes) => {
+    let out = '';
+    if (font) {
+      for (let k = 0; k + font.width <= bytes.length; k += font.width) {
+        let code = 0;
+        for (let j = 0; j < font.width; j += 1) code = code * 256 + bytes[k + j];
+        out += font.map.get(code) || '';
+      }
+    } else out = String.fromCharCode(...bytes);
+    return out;
+  };
+  const emit = (text) => { if (text) items.push({ x, y, text }); };
+  const numbers = () => stack.filter((t) => typeof t === 'number');
+  let i = 0;
+  const n = content.length;
+  while (i < n) {
+    const ch = content[i];
+    if (space.test(ch)) { i += 1; continue; }
+    if (ch === '%') { while (i < n && content[i] !== '\n' && content[i] !== '\r') i += 1; continue; }
+    if (ch === '(') {
+      const bytes = [];
+      let depth = 1;
+      i += 1;
+      while (i < n && depth > 0) {
+        let c = content[i];
+        if (c === '\\') {
+          i += 1;
+          c = content[i];
+          const octal = /^[0-7]{1,3}/.exec(content.slice(i, i + 3));
+          if (octal) { bytes.push(parseInt(octal[0], 8) & 255); i += octal[0].length; continue; }
+          bytes.push(({ n: 10, r: 13, t: 9, b: 8, f: 12 }[c]) || c.charCodeAt(0));
+          i += 1;
+          continue;
+        }
+        if (c === '(') depth += 1;
+        if (c === ')') { depth -= 1; if (depth === 0) { i += 1; break; } }
+        bytes.push(c.charCodeAt(0) & 255);
+        i += 1;
+      }
+      stack.push({ str: bytes });
+    } else if (ch === '<' && content[i + 1] === '<') {
+      let depth = 0;
+      while (i < n) {
+        if (content.startsWith('<<', i)) { depth += 1; i += 2; } else if (content.startsWith('>>', i)) { depth -= 1; i += 2; if (depth === 0) break; } else i += 1;
+      }
+    } else if (ch === '<') {
+      const end = content.indexOf('>', i);
+      const hex = content.slice(i + 1, end === -1 ? n : end).replace(/\s/g, '');
+      const bytes = [];
+      for (let k = 0; k < hex.length; k += 2) bytes.push(parseInt(hex.slice(k, k + 2).padEnd(2, '0'), 16));
+      stack.push({ str: bytes });
+      i = end === -1 ? n : end + 1;
+    } else if (ch === '[') { stack.push('['); i += 1; } else if (ch === ']') {
+      const at = stack.lastIndexOf('[');
+      const arr = at === -1 ? [] : stack.splice(at);
+      arr.shift();
+      stack.push({ arr });
+      i += 1;
+    } else if (ch === '/') {
+      let j = i + 1;
+      while (j < n && !delimiter.test(content[j])) j += 1;
+      stack.push({ name: content.slice(i + 1, j) });
+      i = j;
+    } else if (ch === ')' || ch === '>' || ch === '{' || ch === '}') { i += 1; } else {
+      let j = i;
+      while (j < n && !delimiter.test(content[j])) j += 1;
+      const word = content.slice(i, j);
+      i = j > i ? j : i + 1;
+      if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(word)) { stack.push(Number(word)); continue; }
+      const nums = numbers();
+      const last = stack[stack.length - 1];
+      if (word === 'BT') { x = 0; y = 0; } else if (word === 'Tf') {
+        const named = stack.filter((t) => t && t.name !== undefined).pop();
+        font = named && fonts[named.name] ? fonts[named.name] : null;
+      } else if (word === 'Tm' && nums.length >= 6) { x = nums[nums.length - 2]; y = nums[nums.length - 1]; } else if ((word === 'Td' || word === 'TD') && nums.length >= 2) {
+        x += nums[nums.length - 2];
+        y += nums[nums.length - 1];
+        if (word === 'TD') leading = -nums[nums.length - 1];
+      } else if (word === 'TL' && nums.length) leading = nums[nums.length - 1];
+      else if (word === 'T*') y -= leading;
+      else if (word === 'cm' && nums.length >= 6 && nums[nums.length - 3] < 0) flipped = true;
+      else if (word === 'Tj' && last && last.str) emit(show(last.str));
+      else if ((word === "'" || word === '"') && last && last.str) { y -= leading; emit(show(last.str)); } else if (word === 'TJ' && last && last.arr) {
+        emit(last.arr.map((part) => (part.str ? show(part.str) : typeof part === 'number' && part < -250 ? ' ' : '')).join(''));
+      }
+      stack.length = 0;
+    }
+  }
+  return { items, flipped };
+}
+
+// Text lines from a page's pieces of text: pieces whose heights are close share a line, left to right, and the lines run
+// top to bottom (for a flipped page, from the smallest y).
+function pdfPageLines(items, flipped) {
+  const sorted = [...items].sort((a, b) => (flipped ? a.y - b.y : b.y - a.y));
+  const lines = [];
+  sorted.forEach((item) => {
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(line.y - item.y) <= 2.5) line.items.push(item); else lines.push({ y: item.y, items: [item] });
+  });
+  return lines.map((line) => line.items.sort((a, b) => a.x - b.x).map((p) => p.text.trim()).filter(Boolean).join(' ')).filter(Boolean);
+}
+
+// Pulls the text out of a PDF (one line of text per line on the page), or '' when it cannot be read (a scanned image or
+// an encrypted file, say).
+async function extractPdfText(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const objs = pdfScanObjects(bytes, pdfLatin(bytes));
+  for (const [, obj] of [...objs]) {
+    if (!/\/Type\s*\/ObjStm/.test(obj.dict)) continue;
+    const data = await pdfStreamBytes(obj);
+    if (!data) continue;
+    const text = pdfLatin(data);
+    const count = Number((/\/N\s+(\d+)/.exec(obj.dict) || [])[1]);
+    const first = Number((/\/First\s+(\d+)/.exec(obj.dict) || [])[1]);
+    const head = text.slice(0, first).trim().split(/\s+/).map(Number);
+    for (let k = 0; k < count; k += 1) {
+      const next = k + 1 < count ? head[2 * k + 3] : text.length - first;
+      objs.set(head[2 * k], { dict: text.slice(first + head[2 * k + 1], first + next), data: null });
+    }
+  }
+  const cache = new Map();
+  const lines = [];
+  for (const page of pdfPageList(objs)) {
+    let node = page;
+    let resources = '';
+    for (let depth = 0; node && !resources && depth < 12; depth += 1) {
+      resources = pdfResolve(objs, pdfValue(node.dict, 'Resources'));
+      node = resources ? null : objs.get(pdfRefs(pdfValue(node.dict, 'Parent'))[0]);
+    }
+    const fonts = await pdfPageFonts(objs, resources, cache);
+    const contents = pdfResolve(objs, pdfValue(page.dict, 'Contents'));
+    const direct = /^(\d+)\s+\d+\s+R/.exec(pdfValue(page.dict, 'Contents'));
+    const parts = direct && objs.get(Number(direct[1])) && objs.get(Number(direct[1])).data ? [Number(direct[1])] : pdfRefs(contents);
+    let content = '';
+    for (const num of parts) {
+      const data = await pdfStreamBytes(objs.get(num));
+      if (data) content += `${pdfLatin(data)}\n`;
+    }
+    const { items, flipped } = pdfPageItems(content, fonts);
+    lines.push(...pdfPageLines(items, flipped));
+  }
+  return lines.join('\n');
+}
+
+// Reads lines of statement text (from a PDF, or pasted) into a table with a Date, Description and Amount column, or null
+// when no line starts with a date and ends with an amount. A date without a year takes the year found in the text (a
+// statement that spans New Year puts October to December in the earlier year). An amount is negative when it has a minus
+// sign, brackets or DR; otherwise by the section heading above it (withdrawals, purchases and fees go out; deposits,
+// credits and refunds come in), and money out when there is none. A second amount at the end of a line is a running
+// balance and is ignored.
+function bankStatementTable(text) {
+  const years = [...new Set(text.match(/\b20\d{2}\b/g) || [])].sort();
+  const yearFor = (month) => (years.length > 1 && month >= 10 ? years[0] : years[years.length - 1] || String(new Date().getFullYear()));
+  const amount = String.raw`\(?-?\$?\d[\d,]*\.\d{2}\)?-?(?:\s?(?:CR|DR))?`;
+  const date = String.raw`\d{1,2}/\d{1,2}(?:/\d{2,4})?`;
+  const row = new RegExp(`^(${date})\\s+(?:${date}\\s+)?(.+?)\\s+(${amount})(?:\\s+${amount})?$`, 'i');
+  const table = [['Date', 'Description', 'Amount']];
+  let direction = -1;
+  text.split(/\r?\n/).forEach((raw) => {
+    const line = raw.trim().replace(/\s+/g, ' ');
+    const found = row.exec(line);
+    if (!found) {
+      if (line.length > 0 && line.length < 60 && !/\d[\d,]*\.\d{2}/.test(line)) {
+        if (/deposit|addition|credits?\b|refund/i.test(line)) direction = 1;
+        else if (/withdrawal|debit|checks? paid|fee|purchase|charge|payments? sent/i.test(line)) direction = -1;
+      }
+      return;
+    }
+    if (/^(beginning|ending|opening|closing|previous|new) balance|^total\b/i.test(found[2])) return;
+    const parts = found[1].split('/');
+    const dateText = parts.length === 3 ? found[1] : `${found[1]}/${yearFor(Number(parts[0]))}`;
+    const token = found[3];
+    const explicit = /[-(]|DR\s*$/i.test(token) ? -1 : /CR\s*$/i.test(token) ? 1 : 0;
+    const digits = token.replace(/[^\d.]/g, '');
+    table.push([dateText, found[2], String((explicit || direction) * Number(digits))]);
+  });
+  return table.length > 1 ? table : null;
+}
+
 // The rows of a transactions file, starting at its header: an OFX file is converted, the separator is found, and any
 // lines above the header (an account name, a date range) are skipped. The header is the first of the first twenty
-// rows that names a date, a description and an amount (or a debit and a credit); without one, the first row.
+// rows that names a date, a description and an amount (or a debit and a credit). A file with no such header but with
+// lines that start with a date and end with an amount (a statement's text) is read line by line (bankStatementTable);
+// anything else is returned as it is, from its first row.
 function bankTable(text) {
-  const table = bankOfxTable(text) || parseCsv(text);
+  const ofx = bankOfxTable(text);
+  if (ofx) return ofx;
+  const table = parseCsv(text);
   const lower = (row) => row.map((h) => h.trim().toLowerCase());
   const looksLikeHeader = (row) => {
     const names = lower(row);
@@ -5228,6 +5577,7 @@ function bankTable(text) {
     return has(BANK_DATE_NAMES) && has(BANK_DESC_NAMES) && (has(BANK_AMOUNT_NAMES) || (has(BANK_DEBIT_NAMES) && has(BANK_CREDIT_NAMES)));
   };
   const at = table.slice(0, 20).findIndex(looksLikeHeader);
+  if (at < 0) return bankStatementTable(text) || table;
   return at > 0 ? table.slice(at) : table;
 }
 
@@ -5719,18 +6069,35 @@ function undoBankImport() {
   return result;
 }
 
-// The file box reads the chosen file (any type: a CSV, text or QFX/OFX statement; up to BANK_MAX_BYTES) as text and shows its rows for review.
+// The file box reads the chosen file (any type: a CSV, text, QFX/OFX or PDF statement; up to BANK_MAX_BYTES, or BANK_MAX_PDF_BYTES for a PDF) and shows its rows for review.
 document.getElementById('bank-file-input').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
-  if (file.size > BANK_MAX_BYTES) { setBankStatus('That file is too big to be a transactions file.', 'failed'); return; }
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+  if (file.size > (isPdf ? BANK_MAX_PDF_BYTES : BANK_MAX_BYTES)) { setBankStatus('That file is too big to be a transactions file.', 'failed'); return; }
   try {
-    const problem = loadBankText(decodeBankFile(await file.arrayBuffer()));
+    const buffer = await file.arrayBuffer();
+    let problem = loadBankText(isPdf ? await extractPdfText(buffer) : decodeBankFile(buffer));
+    if (isPdf && problem) {
+      // The text of a PDF is never a table to choose columns for, so drop the column chooser and point to the paste box.
+      pendingBankFile = null;
+      renderBankMapper();
+      problem = 'I could not find transactions in that PDF (a scanned or protected statement cannot be read). Open it, select all, copy, and paste the text into the box below.';
+    }
     setBankStatus(problem, problem ? 'failed' : null);
   } catch {
     setBankStatus('Could not read that file.', 'failed');
   }
   e.target.value = ''; // so choosing the same file again reads it again
+});
+
+// The Read pasted text button reads text copied from a statement (or a CSV pasted as text) the same way as a file.
+document.getElementById('bank-paste-btn').addEventListener('click', () => {
+  const text = document.getElementById('bank-paste-input').value;
+  if (!text.trim()) { setBankStatus('Paste the statement text into the box first.', 'failed'); return; }
+  if (text.length > BANK_MAX_BYTES) { setBankStatus('That is too much text to be a transactions list.', 'failed'); return; }
+  const problem = loadBankText(text);
+  setBankStatus(problem, problem ? 'failed' : null);
 });
 
 // Put every spending row that has no category yet (and is not a payment or transfer) in the category chosen beside the
@@ -8910,12 +9277,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 67;
+const APP_VERSION = 68;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  68: { date: '2026-11-08', notes: ['The bank import reads PDF statements: choose the PDF, or paste the text copied from it into the new box. Lines that start with a date and end with an amount become rows (withdrawals and deposits are told apart by the headings above them).'] },
   67: { date: '2026-11-08', notes: ['The bank import reads more files: any file type can be chosen (it was limited to .csv), plus semicolon- and tab-separated files, notes above the column names, dates like 10/20/26, Oct 20, 2026 and 20-Oct-2026, a minus sign after the amount, UTF-16 text, and QFX/OFX statements.'] },
   66: { date: '2026-11-08', notes: ['Bills have a Paid by Mom option (Other... on a bill card): the date leaves the amount due but does not count as money you spent. Also: the income Quick Add says Set when it replaces today\'s amount, the phone tab bar scrolls instead of wrapping, hover looks no longer stick after a tap, phone side margins are smaller, month boxes match other fields, an import refuses a bill or recurring income with no name, and the sync server makes a wrong passphrase wait half a second.'] },
   65: { date: '2026-11-07', notes: ['Bug fixes from a full code review: a debt month set to $0 no longer says the debt never pays off; editing a debt balance after an extra payment keeps both; unpaid bill totals and Catch up follow a debt-linked bill\'s planned amounts; Undo no longer brings back a record another device deleted; importing a backup applies deletes cleanly; plus smaller fixes.'] },
