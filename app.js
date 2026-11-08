@@ -1742,6 +1742,18 @@ function renderPayPeriod() {
     netEl.innerHTML = `Net this pay period: <strong class="${signedAmountClass(periodNet)}">${formatSignedCurrency(periodNet)}</strong>`;
     netEl.title = 'Income entered or expected in this pay period minus the bills due in it.';
   }
+  // What was spent in this pay period from your own money, and the net after it (shown once something was spent).
+  const periodSpent = sumExpensesIn(expenseRecords(), periodStart, shiftDateKey(periodEnd, -1));
+  const periodSpentEl = document.getElementById('pay-period-spent-total');
+  const periodAfterEl = document.getElementById('pay-period-after-spending-total');
+  if (periodSpentEl && periodAfterEl) {
+    periodSpentEl.hidden = periodSpent === 0;
+    periodAfterEl.hidden = periodSpent === 0;
+    periodSpentEl.innerHTML = `Spent this pay period: <strong>${formatMoney(periodSpent)}</strong>`;
+    periodAfterEl.innerHTML = `Net after spending: <strong class="${signedAmountClass(periodNet - periodSpent)}">${formatSignedCurrency(periodNet - periodSpent)}</strong>`;
+    periodSpentEl.title = 'Expenses logged or imported in this pay period (an expense marked Paid by Mom is not counted)';
+    periodAfterEl.title = 'This pay period\'s net minus what you spent in it';
+  }
 
   matches.forEach(({ bill, total, occurrenceDates }) => {
     const li = document.createElement('li');
@@ -2084,6 +2096,20 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
       'Income entered or expected this month minus every bill due this month (paid or not)';
   }
 
+  // What was spent this month from your own money (imported or typed in; expenses Mom paid are left out), and the net after it.
+  // Shown only once something was spent.
+  const monthSpent = sumExpensesIn(expenseRecords(), monthStartKey, monthEndKey);
+  const monthSpentEl = document.getElementById('budget-month-spent-total');
+  const monthAfterEl = document.getElementById('budget-month-after-spending-total');
+  if (monthSpentEl && monthAfterEl) {
+    monthSpentEl.hidden = monthSpent === 0;
+    monthAfterEl.hidden = monthSpent === 0;
+    monthSpentEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} spent: <strong>${formatMoney(monthSpent)}</strong>`;
+    monthAfterEl.innerHTML = `${MONTH_NAMES[today.getMonth()]} net after spending: <strong class="${signedAmountClass(monthNet - monthSpent)}">${formatSignedCurrency(monthNet - monthSpent)}</strong>`;
+    monthSpentEl.title = 'Expenses logged or imported this month (an expense marked Paid by Mom is not counted)';
+    monthAfterEl.title = 'The month\'s net minus what you spent this month';
+  }
+
   // What is left once the Spending Plan and this month's expected one-time costs are also set aside: the month's net
   // minus the planned spending for a month minus the guesses entered for this month.
   const monthLeftEl = document.getElementById('budget-month-left-total');
@@ -2374,6 +2400,21 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
     netTotalEl.title = carryTitle(
       'Income entered or expected this week minus every bill due this week (paid or not), plus what the weeks before it left over', carriedNet);
     weekEl.appendChild(netTotalEl);
+    // What was spent this week from your own money, and the Net after it (shown once something was spent). The weeks
+    // before are not taken out of what is carried in.
+    const weekSpent = sumExpensesIn(expenseRecords(), weekDays[0], weekEndKey);
+    if (weekSpent > 0) {
+      const spentEl = document.createElement('p');
+      spentEl.className = 'budget-week-spent-total';
+      spentEl.innerHTML = `Spent: <strong>${formatMoney(weekSpent)}</strong>`;
+      spentEl.title = 'Expenses logged or imported this week (an expense marked Paid by Mom is not counted)';
+      weekEl.appendChild(spentEl);
+      const afterEl = document.createElement('p');
+      afterEl.className = 'budget-week-after-spending-total';
+      afterEl.innerHTML = `Net after spending: <strong class="${signedAmountClass(weekNet - weekSpent)}">${formatSignedCurrency(weekNet - weekSpent)}</strong>`;
+      afterEl.title = 'This week\'s Net minus what you spent this week (spending in earlier weeks is not taken out of the amount carried in)';
+      weekEl.appendChild(afterEl);
+    }
     weekEl.appendChild(buildWeekAdjust(weekDays[0], calculatedCarry, carriedNet, adjustment));
 
     // What is left to pay this week: bills due in it that are not ticked paid yet.
@@ -9290,12 +9331,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 69;
+const APP_VERSION = 70;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  70: { date: '2026-11-09', notes: ['Spending now shows next to the totals: each week, the month and the pay period show Spent (what you spent from your own money, imported or typed in; expenses Mom paid are left out) and Net after spending. Net itself is unchanged: income minus bills.'] },
   69: { date: '2026-11-08', notes: ['Every row in the bank import list has a Remove button, so a bill or deposit that is already in the app can be taken off the list and is not imported. Nothing in the app is deleted.'] },
   68: { date: '2026-11-08', notes: ['The bank import reads PDF statements: choose the PDF, or paste the text copied from it into the new box. Lines that start with a date and end with an amount become rows (withdrawals and deposits are told apart by the headings above them).'] },
   67: { date: '2026-11-08', notes: ['The bank import reads more files: any file type can be chosen (it was limited to .csv), plus semicolon- and tab-separated files, notes above the column names, dates like 10/20/26, Oct 20, 2026 and 20-Oct-2026, a minus sign after the amount, UTF-16 text, and QFX/OFX statements.'] },

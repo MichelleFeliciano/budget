@@ -1187,6 +1187,8 @@ input[type="date"]::-webkit-date-and-time-value {
 .budget-month-income-total,
 .budget-month-net-total,
 .budget-month-left-total,
+.budget-month-spent-total,
+.budget-month-after-spending-total,
 .budget-month-adjusted {
   margin: 0;
   color: var(--muted);
@@ -1902,7 +1904,9 @@ input[type="file"] { max-width: 100%; }
 .budget-week-net-total,
 .budget-week-due-total,
 .budget-week-projected-total,
-.budget-week-projected-net-total {
+.budget-week-projected-net-total,
+.budget-week-spent-total,
+.budget-week-after-spending-total {
   margin: 10px 0 0;
   text-align: right;
   color: var(--muted);
@@ -2647,7 +2651,9 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .budget-week-net-total,
   .budget-week-due-total,
   .budget-week-projected-total,
-  .budget-week-projected-net-total {
+  .budget-week-projected-net-total,
+  .budget-week-spent-total,
+  .budget-week-after-spending-total {
     margin: 12px 0 0;
     text-align: left;
   }
@@ -2894,7 +2900,9 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
   .budget-week-net-total,
   .budget-week-due-total,
   .budget-week-projected-total,
-  .budget-week-projected-net-total {
+  .budget-week-projected-net-total,
+  .budget-week-spent-total,
+  .budget-week-after-spending-total {
     display: inline-block;
     box-sizing: border-box;
     width: 50%;

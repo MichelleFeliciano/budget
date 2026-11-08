@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v70 (2026-11-09)
+- Spending next to the totals: each calendar week, the month and the pay period show **Spent** (expenses logged or imported from your own money; an expense marked Paid by Mom is left out) and **Net after spending** (that period's Net minus what was spent). They show only once something was spent. Net itself is unchanged: income minus bills
+
 ## v69 (2026-11-08)
 - Bank import: every row (spending or money in) has a Remove button that takes it off the review list, for a bill or deposit already in the app. It only drops the row from the list so it is not imported; nothing in the app is deleted
 
