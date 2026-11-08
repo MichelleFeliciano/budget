@@ -53,7 +53,7 @@ has Text size (Normal, Large, Largest), Share backup (where the phone can share 
 calendar file with each bill as a repeating event). When a newer version of the app has installed itself, a bar at the
 top offers Update now. `DEVICE-CHECKLIST.md` lists what to try on real phones.
 A bill card's **Other…** button pays its oldest unpaid date with a different amount (for a bill that varies, like
-power) or skips that date. The category box suggests the categories already in use and keeps one spelling for each.
+power), marks it **Paid by Mom** (it leaves the amount due but is not money you spent) or skips that date. The category box suggests the categories already in use and keeps one spelling for each.
 On a phone the Add bill form is a bottom sheet opened by the + button, so the Bills list sits right under its filters.
 Colours meet WCAG contrast in both themes (a test checks it), fields and buttons have names for screen readers, and
 animations and smooth scrolling are turned off when the device asks for less motion.

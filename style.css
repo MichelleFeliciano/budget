@@ -101,6 +101,12 @@ body {
   line-height: 1.6;
 }
 
+/* Buttons and fields use the page font instead of each browser's own. */
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
 /* Headings use the handwriting-style heading font. */
 
 h1, h2, h3 {
@@ -310,10 +316,12 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 /* Accent colour when hovered (but not while disabled). */
 
-.undo-redo-panel button:hover:not(:disabled),
-.data-io-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .undo-redo-panel button:hover:not(:disabled),
+  .data-io-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }
 
 /* Dimmed when there is nothing to undo or redo. */
@@ -382,9 +390,11 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 /* Accent colour when hovered. */
 
-.sync-change-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .sync-change-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }
 
 /* The Sync now button highlights itself when there is something to send (the ID wins over :hover). */
@@ -441,7 +451,9 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 /* Slightly dimmed when hovered. */
 
-.sync-setup-form button:hover { opacity: 0.9; }
+@media (hover: hover) {
+  .sync-setup-form button:hover { opacity: 0.9; }
+}
 
 /* Two boxes under the sync area: the backup buttons, then the Theme, Text size and App lock buttons with the version. */
 
@@ -509,9 +521,11 @@ body::after { bottom: 0; right: 0; transform: scale(-1, -1); }
 
 /* Accent colour when hovered. */
 
-.tabbar-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .tabbar-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }
 
 /* The tab on screen is filled in (it stays readable while hovered). */
@@ -603,8 +617,10 @@ select[id$="-sort-input"] {
 
 /* Cards lift slightly when hovered. */
 
-.bill-card:hover, .recurring-income-card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.055);
+@media (hover: hover) {
+  .bill-card:hover, .recurring-income-card:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.055);
+  }
 }
 
 /* A just-added bill's card flashes once so you can see where it landed. */
@@ -646,22 +662,26 @@ select[id$="-sort-input"] {
 
 /* Accent colour when hovered (but not while disabled). */
 
-.edit-btn:hover,
-.cancel-btn:hover,
-.pay-other-btn:hover:not(:disabled),
-.catch-up-btn:hover,
-.guess-spent-btn:hover,
-.guess-spent-cancel:hover,
-.mark-oldest-paid-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .edit-btn:hover,
+  .cancel-btn:hover,
+  .pay-other-btn:hover:not(:disabled),
+  .catch-up-btn:hover,
+  .guess-spent-btn:hover,
+  .guess-spent-cancel:hover,
+  .mark-oldest-paid-btn:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }
 
 /* Orange-red when hovered, as a warning. */
 
-.delete-btn:hover {
-  color: var(--accent-2);
-  border-color: var(--accent-2);
+@media (hover: hover) {
+  .delete-btn:hover {
+    color: var(--accent-2);
+    border-color: var(--accent-2);
+  }
 }
 
 /* Dimmed when nothing is owed. */
@@ -717,9 +737,11 @@ select[id$="-sort-input"] {
 
 /* Accent colour when hovered. */
 
-.chip:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+@media (hover: hover) {
+  .chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
 }
 
 /* The chip whose filter is currently on. */
@@ -755,6 +777,7 @@ select[id$="-sort-input"] {
 
 .add-form input[type="text"],
 .add-form input[type="date"],
+.add-form input[type="month"],
 .add-form input[type="number"],
 .add-form select {
   flex: 1 1 160px;
@@ -803,7 +826,9 @@ select[id$="-sort-input"] {
 
 /* Slightly dimmed when hovered. */
 
-.add-form button:hover { opacity: 0.9; }
+@media (hover: hover) {
+  .add-form button:hover { opacity: 0.9; }
+}
 
 /* The small Today button under a date box: it only fills the box, so it is an outline, not the form's submit button. */
 
@@ -846,7 +871,8 @@ select[id$="-sort-input"] {
    centres the date text, so they could poke out of their box. Dropping the native look and
    letting them shrink fixes it. */
 
-input[type="date"] {
+input[type="date"],
+input[type="month"] {
   -webkit-appearance: none;
   appearance: none;
   display: block;
@@ -956,8 +982,10 @@ input[type="date"]::-webkit-date-and-time-value {
 
 /* Slightly dimmed when hovered. */
 
-.bill-edit-form button[type="submit"]:hover, .recurring-income-edit-form button[type="submit"]:hover {
-  opacity: 0.9;
+@media (hover: hover) {
+  .bill-edit-form button[type="submit"]:hover, .recurring-income-edit-form button[type="submit"]:hover {
+    opacity: 0.9;
+  }
 }
 
 /* Small note in the bill edit form about already-paid amounts. */
@@ -1321,7 +1349,9 @@ input[type="date"]::-webkit-date-and-time-value {
 
 /* Accent colour when hovered. */
 
-.small-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) {
+  .small-btn:hover { border-color: var(--accent); color: var(--accent); }
+}
 
 /* The search box and its matches at the top of Home. */
 
@@ -1945,7 +1975,9 @@ input[type="file"] { max-width: 100%; }
 
 /* Accent colour when hovered. */
 
-.calendar-nav-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+@media (hover: hover) {
+  .calendar-nav-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+}
 
 /* Today is dimmed while the calendar is already on this week. */
 
@@ -2250,7 +2282,9 @@ input[type="file"] { max-width: 100%; }
 
 /* Accent colour when hovered. */
 
-.reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
+@media (hover: hover) {
+  .reminder-banner-btn:hover { color: var(--accent); border-color: var(--accent); }
+}
 
 /* The "new version is ready" bar stands out from the reminder banners with the accent colour. */
 
@@ -2388,7 +2422,9 @@ input[type="file"] { max-width: 100%; }
 
 /* Accent colour when hovered. */
 
-.paid-history-nav:hover { color: var(--accent); border-color: var(--accent); }
+@media (hover: hover) {
+  .paid-history-nav:hover { color: var(--accent); border-color: var(--accent); }
+}
 
 /* The month name between the arrows. */
 
@@ -2781,7 +2817,11 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
 
   /* Room under the last card for the tab bar and the + button above it. */
 
-  .content { padding-bottom: 150px; }
+  .content {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 150px;
+  }
 
   /* The tabs become a bar along the bottom of the screen (under the sheets, which are higher). */
 
@@ -2796,15 +2836,17 @@ html[data-locked] .undo-toast, html[data-locked] .fab { visibility: hidden; }
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
     background: var(--surface);
     border-top: 1px solid var(--border);
+    flex-wrap: nowrap;
+    overflow-x: auto; /* on a very narrow screen or with large text the tabs scroll sideways rather than wrapping over the floating buttons */
   }
 
   /* Each tab takes the space its label needs and shares out the rest, and is finger-sized; the type is a little smaller
      so all seven tabs fit on one row. */
 
   .tabbar-btn {
-    flex: 1 1 auto;
+    flex: 1 0 auto;
     min-height: 44px;
-    padding: 8px 3px;
+    padding: 8px 6px;
     border-radius: 13px;
     font-size: 0.7rem;
   }

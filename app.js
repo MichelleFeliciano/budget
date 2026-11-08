@@ -1146,6 +1146,7 @@ function updateBill(id, fields) {
     || oldSchedule.every !== bill.every || oldSchedule.unit !== bill.unit || oldSchedule.endDate !== bill.endDate) {
     const moved = [];
     const movedAmounts = {};
+    const movedMom = {};
     (bill.paidDates || []).forEach((d) => {
       let target = d; // already unmatched: leave alone
       if (occursOnDate(oldSchedule, d)) {
@@ -1157,9 +1158,11 @@ function updateBill(id, fields) {
       if (bill.paidAmounts && Object.prototype.hasOwnProperty.call(bill.paidAmounts, d) && !(target in movedAmounts)) {
         movedAmounts[target] = bill.paidAmounts[d];
       }
+      if (bill.momPaid && Object.prototype.hasOwnProperty.call(bill.momPaid, d) && !(target in movedMom)) movedMom[target] = bill.momPaid[d];
     });
     bill.paidDates = [...new Set(moved)].sort();
     if (bill.paidAmounts) bill.paidAmounts = movedAmounts;
+    if (bill.momPaid) { if (Object.keys(movedMom).length) bill.momPaid = movedMom; else delete bill.momPaid; }
     if (bill.plannedAmounts) { // a planned amount belongs to one date, so the ones the new schedule no longer has are dropped
       const keep = Object.fromEntries(Object.entries(bill.plannedAmounts).filter(([d]) => occursOnDate(bill, d)));
       if (Object.keys(keep).length) bill.plannedAmounts = keep; else delete bill.plannedAmounts;
@@ -1199,12 +1202,22 @@ function restoreBill(id) {
 // Marks one occurrence of a bill paid or unpaid. paidAmount (optional) is what was actually paid, and 0 means the
 // date was skipped; unmarking removes the recorded amount, so paidAmounts only keeps entries for dates still in
 // paidDates. paidDates is otherwise only moved by updateBill when the schedule changes.
-function toggleBillPaid(billId, dateKey, paid, paidAmount) {
+// paidByMom (true) records the date as paid directly by Mom: it leaves the amount due like any paid date, but is
+// stored as a payment of 0 so it never counts as money spent from income; `momPaid` ({ date: amount Mom covered })
+// remembers what she paid.
+function toggleBillPaid(billId, dateKey, paid, paidAmount, paidByMom) {
   const bill = bills.find((b) => b.id === billId);
   if (!bill) return;
   const before = structuredClone(bill);
   const paidSet = new Set(bill.paidDates || []);
   const amounts = { ...(bill.paidAmounts || {}) };
+  const mom = { ...(bill.momPaid || {}) };
+  if (paid && paidByMom) {
+    mom[dateKey] = plannedAmountFor(bill, dateKey);
+    paidAmount = 0;
+  } else {
+    delete mom[dateKey]; // marking it another way (or unmarking it) clears the mom record
+  }
   if (paid) {
     paidSet.add(dateKey);
     // Remember what this payment was worth: the amount given (0 means the date was skipped), otherwise the
@@ -1219,6 +1232,7 @@ function toggleBillPaid(billId, dateKey, paid, paidAmount) {
   // Only keep amounts for dates that are still paid.
   Object.keys(amounts).forEach((d) => { if (!paidSet.has(d)) delete amounts[d]; });
   bill.paidAmounts = amounts;
+  if (Object.keys(mom).length) bill.momPaid = mom; else delete bill.momPaid;
   stampSync(bill);
   saveCollection(BILLS_KEY, bills);
   recordUndo('bills', billId, before, structuredClone(bill));
@@ -2280,10 +2294,11 @@ function renderBudgetCalendar(nonDeletedBills, nonDeletedIncome, nonDeletedRecur
           nameSpan.className = 'budget-occurrence-name';
           nameSpan.textContent = bill.name;
 
-          const amountText = skipped ? 'skipped' : formatMoney(occurrenceAmount(bill, dateKey));
+          const byMom = paid && !!bill.momPaid && Object.prototype.hasOwnProperty.call(bill.momPaid, dateKey);
+          const amountText = byMom ? 'paid by Mom' : skipped ? 'skipped' : formatMoney(occurrenceAmount(bill, dateKey));
           label.title = bill.category ? `${bill.name} — ${amountText} (${bill.category})` : `${bill.name} — ${amountText}`;
 
-          daySummary.push(`${bill.name}${skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
+          daySummary.push(`${bill.name}${byMom ? ' (paid by Mom)' : skipped ? ' (skipped)' : paid ? ' (paid)' : overdue ? ' (overdue)' : ''}`);
           peekNames.push(bill.name);
           label.appendChild(checkbox);
           if (dotSpan) label.appendChild(dotSpan);
@@ -2486,7 +2501,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       const target = oldestUnpaidOccurrence(bill, todayKey());
       if (!target) return;
       otherForm.dataset.dateKey = target;
-      otherNote.textContent = `For ${formatDateKeyShort(target)}: enter what you actually paid, or skip this date.`;
+      otherNote.textContent = `For ${formatDateKeyShort(target)}: enter what you actually paid, mark it paid by Mom, or skip this date.`;
       otherAmount.value = String(bill.amount);
       otherError.hidden = true;
       otherForm.hidden = false;
@@ -2503,6 +2518,7 @@ function renderBudgetList(nonDeletedBills, openEdit) {
       toggleBillPaid(bill.id, otherForm.dataset.dateKey, true, amount);
     });
     node.querySelector('.pay-skip-btn').addEventListener('click', () => toggleBillPaid(bill.id, otherForm.dataset.dateKey, true, 0));
+    node.querySelector('.pay-mom-btn').addEventListener('click', () => toggleBillPaid(bill.id, otherForm.dataset.dateKey, true, undefined, true));
     node.querySelector('.pay-other-cancel').addEventListener('click', () => { otherForm.hidden = true; });
     // (everything above is looked up now: by the time a button is pressed, this fragment has moved into the page)
 
@@ -4667,8 +4683,10 @@ function renderIncomeQuickAdd() {
     button.textContent = `${choice.source ? `${choice.source} ` : ''}${formatMoney(choice.amount)}`;
     button.setAttribute('aria-label', `Add ${formatMoney(choice.amount)}${choice.source ? ` from ${choice.source}` : ''} for today`);
     button.addEventListener('click', () => {
+      // A day and source holds one amount, so tapping when today already has one replaces it; say so.
+      const replaces = uniqueIncomeEntries(income).some((r) => !r.deleted && entryKey(r.dateKey, r.source) === entryKey(todayKey(), choice.source));
       setIncomeForDate(todayKey(), String(choice.amount), choice.source);
-      showUndoToast(`Added ${formatMoney(choice.amount)}${choice.source ? ` from ${choice.source}` : ''} for today`);
+      showUndoToast(`${replaces ? 'Set' : 'Added'} ${formatMoney(choice.amount)}${choice.source ? ` from ${choice.source}` : ''} for today${replaces ? ' (replaced the earlier amount)' : ''}`);
     });
     list.appendChild(button);
   });
@@ -7731,6 +7749,7 @@ function undoToastMessage(collectionName, before, after) {
     const paidNow = (after.paidDates || []).length;
     if (paidNow > paidBefore) {
       const added = (after.paidDates || []).find((dateKey) => !(before.paidDates || []).includes(dateKey));
+      if (after.momPaid && Object.prototype.hasOwnProperty.call(after.momPaid, added)) return `Marked ${name} paid by Mom`;
       return after.paidAmounts && after.paidAmounts[added] === 0 ? `Skipped ${name}` : `Marked ${name} paid`;
     }
     if (paidNow < paidBefore) return `Marked ${name} unpaid`;
@@ -8641,8 +8660,8 @@ function isValidImportRecord(collectionName, rec) {
   if (rec.version !== undefined && !isNum(rec.version)) return false;
   if (rec.deleted !== undefined && typeof rec.deleted !== 'boolean') return false;
   if (!['updatedAt', 'deviceId', 'dateAdded'].every((k) => rec[k] == null || isText(rec[k]))) return false;
-  if (collectionName === 'bills') return isText(rec.name) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean') && (rec.business === undefined || typeof rec.business === 'boolean');
-  if (collectionName === 'recurringIncome') return isText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate));
+  if (collectionName === 'bills') return nonEmptyText(rec.name) && (rec.momPaid === undefined || (typeof rec.momPaid === 'object' && rec.momPaid !== null && Object.entries(rec.momPaid).every(([key, amount]) => isDate(key) && isNum(amount) && amount >= 0 && amount <= MAX_MONEY))) && textOrMissing(rec.category) && dateListOrMissing(rec.paidDates) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && BILL_FREQUENCIES.includes(rec.frequency) && (rec.frequency !== 'custom' || schedulePeriod(rec) !== null) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate)) && (rec.autopay === undefined || typeof rec.autopay === 'boolean') && (rec.business === undefined || typeof rec.business === 'boolean');
+  if (collectionName === 'recurringIncome') return nonEmptyText(rec.name) && textOrMissing(rec.category) && isPositiveMoney(rec.amount) && isDate(rec.dueDate) && RECURRING_INCOME_FREQUENCIES.includes(rec.frequency) && (rec.endDate === undefined || (isDate(rec.endDate) && rec.endDate >= rec.dueDate));
   if (collectionName === 'income') {
     if (!textOrMissing(rec.source)) return false;
     if (rec.spentOn !== undefined) {
@@ -8816,12 +8835,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 65;
+const APP_VERSION = 66;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  66: { date: '2026-11-08', notes: ['Bills have a Paid by Mom option (Other... on a bill card): the date leaves the amount due but does not count as money you spent. Also: the income Quick Add says Set when it replaces today\'s amount, the phone tab bar scrolls instead of wrapping, hover looks no longer stick after a tap, phone side margins are smaller, month boxes match other fields, an import refuses a bill or recurring income with no name, and the sync server makes a wrong passphrase wait half a second.'] },
   65: { date: '2026-11-07', notes: ['Bug fixes from a full code review: a debt month set to $0 no longer says the debt never pays off; editing a debt balance after an extra payment keeps both; unpaid bill totals and Catch up follow a debt-linked bill\'s planned amounts; Undo no longer brings back a record another device deleted; importing a backup applies deletes cleanly; plus smaller fixes.'] },
   64: { date: '2026-11-06', notes: ['Projected Income entries have an Add to income button that records the amount as real income on that day and removes the projection.'] },
   63: { date: '2026-11-05', notes: ['Adding a repeating expense now asks whether to put it on your Bills list too (Yes or No), and a repeating expense or a debt payment you missed or said No to has an Add to bills button to do it later.'] },

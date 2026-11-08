@@ -222,6 +222,9 @@ def _content_matches(a, b, collection_name):
 # free plan's memory.
 MAX_SYNC_BODY_BYTES = 10 * 1024 * 1024
 
+# How long a request with the wrong passphrase waits before it is answered, so guessing is slow (seconds).
+WRONG_TOKEN_DELAY_SECONDS = 0.5
+
 # An income id that is built from a date: "2026-10-15", "projected-2026-10-15", or either with "#<source>" after it.
 # Only these have the "one entry per day" rules below; plan categories ("plan-<id>"), expenses ("expense-<id>") and
 # the extra same-day entries (a plain UUID) are ordinary records and merge like bills do.
@@ -452,6 +455,8 @@ class SyncHandler(BaseHTTPRequestHandler):
         matched = False
         for c in candidates:  # no early exit, so timing does not reveal which form matched
             matched |= hmac.compare_digest(c.encode("utf-8"), expected.encode("utf-8"))
+        if not matched:
+            time.sleep(WRONG_TOKEN_DELAY_SECONDS)  # each request has its own thread, so only the wrong guess waits
         return matched
 
     def do_OPTIONS(self):

@@ -2,6 +2,14 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v66 (2026-11-08)
+- Bills: a **Paid by Mom** button in a bill card's Other... form marks the oldest unpaid date as paid directly by Mom. It leaves the amount due (and stops being overdue) but is stored as a payment of 0, so it is not money spent: Paid History, the week/month/pay-period totals and the business totals leave it out. The calendar shows it as "paid by Mom", Undo says so, and the amount Mom covered is kept on the bill (`momPaid`). Unticking the date clears it
+- Income Quick Add: tapping an amount when today already has one for that source says it was set, replacing the earlier amount
+- Phone tab bar scrolls sideways instead of wrapping to two rows over the floating buttons; phone side margins are 16px
+- Hover looks only apply on devices that hover, so they no longer stick after a tap; buttons and fields use the page font; month boxes are styled like the other fields
+- Import refuses a bill or recurring income with an empty name, and checks `momPaid`
+- Sync server: a request with a wrong passphrase waits half a second before it is answered
+
 ## v65 (2026-11-07)
 - Fixes from a full code review of the app, style sheet and sync server:
   - A debt month set to $0 (or below that month's interest) no longer makes the whole debt read "never pays off"
