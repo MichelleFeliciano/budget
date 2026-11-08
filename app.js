@@ -5873,6 +5873,19 @@ function renderBankRows() {
       split.addEventListener('click', () => { row.parts = [{ planId: row.planId, amount: '' }, { planId: '', amount: '' }]; renderBankRows(); });
       item.appendChild(split);
     }
+    // Takes the row out of this review list (a bill or income already in the app, say) so it is not imported; nothing in
+    // the app itself is deleted.
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'small-btn bank-remove-btn';
+    remove.textContent = 'Remove';
+    remove.title = 'Take this row off the list so it is not imported (nothing in the app is deleted)';
+    remove.setAttribute('aria-label', `Remove ${row.desc || 'this transaction'} on ${formatDateKeyShort(row.dateKey)} from the list`);
+    remove.addEventListener('click', () => {
+      bankRows = bankRows.filter((r) => r !== row);
+      renderBankRows();
+    });
+    item.appendChild(remove);
     (row.kind === 'in' ? incomeList : list).appendChild(item);
   });
   const fill = document.getElementById('bank-bulk-category');
@@ -9277,12 +9290,13 @@ document.addEventListener('visibilitychange', () => {
 
 // The build number shown in the Menu. Keep it equal to the number in CACHE_NAME in sw.js
 // (a test checks this), so "which version am I on?" has a one-glance answer.
-const APP_VERSION = 68;
+const APP_VERSION = 69;
 
 // What changed in each version, newest last, in plain words (the Help page shows them). Every shipped version adds an entry
 // here and a matching dated one in CHANGELOG.md; the entry for APP_VERSION also gives the "updated" date shown beside the
 // version (a test checks that both exist).
 const WHATS_NEW = {
+  69: { date: '2026-11-08', notes: ['Every row in the bank import list has a Remove button, so a bill or deposit that is already in the app can be taken off the list and is not imported. Nothing in the app is deleted.'] },
   68: { date: '2026-11-08', notes: ['The bank import reads PDF statements: choose the PDF, or paste the text copied from it into the new box. Lines that start with a date and end with an amount become rows (withdrawals and deposits are told apart by the headings above them).'] },
   67: { date: '2026-11-08', notes: ['The bank import reads more files: any file type can be chosen (it was limited to .csv), plus semicolon- and tab-separated files, notes above the column names, dates like 10/20/26, Oct 20, 2026 and 20-Oct-2026, a minus sign after the amount, UTF-16 text, and QFX/OFX statements.'] },
   66: { date: '2026-11-08', notes: ['Bills have a Paid by Mom option (Other... on a bill card): the date leaves the amount due but does not count as money you spent. Also: the income Quick Add says Set when it replaces today\'s amount, the phone tab bar scrolls instead of wrapping, hover looks no longer stick after a tap, phone side margins are smaller, month boxes match other fields, an import refuses a bill or recurring income with no name, and the sync server makes a wrong passphrase wait half a second.'] },

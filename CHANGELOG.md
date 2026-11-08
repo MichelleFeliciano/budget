@@ -2,6 +2,9 @@
 
 Every shipped version, newest first, with its date. Add an entry here (and one to `WHATS_NEW` in app.js) with every version bump.
 
+## v69 (2026-11-08)
+- Bank import: every row (spending or money in) has a Remove button that takes it off the review list, for a bill or deposit already in the app. It only drops the row from the list so it is not imported; nothing in the app is deleted
+
 ## v68 (2026-11-08)
 - Bank import reads PDF statements. Choose the PDF in the file box (the app reads the text inside it, with no library: compressed streams, object streams and fonts with a ToUnicode table), or paste text copied from the PDF into the new box and tap Read pasted text. Lines that start with a date (a year is taken from the statement when the date has none) and end with an amount become rows; an amount is negative with a minus sign, brackets or DR, otherwise by the heading above it (withdrawals, purchases and fees go out; deposits, credits and refunds come in); a running balance at the end of a line is ignored. A scanned or protected PDF cannot be read, and says so
 
